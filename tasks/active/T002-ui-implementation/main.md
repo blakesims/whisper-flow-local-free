@@ -129,7 +129,7 @@ Develop the user interface components for the Whisper Transcription App, focusin
 - Core control elements, state management, keyboard shortcuts, and tooltips are implemented.
 
 ### Phase 4: Integration and Usability Testing
-**Status**: Not Started
+**Status**: In Progress
 
 **Objectives**:
 - Integrate all UI components into a cohesive interface
@@ -146,5 +146,14 @@ Develop the user interface components for the Whisper Transcription App, focusin
 
 **Dependencies**:
 - Phase 3 completion
+
+**Updates & Progress**:
+- Core UI components (main window, waveform display, control buttons, state management) are implemented.
+- This phase will now focus on:
+  - Ensuring smooth integration as dependent services (like Audio Recording T003) become available.
+  - Implementing basic error visualization mechanisms.
+  - Conducting usability reviews and refining keyboard navigation/shortcuts as needed.
+  - Testing UI responsiveness, especially once real audio data processing is integrated.
+- Further work on this phase is pending the progress of T003 (Audio Recording Implementation) for full end-to-end testing of UI interactions with live audio.
 
 ## Notes & Updates 
