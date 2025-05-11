@@ -1,14 +1,18 @@
 # Placeholder for main_window.py 
 
 import sys
-from PySide6.QtWidgets import QMainWindow, QApplication, QLabel, QVBoxLayout, QHBoxLayout, QWidget, QPushButton
-from PySide6.QtCore import Qt, QTimer, Signal, Slot, QPoint, QEvent
+from PySide6.QtWidgets import QMainWindow, QApplication, QLabel, QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QTextEdit, QProgressBar, QComboBox
+from PySide6.QtCore import Qt, QTimer, Signal, Slot, QPoint, QEvent, QThreadPool
 from PySide6.QtGui import QKeySequence, QShortcut, QColor
 import numpy as np
 import os # Added for os.remove
+import pyperclip # For clipboard
+import subprocess # For running paste command
 
 from .waveform_widget import WaveformWidget, WaveformStatus
 from app.core.audio_recorder import AudioRecorder # Import AudioRecorder
+from app.core.transcription_service import TranscriptionService
+from .workers import TranscriptionWorker
 
 # from app.utils.config_manager import ConfigManager # Will be used later
 
@@ -28,6 +32,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Whisper Transcription UI")
         self.app_state = AppState.IDLE # Initialize app state
         self.last_saved_audio_path = None # To store path for post-processing
+        self.close_after_transcription = False # New flag
 
         # Set window flags: frameless and always on top
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
@@ -78,6 +83,23 @@ class MainWindow(QMainWindow):
         self.status_label.setWordWrap(True)
         main_layout.addWidget(self.status_label)
 
+        # Top bar layout for model selector and minimize button
+        top_bar_layout = QHBoxLayout()
+        
+        # Model Size Selector
+        self.model_label = QLabel("Model:")
+        top_bar_layout.addWidget(self.model_label)
+        
+        self.model_size_selector = QComboBox()
+        self.model_size_selector.addItems(["tiny", "base", "small", "medium", "large"])
+        self.model_size_selector.setCurrentText("base") # Default model
+        self.current_model_size = self.model_size_selector.currentText()
+        self.model_size_selector.setToolTip("Select Whisper model size for transcription")
+        self.model_size_selector.currentTextChanged.connect(self._on_model_size_changed)
+        top_bar_layout.addWidget(self.model_size_selector)
+        
+        top_bar_layout.addStretch() # Pushes minimize button to the right
+
         # Minimize button
         self.minimize_button = QPushButton("Min") # Renamed from "-"
         self.minimize_button.setToolTip("Minimize Window")
@@ -85,8 +107,6 @@ class MainWindow(QMainWindow):
         self.minimize_button.clicked.connect(self.showMinimized)
         # Place minimize button in a dedicated layout if more top-bar controls are needed
         # For now, let's ensure it's distinct. A QHBoxLayout for top controls would be better.
-        top_bar_layout = QHBoxLayout()
-        top_bar_layout.addStretch()
         top_bar_layout.addWidget(self.minimize_button)
         main_layout.insertLayout(0, top_bar_layout) # Insert at the top
 
@@ -94,8 +114,25 @@ class MainWindow(QMainWindow):
         self.audio_recorder = AudioRecorder(parent=self)
         self._connect_audio_recorder_signals()
 
+        # Initialize TranscriptionService and thread pool
+        self.transcription_service = TranscriptionService()
+        self.thread_pool = QThreadPool.globalInstance()
+
+        # Transcription display
+        self.transcription_text = QTextEdit()
+        self.transcription_text.setReadOnly(True)
+        self.transcription_text.setPlaceholderText("Transcribed text will appear here...")
+        main_layout.addWidget(self.transcription_text)
+
+        # Progress bar for transcription
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.hide()
+        main_layout.addWidget(self.progress_bar)
+
         self._apply_button_styles() # Apply styles to all buttons
         self._apply_status_label_style()
+        self._apply_control_specific_styles() # New method for model selector etc.
         self._update_ui_for_state() # Set initial UI state based on AppState.IDLE
 
         # Apply a base background color for Tokyo Night theme
@@ -142,6 +179,7 @@ class MainWindow(QMainWindow):
         # New shortcuts for Transcribe and Fabric
         QShortcut(QKeySequence(Qt.Key.Key_T), self, self._on_transcribe_keypress)
         QShortcut(QKeySequence(Qt.Key.Key_F), self, self._on_fabric_keypress)
+        QShortcut(QKeySequence(Qt.Key.Key_Q), self, self.close) # Q to quit
 
     def _connect_audio_recorder_signals(self):
         self.audio_recorder.new_audio_chunk_signal.connect(self._handle_new_audio_chunk)
@@ -153,7 +191,7 @@ class MainWindow(QMainWindow):
 
     # --- AudioRecorder Signal Handlers ---
     def _handle_new_audio_chunk(self, audio_chunk):
-        print(f"UI: Received audio chunk. Shape: {audio_chunk.shape}, Min: {np.min(audio_chunk):.2f}, Max: {np.max(audio_chunk):.2f}, dtype: {audio_chunk.dtype}")
+        # print(f"UI: Received audio chunk. Shape: {audio_chunk.shape}, Min: {np.min(audio_chunk):.2f}, Max: {np.max(audio_chunk):.2f}, dtype: {audio_chunk.dtype}")
         if audio_chunk is not None and audio_chunk.size > 0:
             # Ensure audio_chunk is 1D for WaveformWidget
             if audio_chunk.ndim > 1:
@@ -167,8 +205,8 @@ class MainWindow(QMainWindow):
             else:
                 processed_chunk = audio_chunk
             self.waveform_widget.update_waveform_data(processed_chunk)
-        else:
-            print("UI: Received empty or None audio chunk.")
+            # else:
+            # print("UI: Received empty or None audio chunk.")
 
     def _handle_recording_started(self):
         print("UI: Recording started")
@@ -228,6 +266,7 @@ class MainWindow(QMainWindow):
     # --- Button Click Handlers (now control AudioRecorder) ---
     def _on_rec_clicked(self):
         self._clear_status_message()
+        self.close_after_transcription = False # Reset flag
         if self.app_state == AppState.IDLE:
             self.audio_recorder.start_recording()
         elif self.app_state == AppState.PAUSED:
@@ -249,6 +288,7 @@ class MainWindow(QMainWindow):
 
     def _on_cancel_clicked(self):
         self._clear_status_message()
+        self.close_after_transcription = False # Reset flag
         if self.app_state == AppState.RECORDING or self.app_state == AppState.PAUSED:
             self._change_app_state(AppState.CANCELLING)
             self.audio_recorder.stop_recording() # Corrected: No 'cancel' argument
@@ -258,17 +298,21 @@ class MainWindow(QMainWindow):
 
     def _on_transcribe_keypress(self):
         if self.app_state == AppState.RECORDING or self.app_state == AppState.PAUSED:
+            self.close_after_transcription = True # Set flag to close after this transcription
             self._change_app_state(AppState.STOPPING_FOR_ACTION)
             self._set_status_message("Stopping for Transcription...")
             self.pending_action = AppState.TRANSCRIBING # Store intended next state
             self.audio_recorder.stop_recording()
         elif self.app_state == AppState.IDLE and self.last_saved_audio_path:
+            self.close_after_transcription = True # Set flag for re-processing too
             self._change_app_state(AppState.TRANSCRIBING)
             # Transcribe last saved file if idle and a path exists
         else:
+            self.close_after_transcription = False # Ensure it's false if no action taken
             self._set_status_message("Not recording. Press R to record first.", is_error=True)
 
     def _on_fabric_keypress(self):
+        self.close_after_transcription = False # Fabric does not close app for now
         if self.app_state == AppState.RECORDING or self.app_state == AppState.PAUSED:
             self._change_app_state(AppState.STOPPING_FOR_ACTION)
             self._set_status_message("Stopping for Fabric processing...")
@@ -278,6 +322,7 @@ class MainWindow(QMainWindow):
             self._change_app_state(AppState.FABRIC_PROCESSING)
              # Process last saved file if idle and a path exists
         else:
+            self.close_after_transcription = False # Ensure it's false if no action taken
             self._set_status_message("Not recording. Press R to record first.", is_error=True)
 
     def _change_app_state(self, new_state):
@@ -359,10 +404,41 @@ class MainWindow(QMainWindow):
             self.cancel_button.setEnabled(False)
             self.transcribe_button.setEnabled(False)
             self.fabric_button.setEnabled(False)
-            self._set_status_message(f"Transcribing: {os.path.basename(self.last_saved_audio_path) if self.last_saved_audio_path else '...'}")
-            # Placeholder: actual transcription would happen here
-            # For now, simulate work and go back to IDLE
-            QTimer.singleShot(3000, lambda: self._post_action_cleanup(True, "Transcription complete (simulated)."))
+            self.model_size_selector.setEnabled(False) # Disable model selection during transcription
+            self._set_status_message(f"Transcribing ({self.current_model_size}): {os.path.basename(self.last_saved_audio_path) if self.last_saved_audio_path else '...'}")
+            
+            # --- Reinstating TranscriptionWorker --- 
+            if not self.last_saved_audio_path or not os.path.exists(self.last_saved_audio_path):
+                self._handle_transcription_error("Audio file path is missing or invalid for transcription.")
+                return
+            if not hasattr(self, 'transcription_service') or self.transcription_service is None:
+                self._handle_transcription_error("Transcription service not initialized.")
+                return
+            if not hasattr(self, 'thread_pool'):
+                self._handle_transcription_error("Thread pool not initialized for transcription worker.")
+                return
+            
+            # Ensure UI elements exist before trying to use them
+            if hasattr(self, 'transcription_text'):
+                self.transcription_text.clear()
+            if hasattr(self, 'progress_bar'):
+                self.progress_bar.setValue(0)
+                self.progress_bar.show()
+            
+            worker = TranscriptionWorker(
+                transcription_service=self.transcription_service, 
+                audio_path=self.last_saved_audio_path, 
+                language=None, # Explicitly set language to None for auto-detection
+                task="transcribe" # task is already a parameter in TranscriptionWorker
+            )
+            worker.signals.progress.connect(self._handle_transcription_progress)
+            worker.signals.finished.connect(self._handle_transcription_finished)
+            worker.signals.error.connect(self._handle_transcription_error)
+            self.thread_pool.start(worker)
+            # --- End Reinstating TranscriptionWorker ---
+            
+            # QTimer.singleShot(3000, lambda: self._post_action_cleanup(True, "Transcription complete (simulated).")) # This was the incorrect simulation
+
         elif self.app_state == AppState.FABRIC_PROCESSING:
             self.waveform_widget.set_status(WaveformStatus.IDLE)
             self.rec_button.setEnabled(False)
@@ -371,6 +447,7 @@ class MainWindow(QMainWindow):
             self.cancel_button.setEnabled(False)
             self.transcribe_button.setEnabled(False)
             self.fabric_button.setEnabled(False)
+            # self.model_size_selector.setEnabled(False) # Similarly for Fabric
             self._set_status_message(f"Fabric Processing: {os.path.basename(self.last_saved_audio_path) if self.last_saved_audio_path else '...'}")
             # Placeholder: Fabric processing (fuzzy search, etc.)
             # For now, simulate work and go back to IDLE
@@ -411,6 +488,44 @@ class MainWindow(QMainWindow):
     def _apply_status_label_style(self):
         # Initial style, color will be set by _set_status_message
         self.status_label.setStyleSheet("color: #c0caf5; padding: 2px; min-height: 2em;") # min-height for 2 lines
+
+    def _apply_control_specific_styles(self):
+        self.model_label.setStyleSheet("color: #c0caf5; margin-right: 5px;")
+        self.model_size_selector.setStyleSheet("""
+            QComboBox {
+                color: #c0caf5;
+                background-color: #24283b;
+                border: 1px solid #7aa2f7;
+                padding: 3px 5px;
+                min-width: 70px;
+            }
+            QComboBox:hover {
+                background-color: #414868;
+            }
+            QComboBox:disabled {
+                background-color: #20202a;
+                color: #50505a;
+            }
+            QComboBox::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 15px;
+                border-left-width: 1px;
+                border-left-color: #7aa2f7;
+                border-left-style: solid;
+            }
+            /* Arrow styling can be tricky; often better to let Qt default handle it for consistency */
+            /* QComboBox::down-arrow { image: url(path/to/your/arrow-icon.svg); } */
+            QComboBox QAbstractItemView { /* The dropdown list itself */
+                color: #c0caf5;
+                background-color: #1a1b26; /* Same as main window background */
+                border: 1px solid #7aa2f7; /* Consistent border */
+                selection-background-color: #414868; /* Hover/selection in dropdown */
+                outline: 0px; /* Removes focus dotted rect for a cleaner look */
+            }
+        """)
+        # Minimize button styling is already applied directly in __init__ because it's more unique
+        # If it were to become more standard, it could be moved here or to _apply_button_styles
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -505,6 +620,74 @@ class MainWindow(QMainWindow):
             self.status_label.setProperty("is_error", False) # Reset error state
         } if not self.status_label.property("is_error") else None)
         self._status_clear_timer.start(delay_ms)
+
+    @Slot(int, str, dict)
+    def _handle_transcription_progress(self, percentage, current_text, lang_info):
+        # Update progress bar and transcription text
+        if not self.progress_bar.isVisible():
+            self.progress_bar.show()
+        self.progress_bar.setValue(percentage)
+        self.transcription_text.setPlainText(current_text)
+        self._set_status_message(f"Transcribing... {percentage}%")
+
+    @Slot(dict)
+    def _handle_transcription_finished(self, result):
+        self.progress_bar.hide()
+        text = result.get("text", "")
+        self.transcription_text.setPlainText(text)
+        lang = result.get("detected_language")
+        prob = result.get("language_probability")
+        status_suffix = ""
+        
+        if text:
+            try:
+                pyperclip.copy(text)
+                print("Transcription copied to clipboard.")
+                paste_command = """
+                osascript -e 'tell application "System Events" to keystroke "v" using command down'
+                """
+                subprocess.run(paste_command, shell=True, check=False)
+                print("Paste command executed.")
+                status_suffix = " (copied & pasted)"
+            except Exception as e:
+                print(f"Error with clipboard/paste: {e}")
+                self._set_status_message(f"Transcription complete, but error with clipboard: {e}", is_error=True)
+                status_suffix = " (clipboard error)"
+        
+        base_message = ""
+        if lang:
+            base_message = f"Transcription complete ({lang}: {prob:.2f})"
+        else:
+            base_message = "Transcription complete"
+        
+        final_ui_message = f"{base_message}{status_suffix}"
+
+        if self.close_after_transcription:
+            self.close_after_transcription = False # Reset flag immediately
+            # Update status one last time before scheduling close
+            self._set_status_message(f"{final_ui_message} Closing...", is_error="(clipboard error)" in status_suffix) 
+            QTimer.singleShot(1200, self.close) # Slightly longer delay to read status
+            # _post_action_cleanup will not be called to change state to IDLE if we are closing.
+        else:
+            self._post_action_cleanup(True, final_ui_message)
+
+    @Slot(str)
+    def _handle_transcription_error(self, error_message):
+        self.progress_bar.hide()
+        self.close_after_transcription = False # Reset flag on error
+        self._post_action_cleanup(False, error_message)
+
+    @Slot(str)
+    def _on_model_size_changed(self, selected_model):
+        self.current_model_size = selected_model
+        print(f"UI: Model size changed to: {self.current_model_size}")
+        if hasattr(self, 'transcription_service') and self.transcription_service is not None:
+            # Call the new set_model method. Assuming default device and compute_type
+            # unless we want to make those configurable in the UI as well.
+            self.transcription_service.set_model(model_name=self.current_model_size)
+        else:
+            print("UI Warning: Transcription service not available to set model.")
+        # Future: May trigger saving to config or notifying other components.
 
 if __name__ == '__main__':
     # This is for testing the window directly
