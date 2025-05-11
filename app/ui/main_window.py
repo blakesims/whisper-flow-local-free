@@ -2,10 +2,11 @@
 
 import sys
 from PySide6.QtWidgets import QMainWindow, QApplication, QLabel, QVBoxLayout, QHBoxLayout, QWidget, QPushButton
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal # Added Signal for consistency if MainWindow were to emit its own
 import numpy as np
 
-from .waveform_widget import WaveformWidget, WaveformStatus # Added WaveformStatus
+from .waveform_widget import WaveformWidget, WaveformStatus
+from app.core.audio_recorder import AudioRecorder # Import AudioRecorder
 
 # from app.utils.config_manager import ConfigManager # Will be used later
 
@@ -27,11 +28,11 @@ class MainWindow(QMainWindow):
         # Basic content for now
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
-        layout = QVBoxLayout(self.central_widget)
+        main_layout = QVBoxLayout(self.central_widget)
         
         # Waveform display area
         self.waveform_widget = WaveformWidget()
-        layout.addWidget(self.waveform_widget) # Add waveform widget to layout
+        main_layout.addWidget(self.waveform_widget) # Add waveform widget to layout
 
         # Control buttons layout
         controls_layout = QHBoxLayout()
@@ -54,23 +55,32 @@ class MainWindow(QMainWindow):
         controls_layout.addWidget(self.stop_button)
         controls_layout.addWidget(self.pause_button)
         controls_layout.addWidget(self.cancel_button)
-        layout.addLayout(controls_layout) # Add controls layout to main vertical layout
+        main_layout.addLayout(controls_layout) # Add controls layout to main vertical layout
+
+        # Status/Error Label
+        self.status_label = QLabel("")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status_label.setWordWrap(True)
+        main_layout.addWidget(self.status_label)
 
         # Minimize button
         self.minimize_button = QPushButton("Min") # Renamed from "-"
         self.minimize_button.setToolTip("Minimize Window")
         self.minimize_button.setFixedSize(40, 28)
         self.minimize_button.clicked.connect(self.showMinimized)
-        layout.addWidget(self.minimize_button, alignment=Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight)
+        # Place minimize button in a dedicated layout if more top-bar controls are needed
+        # For now, let's ensure it's distinct. A QHBoxLayout for top controls would be better.
+        top_bar_layout = QHBoxLayout()
+        top_bar_layout.addStretch()
+        top_bar_layout.addWidget(self.minimize_button)
+        main_layout.insertLayout(0, top_bar_layout) # Insert at the top
 
-        # Setup timer for live waveform testing
-        self._test_waveform_timer = QTimer(self)
-        self._test_waveform_timer.timeout.connect(self._update_live_waveform_test)
-        self._test_waveform_timer.start(1000) # Match waveform_widget test timer for status changes
-        self._test_status_cycle = [WaveformStatus.IDLE, WaveformStatus.RECORDING]
-        self._current_test_status_idx = 0
+        # Initialize AudioRecorder
+        self.audio_recorder = AudioRecorder(parent=self)
+        self._connect_audio_recorder_signals()
 
         self._apply_button_styles() # Apply styles to all buttons
+        self._apply_status_label_style()
         self._update_ui_for_state() # Set initial UI state based on AppState.IDLE
 
         # Apply a base background color for Tokyo Night theme
@@ -98,75 +108,104 @@ class MainWindow(QMainWindow):
         """)
 
         # Set initial size (can be configurable later)
-        self.resize(300, 150)
+        self.resize(350, 250) # Adjusted initial size for status label
 
         # Make the window draggable (since it's frameless)
         self._drag_pos = None
 
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            event.accept()
+    def _connect_audio_recorder_signals(self):
+        self.audio_recorder.new_audio_chunk_signal.connect(self._handle_new_audio_chunk)
+        self.audio_recorder.recording_started_signal.connect(self._handle_recording_started)
+        self.audio_recorder.recording_stopped_signal.connect(self._handle_recording_stopped)
+        self.audio_recorder.recording_paused_signal.connect(self._handle_recording_paused)
+        self.audio_recorder.recording_resumed_signal.connect(self._handle_recording_resumed)
+        self.audio_recorder.error_signal.connect(self._handle_audio_error)
 
-    def mouseMoveEvent(self, event):
-        if event.buttons() == Qt.MouseButton.LeftButton and self._drag_pos:
-            self.move(event.globalPosition().toPoint() - self._drag_pos)
-            event.accept()
+    # --- AudioRecorder Signal Handlers ---
+    def _handle_new_audio_chunk(self, audio_chunk):
+        print(f"UI: Received audio chunk. Shape: {audio_chunk.shape}, Min: {np.min(audio_chunk):.2f}, Max: {np.max(audio_chunk):.2f}, dtype: {audio_chunk.dtype}")
+        if audio_chunk is not None and audio_chunk.size > 0:
+            # Ensure audio_chunk is 1D for WaveformWidget
+            if audio_chunk.ndim > 1:
+                # Squeeze will remove single-dimensional entries from the shape
+                # If shape is (N, 1) or (1, N), it becomes (N,)
+                processed_chunk = np.squeeze(audio_chunk)
+                # If after squeeze it's still not 1D (e.g. was (N, M) with M > 1), then it's an issue
+                if processed_chunk.ndim != 1:
+                    print(f"UI: Audio chunk has unexpected shape {audio_chunk.shape} after squeeze, not processing for waveform.")
+                    return 
+            else:
+                processed_chunk = audio_chunk
+            self.waveform_widget.update_waveform_data(processed_chunk)
+        else:
+            print("UI: Received empty or None audio chunk.")
 
-    def mouseReleaseEvent(self, event):
-        self._drag_pos = None
-        event.accept()
+    def _handle_recording_started(self):
+        print("UI: Recording started")
+        self._change_app_state(AppState.RECORDING)
 
-    def _update_live_waveform_test(self):
-        # Generate a random number of samples for the raw audio chunk
-        # This calls the method now present in WaveformWidget
-        num_raw_samples = np.random.randint(500, 5000) 
-        test_audio_chunk = self.waveform_widget.generate_sample_raw_audio(num_raw_samples)
-        self.waveform_widget.update_waveform_data(test_audio_chunk)
+    def _handle_recording_stopped(self, file_path_or_message):
+        print(f"UI: Recording stopped. Info: {file_path_or_message}")
+        if "Error:" in file_path_or_message or "Failed" in file_path_or_message: # Heuristic for error
+            self._set_status_message(file_path_or_message, is_error=True)
+        else:
+            self._set_status_message(f"Saved: {file_path_or_message.split('/')[-1]}", is_error=False)
+        self._change_app_state(AppState.IDLE)
 
-        # Cycle and set status for the waveform widget
-        self._current_test_status_idx = (self._current_test_status_idx + 1) % len(self._test_status_cycle)
-        self.waveform_widget.set_status(self._test_status_cycle[self._current_test_status_idx])
+    def _handle_recording_paused(self):
+        print("UI: Recording paused")
+        self._change_app_state(AppState.PAUSED)
 
-    # Placeholder methods for button clicks
+    def _handle_recording_resumed(self):
+        print("UI: Recording resumed")
+        self._change_app_state(AppState.RECORDING)
+
+    def _handle_audio_error(self, error_message):
+        print(f"UI Audio Error: {error_message}")
+        self._set_status_message(error_message, is_error=True)
+        self._change_app_state(AppState.IDLE)
+
+    # --- Button Click Handlers (now control AudioRecorder) ---
     def _on_rec_clicked(self):
-        print("Record button clicked")
-        if self._app_state == AppState.IDLE or self._app_state == AppState.PAUSED:
-            self._change_app_state(AppState.RECORDING)
-        # elif self._app_state == AppState.RECORDING: # Could be a toggle to Pause
-            # self._change_app_state(AppState.PAUSED)
+        self._clear_status_message()
+        if self._app_state == AppState.IDLE:
+            self.audio_recorder.start_recording()
+        elif self._app_state == AppState.PAUSED:
+            self.audio_recorder.resume_recording()
 
     def _on_stop_clicked(self):
-        print("Stop button clicked")
+        # Status message will be set by _handle_recording_stopped
         if self._app_state == AppState.RECORDING or self._app_state == AppState.PAUSED:
-            self._change_app_state(AppState.IDLE) # Or a "PROCESSING" state before IDLE
+            self.audio_recorder.stop_recording()
 
     def _on_pause_clicked(self):
-        print("Pause button clicked")
+        self._clear_status_message()
         if self._app_state == AppState.RECORDING:
-            self._change_app_state(AppState.PAUSED)
-        elif self._app_state == AppState.PAUSED:
-            self._change_app_state(AppState.RECORDING) # Resume
+            self.audio_recorder.pause_recording()
 
     def _on_cancel_clicked(self):
-        print("Cancel button clicked") # Typically resets to IDLE
+        self._clear_status_message()
         if self._app_state == AppState.RECORDING or self._app_state == AppState.PAUSED:
-            self._change_app_state(AppState.IDLE)
+            print("UI: Cancel clicked, stopping recording.")
+            self.audio_recorder.stop_recording(cancel=True)
 
     def _change_app_state(self, new_state):
-        if self._app_state == new_state: return
-        print(f"Changing app state from {self._app_state} to {new_state}")
-        self._app_state = new_state
-        self._update_ui_for_state()
-        
-        # Stop test timer when user interacts, if it's running
-        if self._test_waveform_timer.isActive():
-            self._test_waveform_timer.stop()
-            # Optionally set a default waveform state when stopping test timer
-            # self.waveform_widget.set_status(WaveformStatus.IDLE) 
-            # self.waveform_widget.update_waveform_data(np.zeros(self.waveform_widget.num_display_points, dtype=np.float32))
+        if self._app_state == new_state and not (new_state == AppState.RECORDING and self.rec_button.text() == "Resume") : # allow re-setting RECORDING if resuming
+            # avoid redundant UI updates if state is truly the same
+            # but allow _update_ui_for_state to run if text needs to change (e.g. Resume to Rec)
+            if not (self._app_state == AppState.PAUSED and new_state == AppState.RECORDING): # from pause to record
+                 return
 
-    def _update_ui_for_state(self):
+        print(f"Changing app state from {self._app_state} to {new_state}")
+        old_state = self._app_state
+        self._app_state = new_state
+        self._update_ui_for_state(old_state)
+        
+        # Test timer already removed
+        # if self._test_waveform_timer.isActive():
+            # self._test_waveform_timer.stop()
+
+    def _update_ui_for_state(self, old_state=None): # old_state can be used for more nuanced UI updates if needed
         if self._app_state == AppState.IDLE:
             self.waveform_widget.set_status(WaveformStatus.IDLE)
             self.rec_button.setEnabled(True)
@@ -177,19 +216,19 @@ class MainWindow(QMainWindow):
             self.cancel_button.setEnabled(False)
         elif self._app_state == AppState.RECORDING:
             self.waveform_widget.set_status(WaveformStatus.RECORDING)
-            self.rec_button.setEnabled(False) # Or change to a "Pause" icon/text
-            # self.rec_button.setText("PauseRec") 
+            self.rec_button.setEnabled(False) 
+            self.rec_button.setText("Rec") # Keep it as Rec, just disabled
             self.stop_button.setEnabled(True)
             self.pause_button.setEnabled(True)
             self.pause_button.setText("Pause")
             self.cancel_button.setEnabled(True)
         elif self._app_state == AppState.PAUSED:
             self.waveform_widget.set_status(WaveformStatus.IDLE) # Or a specific PAUSED color
-            self.rec_button.setEnabled(True) # To resume
+            self.rec_button.setEnabled(True)
             self.rec_button.setText("Resume") 
             self.stop_button.setEnabled(True)
-            self.pause_button.setEnabled(False) # Or change text to "Resumed by Rec button"
-            # self.pause_button.setText("Resume") # If pause button also resumes
+            self.pause_button.setEnabled(False)
+            # self.pause_button.setText("Resume") # Pause button does not resume in this logic
             self.cancel_button.setEnabled(True)
 
     def _apply_button_styles(self):
@@ -209,7 +248,7 @@ class MainWindow(QMainWindow):
                 color: #1a1b26;
             }
             QPushButton:disabled {
-                background-color: #20202a; /* Darker, less prominent */
+                background-color: #20202a;
                 color: #50505a;
                 border: 1px solid #40404a;
             }
@@ -218,13 +257,27 @@ class MainWindow(QMainWindow):
         self.stop_button.setStyleSheet(button_style)
         self.pause_button.setStyleSheet(button_style)
         self.cancel_button.setStyleSheet(button_style)
-        # self.minimize_button can have its own specific style or share this
-        # For now, let minimize button keep its more compact style from before
-        # Or, apply this and adjust its padding/min-width if needed.
-        # Let's update minimize button to use this style too for consistency, adjusting size via layout later if needed.
         self.minimize_button.setStyleSheet(button_style)
-        self.minimize_button.setText("Min") # More descriptive than "-"
-        self.minimize_button.setFixedSize(40, 28) # Adjust fixed size for new padding
+        self.minimize_button.setText("Min")
+        self.minimize_button.setFixedSize(40, 28)
+
+    def _apply_status_label_style(self):
+        # Initial style, color will be set by _set_status_message
+        self.status_label.setStyleSheet("color: #c0caf5; padding: 2px; min-height: 2em;") # min-height for 2 lines
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.MouseButton.LeftButton and self._drag_pos:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
+        event.accept()
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:
@@ -240,19 +293,48 @@ class MainWindow(QMainWindow):
             if self.stop_button.isEnabled():
                 self._on_stop_clicked()
         elif event.key() == Qt.Key.Key_P:
-            if self.pause_button.isEnabled(): # If pause button itself handles resume, this is fine
+            if self.pause_button.isEnabled():
                 self._on_pause_clicked()
-            # If Pause button becomes disabled and Rec becomes Resume when paused, 
-            # then P might also need to trigger _on_rec_clicked if app_state is PAUSED.
-            # For now, P only triggers _on_pause_clicked if pause_button is enabled.
-            # Let's refine: if P is pressed and state is PAUSED, treat as resume (same as Rec button)
-            elif self._app_state == AppState.PAUSED and self.rec_button.isEnabled(): # rec_button is "Resume"
-                 self._on_rec_clicked() # P for resume
+            elif self._app_state == AppState.PAUSED and self.rec_button.isEnabled(): 
+                 self._on_rec_clicked() 
         elif event.key() == Qt.Key.Key_C:
             if self.cancel_button.isEnabled():
                 self._on_cancel_clicked()
         else:
             super().keyPressEvent(event)
+
+    def closeEvent(self, event):
+        print("UI: Close event triggered. Stopping audio recorder.")
+        # Assuming AudioRecorder manages its QThread instance as self.thread
+        # and that self.audio_recorder.thread is accessible, or AudioRecorder
+        # provides a method to check if its underlying thread is running.
+        # If AudioRecorder itself is a QThread subclass, self.audio_recorder.isRunning() is fine.
+        # For now, let's assume a direct isRunning() on the recorder object that proxies to its thread.
+        # Or, more directly, just try to stop and wait.
+        
+        # Safest approach: just call stop and wait. The stop method should handle internal thread state.
+        self.audio_recorder.stop_recording() # Ensure recording is stopped
+        # The wait() call is crucial if AudioRecorder's operations (like saving file) happen in its thread.
+        # If AudioRecorder is a QObject moved to a QThread, self.audio_recorder.thread.wait() might be needed
+        # if wait() is not exposed on AudioRecorder itself. Assuming AudioRecorder handles this internally or is a QThread.
+        if hasattr(self.audio_recorder, 'wait') and callable(self.audio_recorder.wait):
+            self.audio_recorder.wait()
+        elif hasattr(self.audio_recorder, 'thread') and hasattr(self.audio_recorder.thread, 'wait') and callable(self.audio_recorder.thread.wait):
+             self.audio_recorder.thread.wait()
+        super().closeEvent(event)
+
+    def _set_status_message(self, message, is_error=False):
+        self.status_label.setText(message)
+        if is_error:
+            self.status_label.setStyleSheet("color: #f7768e; margin: 2px;") # Tokyo Night Red
+        else:
+            self.status_label.setStyleSheet("color: #c0caf5; margin: 2px;") # Tokyo Night Text
+        # Optionally, clear message after a delay for non-errors
+        if not is_error and message: 
+            QTimer.singleShot(5000, lambda: self.status_label.setText("") if self.status_label.text() == message else None)
+
+    def _clear_status_message(self):
+        self.status_label.setText("")
 
 if __name__ == '__main__':
     # This is for testing the window directly

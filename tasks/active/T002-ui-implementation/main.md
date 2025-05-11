@@ -155,5 +155,18 @@ Develop the user interface components for the Whisper Transcription App, focusin
   - Conducting usability reviews and refining keyboard navigation/shortcuts as needed.
   - Testing UI responsiveness, especially once real audio data processing is integrated.
 - Further work on this phase is pending the progress of T003 (Audio Recording Implementation) for full end-to-end testing of UI interactions with live audio.
+- **Integrated `AudioRecorder` (from T003) into `MainWindow`:**
+  - Imported and instantiated `AudioRecorder` in `app/ui/main_window.py`.
+  - Removed the previous test timer and associated logic for simulating waveform data.
+  - Connected `AudioRecorder` signals (`new_audio_chunk_signal`, `recording_started_signal`, `recording_stopped_signal`, `recording_paused_signal`, `recording_resumed_signal`, `error_signal`) to new handler slots in `MainWindow`.
+  - These handler slots now update the application state (`_app_state`) and UI (via `_update_ui_for_state`) based on actual events from the `AudioRecorder`.
+  - UI control button click handlers (`_on_rec_clicked`, etc.) now call corresponding methods on the `audio_recorder` instance (e.g., `start_recording()`, `stop_recording()`).
+  - Added a `closeEvent` to `MainWindow` to attempt to stop the `audio_recorder` and clean up its thread upon application exit.
+  - Basic error messages from `AudioRecorder` are printed to the console; UI display of errors is a next step.
+- Added a `QLabel` (`status_label`) to `MainWindow` for displaying status and error messages.
+  - Implemented `_set_status_message(message, is_error)` to update the label's text and color (errors in red, normal status in default text color).
+  - Non-error status messages automatically clear after a 5-second delay.
+  - `_handle_audio_error` and `_handle_recording_stopped` now use this label to provide feedback.
+  - User action initiating methods (e.g., `_on_rec_clicked`) now clear the status label.
 
 ## Notes & Updates 

@@ -1,6 +1,6 @@
 import sys
 from PySide6.QtWidgets import QWidget, QApplication
-from PySide6.QtGui import QPainter, QColor, QPolygonF
+from PySide6.QtGui import QPainter, QColor, QPolygonF, QPen
 from PySide6.QtCore import Qt, QPointF
 import numpy as np
 
@@ -14,14 +14,16 @@ class WaveformWidget(QWidget):
         super().__init__(parent)
         self.setMinimumSize(200, 100)
         self._display_amplitudes = np.array([], dtype=np.float32) # Renamed for clarity
-        self._background_color = QColor("#1a1b26")
+        self._background_color = QColor("#1a1b26") # Transparent, effectively
         
-        self._idle_color = QColor("#7aa2f7")      # Tokyo Night blue
-        self._recording_color = QColor("#f7768e") # Tokyo Night red/pink
+        self._idle_color = QColor("#a9b1d6")      # Light blue for idle/waveform line
+        self._recording_color = QColor("#f7768e") # Red/pink for recording line (can be same as idle if preferred)
         # self._processing_color = QColor("#73daca") # Tokyo Night cyan/teal
         
-        self._current_waveform_color = self._idle_color
+        self._current_waveform_pen_color = self._idle_color
         self._status = WaveformStatus.IDLE
+        self.visual_gain = 3.0 # Added visual gain
+        self.waveform_pen_width = 2 # Pen width for the waveform line
         
         self.num_display_points = 200 # How many points to show in the waveform display
 
@@ -30,13 +32,14 @@ class WaveformWidget(QWidget):
 
     def set_status(self, status):
         if status == WaveformStatus.IDLE:
-            self._current_waveform_color = self._idle_color
+            self._current_waveform_pen_color = self._idle_color
         elif status == WaveformStatus.RECORDING:
-            self._current_waveform_color = self._recording_color
+            # Let's use a different color for recording to keep that feature, e.g., a brighter blue or the red
+            self._current_waveform_pen_color = self._recording_color 
         # elif status == WaveformStatus.PROCESSING:
         #     self._current_waveform_color = self._processing_color
         else:
-            self._current_waveform_color = self._idle_color # Default to idle
+            self._current_waveform_pen_color = self._idle_color # Default to idle
         self._status = status
         self.update() # Trigger repaint to show new color
 
@@ -83,7 +86,13 @@ class WaveformWidget(QWidget):
         super().paintEvent(event)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), self._background_color)
+        # Background is part of the main window now, or could be set here if needed
+        # For a truly transparent widget background to see main window, ensure parent styling allows it,
+        # or set Qt.WA_StyledBackground and use transparent background-color in stylesheet for this widget.
+        # For now, let's assume the main window bg provides the dark theme and this widget is clear.
+        # painter.fillRect(self.rect(), self._background_color) # This would fill it with #1a1b26
+        # To make the widget itself transparent to what's behind it (if nested), more complex styling is needed.
+        # We will draw on the existing background from MainWindow.
 
         if self._display_amplitudes.size == 0:
             return
@@ -96,22 +105,30 @@ class WaveformWidget(QWidget):
         if num_points_to_draw < 2:
             return
 
-        points = QPolygonF()
-        points.append(QPointF(0, mid_y))
+        points_top = QPolygonF()
+        points_bottom = QPolygonF()
 
         for i, amp in enumerate(self._display_amplitudes):
             x = (i / (num_points_to_draw -1)) * width if num_points_to_draw > 1 else 0
-            # Amplitude is now expected to be positive (from np.max(np.abs(segment)))
-            # So, we draw it upwards from mid_y and can mirror for a symmetric look if desired
-            # For now, just simple positive amplitude representation.
-            y = mid_y - (amp * (height / 2.5)) 
-            points.append(QPointF(x, y))
-        
-        points.append(QPointF(width, mid_y))
+            scaled_amp_h = amp * self.visual_gain * (height / 2.5) # Scaled amplitude for half-height
+            
+            y_top = mid_y - scaled_amp_h
+            y_bottom = mid_y + scaled_amp_h
+            
+            # Ensure y does not go out of bounds due to gain
+            y_top = max(0, min(height, y_top)) 
+            y_bottom = max(0, min(height, y_bottom))
 
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(self._current_waveform_color) # Use status-dependent color
-        painter.drawPolygon(points)
+            points_top.append(QPointF(x, y_top))
+            points_bottom.append(QPointF(x, y_bottom))
+        
+        pen = QPen(self._current_waveform_pen_color)
+        pen.setWidth(self.waveform_pen_width)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush) # No fill for the waveform itself
+        
+        painter.drawPolyline(points_top)
+        painter.drawPolyline(points_bottom)
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
