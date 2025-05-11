@@ -3,7 +3,7 @@ Setup script for packaging the Whisper Transcription UI app with py2app.
 """
 from setuptools import setup
 
-APP = ['src/main.py']
+APP = ['app/main.py']
 DATA_FILES = []
 OPTIONS = {
     'argv_emulation': True,

@@ -18,6 +18,7 @@ Set up the initial project structure and development environment for the Whisper
 
 ## Rules Required
 - task-documentation
+- code-conventions.mdc
 
 ## Resources & References
 - Project specification: `tasks/init-Project-Spec.md`
@@ -28,7 +29,7 @@ Set up the initial project structure and development environment for the Whisper
 ## Phases Breakdown
 
 ### Phase 1: Development Environment Setup
-**Status**: Not Started
+**Status**: Completed
 
 **Objectives**:
 - Set up a Python virtual environment
@@ -47,7 +48,7 @@ Set up the initial project structure and development environment for the Whisper
 - None
 
 ### Phase 2: Project Structure Creation
-**Status**: Not Started
+**Status**: Completed
 
 **Objectives**:
 - Create core application directory structure
@@ -66,7 +67,7 @@ Set up the initial project structure and development environment for the Whisper
 - Phase 1 completion
 
 ### Phase 3: Application Skeleton Implementation
-**Status**: Not Started
+**Status**: Completed
 
 **Objectives**:
 - Implement basic application skeleton with PySide6
@@ -85,7 +86,7 @@ Set up the initial project structure and development environment for the Whisper
 - Phase 2 completion
 
 ### Phase 4: Faster-Whisper Integration 
-**Status**: Not Started
+**Status**: Completed
 
 **Objectives**:
 - Integrate existing faster-whisper code into the project

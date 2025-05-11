@@ -1,5 +1,36 @@
 ---
-description:
+description: the structure of the project
 globs:
 alwaysApply: false
 ---
+
+## 1. Project Directory Structure
+
+NOTE: always verify with a 'tree' search of the project
+
+The project follows a standard structure to organize code and resources:
+
+-   **`.venv/`**: Python virtual environment. Should be added to `.gitignore`.
+-   **`app/`**: Core application source code.
+    -   **`__init__.py`**: Makes `app` a package.
+    -   **`main.py`**: Main application entry point. ([app/main.py](mdc:app/main.py))
+    -   **`core/`**: Business logic, services (e.g., `TranscriptionService`, `AudioRecorder`).
+        -   `__init__.py`
+        -   Example: [app/core/transcription_service.py](mdc:app/core/transcription_service.py)
+    -   **`ui/`**: PySide6 UI components (e.g., `MainWindow`, dialogs, custom widgets).
+        -   `__init__.py`
+        -   Example: [app/ui/main_window.py](mdc:app/ui/main_window.py)
+    -   **`utils/`**: Utility classes and functions (e.g., `ConfigManager`).
+        -   `__init__.py`
+        -   Example: [app/utils/config_manager.py](mdc:app/utils/config_manager.py)
+    -   **`assets/`**: Static assets like icons, images used by the application (if not in `resources/`).
+-   **`resources/`**: Non-code resources, like the application icon ([resources/app_icon.icns](mdc:resources/app_icon.icns) - if it exists).
+-   **`tasks/`**: Task management and documentation files.
+    -   `global-task-manager.md`: ([tasks/global-task-manager.md](mdc:tasks/global-task-manager.md))
+    -   `main-template.md`: ([tasks/main-template.md](mdc:tasks/main-template.md))
+-   **`tests/`**: Unit and integration tests.
+-   **`scripts/`**: Helper scripts (e.g., build scripts).
+-   **`.gitignore`**: Specifies intentionally untracked files that Git should ignore.
+-   **`README.md`**: Project overview and setup instructions.
+-   **`requirements.txt`**: Python package dependencies. ([requirements.txt](mdc:requirements.txt))
+-   **`setup.py`**: Build script for `py2app`. ([setup.py](mdc:setup.py))

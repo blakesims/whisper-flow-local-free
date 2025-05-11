@@ -3,3 +3,67 @@ description:
 globs:
 alwaysApply: false
 ---
+# UI Guidelines for Whisper Transcription App
+
+This document provides User Interface (UI) guidelines specific to the Whisper Transcription App, complementing any general UI/UX design standards.
+
+## 1. Main Recording Interface Window
+
+-   **Behavior**:
+    -   **Frameless**: The main window should be frameless (`Qt.WindowType.FramelessWindowHint`).
+    -   **Always-on-Top**: It should stay on top of other applications (`Qt.WindowType.WindowStaysOnTopHint`).
+    -   **Draggable**: Implement custom dragging logic since the standard window frame is absent. This is typically done by handling `mousePressEvent`, `mouseMoveEvent`, and `mouseReleaseEvent`.
+    -   Reference: [app/ui/main_window.py](mdc:app/ui/main_window.py)
+-   **Appearance**:
+    -   Minimalist design with essential controls only.
+    -   Adhere to the "Tokyo Night or pastel color palette" as specified in the project documentation ([tasks/init-Project-Spec.md](mdc:tasks/init-Project-Spec.md)).
+-   **Initial Size**: A small, unobtrusive size (e.g., 300x150 pixels) is a good starting point, potentially configurable later via `ConfigManager`.
+
+## 2. Layout Management
+
+-   Utilize Qt's layout managers (`QVBoxLayout`, `QHBoxLayout`, `QGridLayout`, `QStackedLayout`, etc.) for arranging widgets. This ensures that the UI is responsive and adapts to different content sizes or minor window resizes.
+-   Avoid fixed positioning and sizing of widgets where possible; prefer layouts and size policies.
+
+## 3. Controls and Indicators
+
+-   **Buttons**:
+    -   Use clear icons and/or minimal text for buttons (e.g., Record, Pause, Stop, Cancel).
+    -   Provide tooltips for icon-only buttons.
+-   **Status Indicators**:
+    -   Visually indicate the application's current state (e.g., Idle, Recording, Paused, Transcribing, Processing, Error). This can be done via text labels, color changes in the UI (e.g., waveform color), or small status icons.
+-   **Waveform Visualization**:
+    -   Display a live audio waveform during recording.
+    -   The color of the waveform can change to indicate recording status (e.g., green for recording, orange for paused).
+-   **Progress Indicators**:
+    -   Use `QProgressBar` or custom visual indicators for long-running operations like transcription and model downloading.
+
+## 4. Fabric Pattern Selector
+
+-   **Appearance**: A dedicated dialog or panel that appears when the user chooses to process with Fabric.
+-   **Functionality**:
+    -   Should provide a fuzzy search input field to filter through available Fabric patterns.
+    -   Display a list of matching patterns.
+    -   Allow selection of a pattern to proceed with processing.
+
+## 5. Settings Dialog
+
+-   **Accessibility**: Standard macOS shortcut `Cmd+,` should open the settings/preferences dialog.
+-   **Content**: Allow configuration of:
+    -   Transcription model size.
+    -   Default language.
+    -   Keyboard shortcuts.
+    -   Other relevant application preferences.
+-   **Persistence**: Settings should be saved via `app.utils.config_manager.ConfigManager` ([app/utils/config_manager.py](mdc:app/utils/config_manager.py)).
+
+## 6. Keyboard Shortcuts
+
+-   Prioritize keyboard-driven workflows.
+-   Clearly document and, where possible, make shortcuts configurable.
+-   Provide hints for keyboard shortcuts in the UI if space permits or via tooltips.
+
+## 7. Error Display
+
+-   Display user-friendly error messages directly in the UI when operations fail (e.g., transcription error, model loading failure). This could be a status bar message, a small pop-up, or an information panel within the main window.
+-   Avoid showing raw technical error details to the user unless there's an "Advanced" or "Details" view.
+
+

@@ -1,7 +1,9 @@
-Rule Name: code-conventions
-Description: Defines coding standards and conventions for the Whisper Transcription App.
+---
+description: Defines coding standards and conventions for the Whisper Transcription App.
+globs:
+alwaysApply: false
+---
 
-# Code Conventions
 
 ## Python Style
 
