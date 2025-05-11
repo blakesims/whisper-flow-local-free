@@ -12,7 +12,8 @@ import subprocess # For running paste command
 from .waveform_widget import WaveformWidget, WaveformStatus
 from app.core.audio_recorder import AudioRecorder # Import AudioRecorder
 from app.core.transcription_service import TranscriptionService
-from .workers import TranscriptionWorker
+from app.core.fabric_service import FabricService # <-- ADDED IMPORT
+from .workers import TranscriptionWorker, FabricListPatternsWorker # <-- IMPORTED FabricListPatternsWorker
 
 # from app.utils.config_manager import ConfigManager # Will be used later
 
@@ -116,6 +117,7 @@ class MainWindow(QMainWindow):
 
         # Initialize TranscriptionService and thread pool
         self.transcription_service = TranscriptionService()
+        self.fabric_service = FabricService() # <-- INITIALIZED SERVICE
         self.thread_pool = QThreadPool.globalInstance()
 
         # Transcription display
@@ -447,11 +449,19 @@ class MainWindow(QMainWindow):
             self.cancel_button.setEnabled(False)
             self.transcribe_button.setEnabled(False)
             self.fabric_button.setEnabled(False)
-            # self.model_size_selector.setEnabled(False) # Similarly for Fabric
-            self._set_status_message(f"Fabric Processing: {os.path.basename(self.last_saved_audio_path) if self.last_saved_audio_path else '...'}")
-            # Placeholder: Fabric processing (fuzzy search, etc.)
-            # For now, simulate work and go back to IDLE
-            QTimer.singleShot(3000, lambda: self._post_action_cleanup(True, "Fabric processing complete (simulated)."))
+            self._set_status_message("Listing Fabric patterns...")
+
+            if not hasattr(self, 'fabric_service') or self.fabric_service is None:
+                self._handle_fabric_error("Fabric service not initialized.")
+                return
+            if not hasattr(self, 'thread_pool'):
+                self._handle_fabric_error("Thread pool not initialized for Fabric worker.")
+                return
+
+            fabric_worker = FabricListPatternsWorker(fabric_service=self.fabric_service)
+            fabric_worker.signals.finished.connect(self._handle_fabric_patterns_listed)
+            fabric_worker.signals.error.connect(self._handle_fabric_error)
+            self.thread_pool.start(fabric_worker)
 
     def _apply_button_styles(self):
         button_style = """
@@ -605,7 +615,11 @@ class MainWindow(QMainWindow):
             #     except OSError as e:
             #         print(f"Error deleting temp file {self.last_saved_audio_path}: {e}")
         
-        self._change_app_state(AppState.IDLE)
+        # Do not automatically go to IDLE for fabric listing, 
+        # as we need to show the patterns or an error.
+        # The specific handlers will decide the next state, or user interaction will.
+        if self.app_state != AppState.FABRIC_PROCESSING: # Only go to IDLE if not in fabric processing
+             self._change_app_state(AppState.IDLE)
 
     def _clear_status_message_after_delay(self, delay_ms=3000):
         if hasattr(self, '_status_clear_timer') and self._status_clear_timer.isActive():
@@ -676,6 +690,27 @@ class MainWindow(QMainWindow):
         self.progress_bar.hide()
         self.close_after_transcription = False # Reset flag on error
         self._post_action_cleanup(False, error_message)
+
+    @Slot(list) # Slot for the list of patterns from FabricListPatternsWorker
+    def _handle_fabric_patterns_listed(self, patterns):
+        if patterns:
+            print("Fabric patterns listed:")
+            for p_name in patterns:
+                print(f"- {p_name}")
+            self._set_status_message(f"Found {len(patterns)} Fabric patterns. Check console.")
+            # Here you would typically open a dialog for pattern selection.
+            # For now, just going back to IDLE after a delay.
+            QTimer.singleShot(1000, lambda: self._change_app_state(AppState.IDLE))
+        else:
+            self._set_status_message("No Fabric patterns found.")
+            QTimer.singleShot(1000, lambda: self._change_app_state(AppState.IDLE))
+
+    @Slot(str) # Slot for error messages from FabricListPatternsWorker
+    def _handle_fabric_error(self, error_message):
+        print(f"Fabric Service Error: {error_message}")
+        self._set_status_message(f"Fabric Error: {error_message}", is_error=True)
+        # Decide on next state, perhaps IDLE after showing error
+        QTimer.singleShot(1000, lambda: self._change_app_state(AppState.IDLE))
 
     @Slot(str)
     def _on_model_size_changed(self, selected_model):

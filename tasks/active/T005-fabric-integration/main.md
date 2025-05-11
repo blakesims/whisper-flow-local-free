@@ -29,14 +29,24 @@ Integrate the fabric CLI with the application, enabling post-processing of trans
 ## Phases Breakdown
 
 ### Phase 1: Fabric CLI Integration
-**Status**: Not Started
+**Status**: Blocked
 
 **Objectives**:
-- Create service for interacting with fabric CLI
-- Implement pattern listing functionality (`fabric -l`)
-- Develop process execution and output capture
-- Create error handling for CLI operations
-- Test basic fabric integration
+- Create service for interacting with fabric CLI - **Done** (`app.core.fabric_service.py` created with `FabricService` class)
+- Implement pattern listing functionality (`fabric -l`) - **Done** (`list_patterns` method implemented)
+- Develop process execution and output capture - **Done** (Using `subprocess.run` with stdin)
+- Create error handling for CLI operations - **Done** (Implemented for common subprocess errors, enhanced for API issues)
+- Test basic fabric integration - **Blocked** (Underlying `fabric` CLI calls are failing due to an Anthropic API credit issue. `FabricService` itself is likely correct.)
+
+**Actual Time**: ~1 day (Initial service implementation, multiple rounds of testing and refinement)
+
+**Summary of Changes**:
+- Created `app.core.fabric_service.py`.
+- Implemented `FabricService` class with:
+    - `__init__(self, fabric_executable_path="fabric")`
+    - `list_patterns(self)`: Executes `fabric -l` and parses plain text output.
+    - `run_pattern(self, pattern_name: str, text_input: str)`: Executes `fabric --pattern <pattern_name>` piping `text_input` to stdin. Includes enhanced error detection for API issues.
+- Testing revealed that `fabric` CLI execution fails due to an external Anthropic API credit balance problem.
 
 **Estimated Time**: 2 days
 
