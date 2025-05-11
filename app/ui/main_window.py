@@ -1,7 +1,7 @@
 # Placeholder for main_window.py 
 
 import sys
-from PySide6.QtWidgets import QMainWindow, QApplication, QLabel, QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QTextEdit, QProgressBar, QComboBox
+from PySide6.QtWidgets import QMainWindow, QApplication, QLabel, QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QTextEdit, QProgressBar, QComboBox, QDialog
 from PySide6.QtCore import Qt, QTimer, Signal, Slot, QPoint, QEvent, QThreadPool
 from PySide6.QtGui import QKeySequence, QShortcut, QColor
 import numpy as np
@@ -13,7 +13,8 @@ from .waveform_widget import WaveformWidget, WaveformStatus
 from app.core.audio_recorder import AudioRecorder # Import AudioRecorder
 from app.core.transcription_service import TranscriptionService
 from app.core.fabric_service import FabricService # <-- ADDED IMPORT
-from .workers import TranscriptionWorker, FabricListPatternsWorker, LoadModelWorker # <-- IMPORTED LoadModelWorker
+from .workers import TranscriptionWorker, FabricListPatternsWorker, LoadModelWorker, FabricRunPatternWorker # <-- IMPORTED LoadModelWorker, FabricRunPatternWorker
+from .pattern_selection_dialog import PatternSelectionDialog # <-- IMPORTED PatternSelectionDialog
 
 # from app.utils.config_manager import ConfigManager # Will be used later
 
@@ -21,11 +22,12 @@ class AppState:
     IDLE = 0
     RECORDING = 1
     PAUSED = 2
-    # States for managing transitions and post-recording actions
     CANCELLING = 3 # Recording is stopping, will delete file
     STOPPING_FOR_ACTION = 4 # Generic stopping before a post-action
     TRANSCRIBING = 5 # Whisper service will be triggered
     FABRIC_PROCESSING = 6 # Fabric post-processing will be triggered
+    PREPARING_FABRIC = 7      # New: Listing patterns, possibly transcribing for Fabric
+    RUNNING_FABRIC_PATTERN = 8 # New: Executing the selected Fabric pattern
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -36,6 +38,14 @@ class MainWindow(QMainWindow):
         self.close_after_transcription = False # New flag
         self.current_model_size = "base" # Initialize before model selector
         self.is_model_loading_busy = False # Flag for model loading
+
+        # New attributes for Fabric workflow
+        self.fabric_patterns = None
+        self.selected_fabric_pattern = None
+        self.last_transcribed_text_for_fabric = None
+        self.pattern_selection_dialog = None
+        self.is_transcribing_for_fabric = False
+        # self.close_after_fabric = False # Decided against this for now
 
         # Set window flags: frameless and always on top
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
@@ -242,8 +252,8 @@ class MainWindow(QMainWindow):
                 self._set_status_message(f"Recording saved: {os.path.basename(self.last_saved_audio_path)}")
                 if current_intended_next_state == AppState.TRANSCRIBING:
                     self._change_app_state(AppState.TRANSCRIBING)
-                elif current_intended_next_state == AppState.FABRIC_PROCESSING:
-                    self._change_app_state(AppState.FABRIC_PROCESSING)
+                elif current_intended_next_state == AppState.PREPARING_FABRIC: # <-- MODIFIED for new state
+                    self._change_app_state(AppState.PREPARING_FABRIC)
                 else: # Normal stop
                     self._change_app_state(AppState.IDLE)
             else: # Failed to save or was stopped before data
@@ -317,18 +327,26 @@ class MainWindow(QMainWindow):
             self._set_status_message("Not recording. Press R to record first.", is_error=True)
 
     def _on_fabric_keypress(self):
-        self.close_after_transcription = False # Fabric does not close app for now
+        # self.close_after_fabric = False # Not closing after Fabric for now
+        self._clear_status_message()
+        self.is_transcribing_for_fabric = False # Reset flag
+        self.last_transcribed_text_for_fabric = None # Reset text
+        self.selected_fabric_pattern = None # Reset selection
+        self.fabric_patterns = None # Reset list
+
         if self.app_state == AppState.RECORDING or self.app_state == AppState.PAUSED:
-            self._change_app_state(AppState.STOPPING_FOR_ACTION)
-            self._set_status_message("Stopping for Fabric processing...")
-            self.pending_action = AppState.FABRIC_PROCESSING # Store intended next state
+            self._set_status_message("Stopping for Fabric preparation...")
+            self.pending_action = AppState.PREPARING_FABRIC # Store intended next state
+            self._change_app_state(AppState.STOPPING_FOR_ACTION) # Go through stopping first
             self.audio_recorder.stop_recording()
         elif self.app_state == AppState.IDLE and self.last_saved_audio_path:
-            self._change_app_state(AppState.FABRIC_PROCESSING)
-             # Process last saved file if idle and a path exists
+            self._change_app_state(AppState.PREPARING_FABRIC)
+        elif self.app_state == AppState.IDLE and not self.last_saved_audio_path and self.transcription_text.toPlainText():
+            # If idle, no audio file, but there is text in the box, use that directly
+            self.last_transcribed_text_for_fabric = self.transcription_text.toPlainText()
+            self._change_app_state(AppState.PREPARING_FABRIC)
         else:
-            self.close_after_transcription = False # Ensure it's false if no action taken
-            self._set_status_message("Not recording. Press R to record first.", is_error=True)
+            self._set_status_message("Not recording and no previous audio/text for Fabric. Press R or T first.", is_error=True)
 
     def _change_app_state(self, new_state):
         if self.app_state == new_state and not (new_state == AppState.RECORDING and self.rec_button.text() == "Resume") : # allow re-setting RECORDING if resuming
@@ -347,7 +365,6 @@ class MainWindow(QMainWindow):
             # self._test_waveform_timer.stop()
 
     def _update_ui_for_state(self, old_state=None): # old_state can be used for more nuanced UI updates if needed
-        # Determine if model is ready and not busy loading
         model_ready = (hasattr(self, 'transcription_service') and 
                        self.transcription_service.model is not None and 
                        not self.is_model_loading_busy)
@@ -375,8 +392,9 @@ class MainWindow(QMainWindow):
             self.pause_button.setEnabled(False)
             self.pause_button.setText("Pause")
             self.cancel_button.setEnabled(False)
+            # Enable Transcribe/Fabric if model is ready AND (there's a last saved path OR there's text in the box for Fabric)
             self.transcribe_button.setEnabled(model_ready and bool(self.last_saved_audio_path))
-            self.fabric_button.setEnabled(model_ready and bool(self.last_saved_audio_path))
+            self.fabric_button.setEnabled(model_ready and (bool(self.last_saved_audio_path) or bool(self.transcription_text.toPlainText())))
             if not self.status_label.property("is_error") and not self.is_model_loading_busy:
                  self._clear_status_message_after_delay()
         elif self.app_state == AppState.RECORDING:
@@ -460,7 +478,7 @@ class MainWindow(QMainWindow):
             worker.signals.error.connect(self._handle_transcription_error)
             self.thread_pool.start(worker)
 
-        elif self.app_state == AppState.FABRIC_PROCESSING:
+        elif self.app_state == AppState.PREPARING_FABRIC:
             self.waveform_widget.set_status(WaveformStatus.IDLE)
             self.rec_button.setEnabled(False)
             self.stop_button.setEnabled(False)
@@ -468,22 +486,67 @@ class MainWindow(QMainWindow):
             self.cancel_button.setEnabled(False)
             self.transcribe_button.setEnabled(False)
             self.fabric_button.setEnabled(False)
-            self._set_status_message("Listing Fabric patterns...")
+            self.model_size_selector.setEnabled(False)
 
-            if not hasattr(self, 'fabric_service') or self.fabric_service is None:
-                self._handle_fabric_error("Fabric service not initialized.")
-                return
-            if not hasattr(self, 'thread_pool'):
-                self._handle_fabric_error("Thread pool not initialized for Fabric worker.")
-                return
+            # Logic to decide whether to transcribe or go straight to listing patterns
+            if not self.last_transcribed_text_for_fabric and self.last_saved_audio_path and os.path.exists(self.last_saved_audio_path):
+                if self.is_model_loading_busy or self.transcription_service.model is None:
+                    self._handle_fabric_error("Model not ready for transcription needed for Fabric.") # Use fabric error handler
+                    return
+                self._set_status_message(f"Transcribing for Fabric ({self.current_model_size})...", clear_automatically=False)
+                self.is_transcribing_for_fabric = True
+                
+                if hasattr(self, 'transcription_text'): self.transcription_text.clear() # Clear main display for this
+                if hasattr(self, 'progress_bar'): self.progress_bar.setValue(0); self.progress_bar.show()
 
-            fabric_worker = FabricListPatternsWorker(fabric_service=self.fabric_service)
-            fabric_worker.signals.finished.connect(self._handle_fabric_patterns_listed)
-            fabric_worker.signals.error.connect(self._handle_fabric_error)
-            self.thread_pool.start(fabric_worker)
+                worker = TranscriptionWorker(
+                    transcription_service=self.transcription_service,
+                    audio_path=self.last_saved_audio_path,
+                    language=None, task="transcribe"
+                )
+                # Connect to specific handlers for Fabric context if needed, or reuse.
+                # For now, reusing general transcription handlers but with is_transcribing_for_fabric flag.
+                worker.signals.progress.connect(self._handle_transcription_progress) # Can reuse
+                worker.signals.finished.connect(self._handle_transcription_finished) # Reused, will check flag
+                worker.signals.error.connect(self._handle_transcription_error)       # Reused, will check flag
+                self.thread_pool.start(worker)
+            elif self.last_transcribed_text_for_fabric or (not self.last_saved_audio_path and not self.transcription_text.toPlainText()):
+                # Text already available (from direct input or previous step) OR no audio and no text box text (error case handled by _on_fabric_keypress)
+                # Proceed to list patterns
+                self._set_status_message("Listing Fabric patterns...", clear_automatically=False)
+                if not hasattr(self, 'fabric_service') or self.fabric_service is None:
+                    self._handle_fabric_error("Fabric service not initialized.")
+                    return
+                fabric_list_worker = FabricListPatternsWorker(fabric_service=self.fabric_service)
+                fabric_list_worker.signals.finished.connect(self._handle_fabric_patterns_listed)
+                fabric_list_worker.signals.error.connect(self._handle_fabric_error) # General Fabric error
+                self.thread_pool.start(fabric_list_worker)
+            else: # Should not be reached if _on_fabric_keypress is correct
+                 self._handle_fabric_error("Cannot prepare Fabric: No audio to transcribe and no existing text.")
+
+        elif self.app_state == AppState.RUNNING_FABRIC_PATTERN:
+            self.waveform_widget.set_status(WaveformStatus.IDLE)
+            self.rec_button.setEnabled(False); self.stop_button.setEnabled(False)
+            self.pause_button.setEnabled(False); self.cancel_button.setEnabled(False)
+            self.transcribe_button.setEnabled(False); self.fabric_button.setEnabled(False)
+            self.model_size_selector.setEnabled(False)
+            self._set_status_message(f"Running Fabric pattern: {self.selected_fabric_pattern}...", clear_automatically=False)
+
+            if not self.selected_fabric_pattern or self.last_transcribed_text_for_fabric is None:
+                 self._handle_fabric_run_error("Missing pattern or text for Fabric execution.")
+                 return
+            
+            run_worker = FabricRunPatternWorker(
+                fabric_service=self.fabric_service,
+                pattern_name=self.selected_fabric_pattern,
+                text_input=self.last_transcribed_text_for_fabric
+            )
+            run_worker.signals.finished.connect(self._handle_fabric_run_finished)
+            run_worker.signals.error.connect(self._handle_fabric_run_error)
+            self.thread_pool.start(run_worker)
 
         # Make sure model_size_selector gets re-enabled if not in a blocking state
-        if self.app_state not in [AppState.TRANSCRIBING, AppState.FABRIC_PROCESSING, AppState.STOPPING_FOR_ACTION, AppState.CANCELLING] and not self.is_model_loading_busy:
+        if self.app_state not in [AppState.TRANSCRIBING, AppState.PREPARING_FABRIC, AppState.RUNNING_FABRIC_PATTERN, AppState.STOPPING_FOR_ACTION, AppState.CANCELLING] and not self.is_model_loading_busy:
             self.model_size_selector.setEnabled(True)
 
     def _apply_button_styles(self):
@@ -667,13 +730,27 @@ class MainWindow(QMainWindow):
             #     except OSError as e:
             #         print(f"Error deleting temp file {self.last_saved_audio_path}: {e}")
         
-        # Ensure model selector is enabled when returning to IDLE if not still loading
+        # Reset Fabric specific state if coming from a Fabric operation
+        if self.app_state == AppState.RUNNING_FABRIC_PATTERN or self.app_state == AppState.PREPARING_FABRIC:
+            self.selected_fabric_pattern = None
+            # self.last_transcribed_text_for_fabric = None # Keep for potential re-use if user cancels dialog then re-runs F
+            self.fabric_patterns = None
+            self.is_transcribing_for_fabric = False
+            if self.pattern_selection_dialog and self.pattern_selection_dialog.isVisible():
+                self.pattern_selection_dialog.reject() # Close it if open
+
         if not self.is_model_loading_busy:
             self.model_size_selector.setEnabled(True)
-        # Only go to IDLE if not in fabric processing (which now manages its own return to IDLE)
-        # And also ensure we don't mess up if app is closing due to close_after_transcription
-        if self.app_state != AppState.FABRIC_PROCESSING and not (hasattr(self, 'close_after_transcription') and self.close_after_transcription):
-             self._change_app_state(AppState.IDLE)
+        
+        # Conditional return to IDLE
+        # Avoid auto-IDLE if we are closing, or if a dialog should remain, etc.
+        # Fabric handlers now manage their own transition to IDLE mostly.
+        if not (hasattr(self, 'close_after_transcription') and self.close_after_transcription and not success):
+             # If closing after transcription AND it was successful, normal close handles it.
+             # If closing and it FAILED, then we might want to go to IDLE to show error before closing.
+             # This logic is getting complex. The main idea is Fabric flow controls its own IDLE transition.
+             if self.app_state not in [AppState.PREPARING_FABRIC]: # PREPARING_FABRIC leads to dialog or error
+                self._change_app_state(AppState.IDLE)
 
     def _clear_status_message_after_delay(self, delay_ms=3000):
         # This method is now largely superseded by the logic in _set_status_message
@@ -714,11 +791,30 @@ class MainWindow(QMainWindow):
     def _handle_transcription_finished(self, result):
         self.progress_bar.hide()
         text = result.get("text", "")
-        self.transcription_text.setPlainText(text)
         lang = result.get("detected_language")
         prob = result.get("language_probability")
         status_suffix = ""
-        
+
+        if self.is_transcribing_for_fabric:
+            self.is_transcribing_for_fabric = False
+            self.last_transcribed_text_for_fabric = text
+            
+            prob_str = f"{prob:.2f}" if prob is not None else "N/A"
+            lang_str = lang if lang else "Unknown"
+            self._set_status_message(f"Transcription for Fabric complete ({lang_str}: {prob_str}). Listing patterns...")
+            
+            # Now trigger pattern listing
+            if not hasattr(self, 'fabric_service') or self.fabric_service is None:
+                self._handle_fabric_error("Fabric service not initialized after transcription for Fabric.")
+                return
+            fabric_list_worker = FabricListPatternsWorker(fabric_service=self.fabric_service)
+            fabric_list_worker.signals.finished.connect(self._handle_fabric_patterns_listed)
+            fabric_list_worker.signals.error.connect(self._handle_fabric_error)
+            self.thread_pool.start(fabric_list_worker)
+            return # Do not proceed with normal transcription cleanup (clipboard, paste, close)
+
+        # --- Normal 'T' key transcription finish ---
+        self.transcription_text.setPlainText(text) # Update main text box
         if text:
             try:
                 pyperclip.copy(text)
@@ -734,12 +830,7 @@ class MainWindow(QMainWindow):
                 self._set_status_message(f"Transcription complete, but error with clipboard: {e}", is_error=True)
                 status_suffix = " (clipboard error)"
         
-        base_message = ""
-        if lang:
-            base_message = f"Transcription complete ({lang}: {prob:.2f})"
-        else:
-            base_message = "Transcription complete"
-        
+        base_message = f"Transcription complete ({lang}: {prob:.2f})" if lang else "Transcription complete"
         final_ui_message = f"{base_message}{status_suffix}"
 
         if self.close_after_transcription:
@@ -754,31 +845,125 @@ class MainWindow(QMainWindow):
     @Slot(str)
     def _handle_transcription_error(self, error_message):
         self.progress_bar.hide()
-        self.close_after_transcription = False # Reset flag on error
+        if self.is_transcribing_for_fabric:
+            self.is_transcribing_for_fabric = False
+            self._set_status_message(f"Transcription for Fabric failed: {error_message}", is_error=True)
+            self._change_app_state(AppState.IDLE) # Go to IDLE on critical failure
+            self.model_size_selector.setEnabled(not self.is_model_loading_busy)
+            return
+
+        self.close_after_transcription = False 
         self._post_action_cleanup(False, error_message)
 
-    @Slot(list) # Slot for the list of patterns from FabricListPatternsWorker
+    @Slot(list) 
     def _handle_fabric_patterns_listed(self, patterns):
+        if self.app_state != AppState.PREPARING_FABRIC: # Ensure we are in the correct state
+            return 
+
         if patterns:
-            print("Fabric patterns listed:")
-            for p_name in patterns:
-                print(f"- {p_name}")
-            self._set_status_message(f"Found {len(patterns)} Fabric patterns. Check console.")
-            # Here you would typically open a dialog for pattern selection.
-            # For now, just going back to IDLE after a delay.
-            QTimer.singleShot(1000, lambda: self._change_app_state(AppState.IDLE) if not self.is_model_loading_busy else None)
+            self.fabric_patterns = patterns
+            self._set_status_message(f"Found {len(patterns)} Fabric patterns. Select one.")
+            self._show_pattern_selection_dialog()
         else:
-            self._set_status_message("No Fabric patterns found.")
-            QTimer.singleShot(1000, lambda: self._change_app_state(AppState.IDLE) if not self.is_model_loading_busy else None)
+            self._set_status_message("No Fabric patterns found or error listing.", is_error=True)
+            QTimer.singleShot(2000, lambda: self._change_app_state(AppState.IDLE) if not self.is_model_loading_busy else None)
+            if not self.is_model_loading_busy : self.model_size_selector.setEnabled(True)
+
+    @Slot(str) 
+    def _handle_fabric_error(self, error_message): # General errors from FabricListPatternsWorker
+        print(f"Fabric Service Error (List/Prepare): {error_message}")
+        self._set_status_message(f"Fabric Error: {error_message}", is_error=True)
+        self.is_transcribing_for_fabric = False # Reset flag
+        QTimer.singleShot(2000, lambda: self._change_app_state(AppState.IDLE) if not self.is_model_loading_busy else None)
         if not self.is_model_loading_busy : self.model_size_selector.setEnabled(True)
 
-    @Slot(str) # Slot for error messages from FabricListPatternsWorker
-    def _handle_fabric_error(self, error_message):
-        print(f"Fabric Service Error: {error_message}")
-        self._set_status_message(f"Fabric Error: {error_message}", is_error=True)
-        # Decide on next state, perhaps IDLE after showing error
-        QTimer.singleShot(1000, lambda: self._change_app_state(AppState.IDLE) if not self.is_model_loading_busy else None)
-        if not self.is_model_loading_busy : self.model_size_selector.setEnabled(True)
+    # --- New methods for Pattern Selection Dialog and Running Fabric Pattern ---
+    def _show_pattern_selection_dialog(self):
+        if not self.fabric_patterns:
+            self._handle_fabric_error("Pattern list not available to show dialog.")
+            return
+        
+        # Ensure text is ready if we didn't transcribe specifically for fabric earlier
+        if not self.last_transcribed_text_for_fabric:
+            current_text_in_box = self.transcription_text.toPlainText()
+            if current_text_in_box:
+                self.last_transcribed_text_for_fabric = current_text_in_box
+            # If still no text, an error will be caught before running the pattern.
+            # Or, we could show an error here if last_transcribed_text_for_fabric is None.
+            # For now, let _on_pattern_dialog_accepted handle it.
+
+        self.pattern_selection_dialog = PatternSelectionDialog(self.fabric_patterns, self)
+        self.pattern_selection_dialog.pattern_selected.connect(self._on_pattern_dialog_accepted)
+        self.pattern_selection_dialog.finished.connect(self._on_pattern_dialog_finished)
+        # Apply styles to dialog if needed, or ensure it inherits them
+        # self.pattern_selection_dialog.setStyleSheet(self.styleSheet()) # Basic inheritance
+        self.pattern_selection_dialog.show() # Use show() for non-blocking if other tasks, but exec() for modal
+        # Using exec() to make it modal and block until selection
+        # self.pattern_selection_dialog.exec() 
+        # ^ Handled by self.pattern_selection_dialog.finished connection
+
+    @Slot(str)
+    def _on_pattern_dialog_accepted(self, pattern_name):
+        self.selected_fabric_pattern = pattern_name
+        self._set_status_message(f"Pattern '{pattern_name}' selected.")
+        
+        if not self.last_transcribed_text_for_fabric:
+            # This might happen if user had no audio, no text in box, then pressed F
+            # and somehow listing patterns succeeded (e.g. if it doesn't depend on text).
+            # However, _on_fabric_keypress should prevent this state.
+            # Or if transcription for fabric was skipped and main text box was empty.
+            self._handle_fabric_run_error("No text available to process with Fabric.")
+            return
+
+        self._change_app_state(AppState.RUNNING_FABRIC_PATTERN)
+
+    @Slot(int)
+    def _on_pattern_dialog_finished(self, result_code):
+        # This slot is connected to QDialog.finished(int)
+        if self.pattern_selection_dialog: # Ensure dialog exists
+            self.pattern_selection_dialog.deleteLater() # Clean up dialog
+            self.pattern_selection_dialog = None
+
+        if result_code == QDialog.DialogCode.Rejected:
+            if not self.selected_fabric_pattern: # Only if OK wasn't clicked (i.e., proper cancel)
+                self._set_status_message("Fabric pattern selection cancelled.")
+                self.last_transcribed_text_for_fabric = None # Clear if cancelled
+                self.fabric_patterns = None
+                self._change_app_state(AppState.IDLE)
+        # If accepted, _on_pattern_dialog_accepted already handled setting selected_fabric_pattern
+        # and triggering the next state.
+
+    @Slot(object) # Receives processed_text (str) from FabricRunPatternWorker
+    def _handle_fabric_run_finished(self, processed_text):
+        output_text = str(processed_text) # Ensure it's a string
+        self._set_status_message("Fabric processing successful!")
+        self.transcription_text.setPlainText(output_text) # Display result
+
+        status_suffix_fabric = ""
+        if output_text:
+            try:
+                pyperclip.copy(output_text)
+                print("Fabric output copied to clipboard.")
+                paste_command = """
+                osascript -e 'tell application "System Events" to keystroke "v" using command down'
+                """
+                subprocess.run(paste_command, shell=True, check=False)
+                print("Paste command executed for Fabric output.")
+                status_suffix_fabric = " (copied & pasted)"
+            except Exception as e:
+                print(f"Error with clipboard/paste for Fabric output: {e}")
+                self._set_status_message(f"Fabric complete, clipboard error: {e}", is_error=True)
+                status_suffix_fabric = " (clipboard error)"
+        
+        final_fabric_message = f"Fabric processing complete{status_suffix_fabric}"
+        self._post_action_cleanup(True, final_fabric_message) # Resets state to IDLE
+
+    @Slot(str)
+    def _handle_fabric_run_error(self, error_message):
+        print(f"Fabric Run Error: {error_message}")
+        self._set_status_message(f"Fabric Run Error: {error_message}", is_error=True)
+        self._post_action_cleanup(False, f"Fabric run failed: {error_message}") # Resets state to IDLE
+        # Ensure self.selected_fabric_pattern etc. are reset by _post_action_cleanup
 
     @Slot(str)
     def _on_model_size_changed(self, selected_model):

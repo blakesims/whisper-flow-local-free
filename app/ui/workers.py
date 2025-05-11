@@ -87,9 +87,41 @@ class FabricListPatternsWorker(QRunnable):
             return
         try:
             patterns = self.fabric_service.list_patterns()
-            self.signals.finished.emit(patterns) # Emits list for fabric patterns
+            # Ensure patterns is a list, even if empty, for consistent signal emission type
+            self.signals.finished.emit(patterns if patterns is not None else [])
         except Exception as e:
             self.signals.error.emit(f"Error listing Fabric patterns: {str(e)}")
+
+class FabricRunPatternWorker(QRunnable):
+    """
+    Worker thread for running a specific Fabric pattern.
+    """
+    def __init__(self, fabric_service, pattern_name, text_input):
+        super().__init__()
+        self.fabric_service = fabric_service
+        self.pattern_name = pattern_name
+        self.text_input = text_input
+        self.signals = WorkerSignals()
+
+    @Slot()
+    def run(self):
+        if not self.fabric_service:
+            self.signals.error.emit("FabricRunPatternWorker: FabricService not provided.")
+            return
+        if not self.pattern_name or not self.text_input:
+            self.signals.error.emit("FabricRunPatternWorker: Pattern name or text input missing.")
+            return
+        
+        try:
+            processed_text = self.fabric_service.run_pattern(self.pattern_name, self.text_input)
+            if processed_text is not None:
+                self.signals.finished.emit(processed_text) # Emits the processed string
+            else:
+                # run_pattern in FabricService prints its own errors, 
+                # including API credit issues. We can make this error more generic here.
+                self.signals.error.emit(f"Fabric pattern '{self.pattern_name}' execution failed or returned no output.")
+        except Exception as e:
+            self.signals.error.emit(f"Error running Fabric pattern '{self.pattern_name}': {str(e)}")
 
 class LoadModelWorker(QRunnable):
     """
