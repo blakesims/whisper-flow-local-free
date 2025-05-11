@@ -5,6 +5,7 @@ T003
 
 ## Overview
 Implement the audio recording functionality for the Whisper Transcription App, including audio capture, temporary storage, and the ability to pause, resume, and cancel recordings. This task focuses on the core audio recording feature that will feed into the transcription process.
+**This service will be located at `app/core/audio_recorder.py` as per `project-architecture.mdc`.**
 
 ## Objectives
 - Implement audio capture using the sounddevice library
@@ -19,6 +20,9 @@ Implement the audio recording functionality for the Whisper Transcription App, i
 
 ## Rules Required
 - task-documentation
+- code-conventions
+- integration-points
+- project-architecture
 
 ## Resources & References
 - Project specification: `tasks/init-Project-Spec.md`
@@ -28,17 +32,38 @@ Implement the audio recording functionality for the Whisper Transcription App, i
 
 ## Phases Breakdown
 
-### Phase 1: Audio Capture Implementation
-**Status**: Not Started
+### Phase 1: Audio Capture Implementation & Core Service Setup
+**Status**: ACTIVE
 
 **Objectives**:
-- Set up sounddevice for audio input capture
-- Create audio capture thread/service
-- Implement proper audio stream management
-- Develop real-time amplitude calculation
-- Test basic recording functionality
+- **Setup `AudioRecorder` Service:**
+    - Create `app/core/audio_recorder.py`.
+    - Implement the `AudioRecorder` class.
+- **Threading:**
+    - The `AudioRecorder` service **must** operate in a separate worker thread (`QThread`) to prevent UI freezes, as per `code-conventions.mdc`.
+- **Audio Input (sounddevice):**
+    - Set up `sounddevice` for audio input capture (e.g., default microphone).
+    - Implement robust audio stream management (opening, closing, error checking).
+- **Data Format & Interface:**
+    - Capture audio as raw PCM data.
+    - Provide raw audio data chunks compatible with `WaveformWidget.update_waveform_data(raw_audio_chunk: np.ndarray)`. The `raw_audio_chunk` should be a 1D NumPy array of floating-point PCM samples (e.g., values between -1.0 and 1.0).
+- **Communication (Signals & Slots):**
+    - Implement Qt signals for communication from `AudioRecorder` to `MainWindow` (or other UI components), as per `code-conventions.mdc`. This includes:
+        - Emitting new audio data chunks.
+        - Signaling changes in operational status (e.g., `recording_started_signal`, `recording_stopped_signal`, `recording_failed_to_start_signal`, `error_occurred_signal`).
+- **State Management Integration (Foundation):**
+    - The `AudioRecorder` will be the *actual driver* of recording-related states.
+    - Implement methods like `start_recording()`, `stop_recording()` etc., which will then emit signals to `MainWindow` to confirm the *actual* outcome.
+    - `MainWindow` will have slots connected to these signals to update its internal `_app_state` and UI.
+- **Error Handling (Initial):**
+    - Implement basic detection of potential errors (e.g., no microphone available, microphone access denied).
+    - Emit specific error signals (e.g., `error_signal(error_message: str)`) that `MainWindow` can connect to.
+- **Configuration (Consideration):**
+    - Identify parameters for `AudioRecorder` (e.g., preferred input device, sample rate (default 16000Hz), audio chunk size) that might need to be managed via `ConfigManager` (as per `integration-points.mdc`). Implement with defaults for now, with an eye towards future configurability.
+- **Basic Testing:**
+    - Test basic recording functionality and signal emission.
 
-**Estimated Time**: 2 days
+**Estimated Time**: 3 days (adjusted for increased detail)
 
 **Resources Needed**:
 - sounddevice documentation
