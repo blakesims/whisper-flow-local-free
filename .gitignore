@@ -1,2 +1,3 @@
 mvp-example/fabric-app-venv/
 .venv/
+**/__pycache__

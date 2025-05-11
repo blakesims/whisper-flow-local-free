@@ -28,7 +28,7 @@ Develop the user interface components for the Whisper Transcription App, focusin
 ## Phases Breakdown
 
 ### Phase 1: Main Window Implementation
-**Status**: Not Started
+**Status**: In Progress
 
 **Objectives**:
 - Create frameless, always-on-top main window
@@ -45,6 +45,13 @@ Develop the user interface components for the Whisper Transcription App, focusin
 
 **Dependencies**:
 - T001 completion
+
+**Updates & Progress**:
+- Initial frameless, always-on-top window with drag functionality confirmed (was pre-existing).
+- Applied a base background color (#1a1b26) and label text color (#c0caf5) as a first step towards Tokyo Night styling.
+- Refined styling: added a subtle border (#24283b) to the main window and made label style more specific (transparent background, no border).
+- Added functionality to close the window using the Escape key.
+- Added a basic minimize button with initial styling and functionality.
 
 ### Phase 2: Waveform Visualization Development
 **Status**: Not Started

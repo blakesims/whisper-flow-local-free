@@ -1,7 +1,7 @@
 # Placeholder for main_window.py 
 
 import sys
-from PySide6.QtWidgets import QMainWindow, QApplication, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QMainWindow, QApplication, QLabel, QVBoxLayout, QWidget, QPushButton
 from PySide6.QtCore import Qt
 
 # from app.utils.config_manager import ConfigManager # Will be used later
@@ -21,6 +21,44 @@ class MainWindow(QMainWindow):
         label = QLabel("Recording Interface Placeholder")
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(label)
+
+        # Minimize button
+        self.minimize_button = QPushButton("-")
+        self.minimize_button.setFixedSize(20, 20)
+        self.minimize_button.clicked.connect(self.showMinimized)
+        layout.addWidget(self.minimize_button, alignment=Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight)
+
+        # Apply a base background color for Tokyo Night theme
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #1a1b26;
+                border: 1px solid #24283b; /* Subtle border */
+            }
+        """)
+        # Change text color on the label for visibility
+        label.setStyleSheet("""
+            QLabel {
+                color: #c0caf5;
+                background-color: transparent; /* Ensure it doesn't pick up QWidget default bg */
+                border: none; /* Ensure no separate border for the label */
+            }
+        """)
+
+        self.minimize_button.setStyleSheet("""
+            QPushButton {
+                color: #c0caf5;
+                background-color: #24283b; /* Slightly lighter than main bg */
+                border: 1px solid #7aa2f7; /* A Tokyo Night blue for border */
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #414868; /* Darker accent for hover */
+            }
+            QPushButton:pressed {
+                background-color: #7aa2f7; /* Blue when pressed */
+                color: #1a1b26;
+            }
+        """)
 
         # Set initial size (can be configurable later)
         self.resize(300, 150)
@@ -42,6 +80,11 @@ class MainWindow(QMainWindow):
         self._drag_pos = None
         event.accept()
 
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            self.close()
+        else:
+            super().keyPressEvent(event)
 
 if __name__ == '__main__':
     # This is for testing the window directly
