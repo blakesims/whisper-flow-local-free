@@ -99,8 +99,8 @@ Develop the user interface components for the Whisper Transcription App, focusin
 **Status**: Completed
 
 **Objectives**:
-- Create minimal control buttons (record, stop, pause, cancel)
-- Implement keyboard shortcut handling
+- Create minimal control buttons (record, stop, pause, cancel, transcribe, fabric)
+- Implement keyboard shortcut handling for all controls
 - Develop status indicators for application state
 - Design and implement tooltip/hint system
 - Create smooth transition effects between states
@@ -123,9 +123,11 @@ Develop the user interface components for the Whisper Transcription App, focusin
   - Button click handlers now call `_change_app_state`.
   - A new `_update_ui_for_state` method manages UI changes based on the current application state (e.g., enabling/disabling buttons, changing button text, setting `WaveformWidget` status).
   - Test data timer in `MainWindow` is now stopped upon user interaction with control buttons.
-- Implemented keyboard shortcuts in `MainWindow.keyPressEvent` for main control actions (R for Rec/Resume, S for Stop, P for Pause/Resume, C for Cancel), respecting button enabled states.
+- Implemented keyboard shortcuts in `MainWindow` (using `QShortcut` for most) for main control actions (R for Rec/Resume, S for Stop, P for Pause, C for Cancel, M for Minimize, Escape for Close).
 - Added tooltips to control buttons (Rec, Stop, Pause, Cancel) and the Minimize button, indicating their function and shortcuts.
 - State transitions are currently immediate (color changes, button enable/disable). Smooth animated transitions are considered a potential future refinement if deemed necessary for UX, but not implemented in this phase for core functionality.
+- Added "Transcribe" (T) and "Fabric" (F) buttons and corresponding `QShortcut`s. These actions currently stop an active recording (saving it) and then transition to placeholder states.
+- Corrected `_on_cancel_clicked` to no longer pass an unexpected argument to `audio_recorder.stop_recording()`.
 - Core control elements, state management, keyboard shortcuts, and tooltips are implemented.
 
 ### Phase 4: Integration and Usability Testing
@@ -137,15 +139,19 @@ Develop the user interface components for the Whisper Transcription App, focusin
 - Implement error visualization for user feedback
 - Refine keyboard navigation and shortcuts
 - Conduct basic usability testing
+- Prepare for and integrate with T004 (Transcription) and T005 (Fabric) services.
 
 **Estimated Time**: 2 days
 
 **Resources Needed**:
 - Test plan for UI functionality
 - Reference usability heuristics
+- T004 and T005 interface specifications (when available)
 
 **Dependencies**:
 - Phase 3 completion
+- T003 (Audio Recording) for ongoing testing
+- T004, T005 (for full integration testing of Transcribe/Fabric flows)
 
 **Updates & Progress**:
 - Core UI components (main window, waveform display, control buttons, state management) are implemented.
@@ -159,7 +165,7 @@ Develop the user interface components for the Whisper Transcription App, focusin
   - Imported and instantiated `AudioRecorder` in `app/ui/main_window.py`.
   - Removed the previous test timer and associated logic for simulating waveform data.
   - Connected `AudioRecorder` signals (`new_audio_chunk_signal`, `recording_started_signal`, `recording_stopped_signal`, `recording_paused_signal`, `recording_resumed_signal`, `error_signal`) to new handler slots in `MainWindow`.
-  - These handler slots now update the application state (`_app_state`) and UI (via `_update_ui_for_state`) based on actual events from the `AudioRecorder`.
+  - These handler slots now update the application state (`app_state`) and UI (via `_update_ui_for_state`) based on actual events from the `AudioRecorder`.
   - UI control button click handlers (`_on_rec_clicked`, etc.) now call corresponding methods on the `audio_recorder` instance (e.g., `start_recording()`, `stop_recording()`).
   - Added a `closeEvent` to `MainWindow` to attempt to stop the `audio_recorder` and clean up its thread upon application exit.
   - Basic error messages from `AudioRecorder` are printed to the console; UI display of errors is a next step.
@@ -168,5 +174,29 @@ Develop the user interface components for the Whisper Transcription App, focusin
   - Non-error status messages automatically clear after a 5-second delay.
   - `_handle_audio_error` and `_handle_recording_stopped` now use this label to provide feedback.
   - User action initiating methods (e.g., `_on_rec_clicked`) now clear the status label.
+- **New Application States & Workflow for Cancel/Transcribe/Fabric:**
+  - `AppState` in `app/ui/main_window.py` now includes:
+    - `CANCELLING`: Used when the cancel action is triggered.
+    - `STOPPING_FOR_ACTION`: A general intermediate state when stopping a recording before a post-processing action (like Transcribe or Fabric).
+    - `TRANSCRIBING`: State for when transcription is supposed to occur.
+    - `FABRIC_PROCESSING`: State for when Fabric processing is supposed to occur.
+  - **Cancel Workflow (`_on_cancel_clicked`, `_handle_recording_stopped`):**
+    - Clicking Cancel or pressing 'C' sets state to `AppState.CANCELLING`.
+    - `audio_recorder.stop_recording()` is called.
+    - In `_handle_recording_stopped`, if state is `CANCELLING` and the `message_or_path` received from `audio_recorder` is a valid file path, `os.remove()` is used to delete the recorded audio file. The UI then transitions to `IDLE`.
+  - **Transcribe/Fabric Workflow (`_on_transcribe_keypress`, `_on_fabric_keypress`, `_handle_recording_stopped`):**
+    - Pressing 'T'/'F' or clicking respective buttons, if recording/paused, sets state to `AppState.STOPPING_FOR_ACTION`, sets `self.pending_action` to `AppState.TRANSCRIBING` or `AppState.FABRIC_PROCESSING`, and calls `audio_recorder.stop_recording()`.
+    - If IDLE and `self.last_saved_audio_path` exists, it directly transitions to `TRANSCRIBING` or `FABRIC_PROCESSING`.
+    - In `_handle_recording_stopped`, if the state was `STOPPING_FOR_ACTION` and recording was saved successfully (path received), `self.last_saved_audio_path` is updated. The application then transitions to the state stored in `self.pending_action` (i.e., `TRANSCRIBING` or `FABRIC_PROCESSING`).
+    - Currently, the `TRANSCRIBING` and `FABRIC_PROCESSING` states in `_update_ui_for_state` use a `QTimer.singleShot` to simulate work and then call `_post_action_cleanup` to return to `IDLE`. **These are the primary integration points for T004 and T005.**
+  - `self.last_saved_audio_path` in `MainWindow` stores the file path of the most recently saved audio, intended for use by transcription or Fabric processing.
 
 ## Notes & Updates 
+- **Key Integration Points for T004 (Transcription) & T005 (Fabric):**
+  - **`AppState.TRANSCRIBING` / `AppState.FABRIC_PROCESSING`:** The `MainWindow` transitions to these states after a recording is successfully stopped via the 'T' or 'F' actions (or corresponding buttons). The UI will display a relevant status message.
+  - **`MainWindow.last_saved_audio_path`:** This attribute will hold the string path to the temporarily saved WAV file that needs to be transcribed or processed.
+  - **`MainWindow._update_ui_for_state()`:** The sections for `AppState.TRANSCRIBING` and `AppState.FABRIC_PROCESSING` currently contain `QTimer.singleShot(...)` calls for simulation. These should be replaced with the actual calls to the transcription/Fabric services. The service should ideally run asynchronously. Upon completion (success or failure), `_post_action_cleanup(success_bool, message_str)` should be called to update the UI and return to `IDLE`.
+  - **Error Handling:** If the transcription/Fabric service reports an error, `_post_action_cleanup(False, "Error message from service")` should be used.
+  - **File Management:** Decide if `last_saved_audio_path` should be deleted after successful transcription/processing or if it's kept (currently, `_post_action_cleanup` keeps it). This might become a user setting.
+- The `cancel` functionality ensures that if a user cancels a recording, the audio data is discarded.
+- The UI now has dedicated "Transcribe" and "Fabric" buttons in addition to the 'T' and 'F' keyboard shortcuts. 

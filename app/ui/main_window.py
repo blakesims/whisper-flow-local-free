@@ -2,8 +2,10 @@
 
 import sys
 from PySide6.QtWidgets import QMainWindow, QApplication, QLabel, QVBoxLayout, QHBoxLayout, QWidget, QPushButton
-from PySide6.QtCore import Qt, QTimer, Signal # Added Signal for consistency if MainWindow were to emit its own
+from PySide6.QtCore import Qt, QTimer, Signal, Slot, QPoint, QEvent
+from PySide6.QtGui import QKeySequence, QShortcut, QColor
 import numpy as np
+import os # Added for os.remove
 
 from .waveform_widget import WaveformWidget, WaveformStatus
 from app.core.audio_recorder import AudioRecorder # Import AudioRecorder
@@ -14,13 +16,18 @@ class AppState:
     IDLE = 0
     RECORDING = 1
     PAUSED = 2
-    # PROCESSING = 3 # Future state
+    # States for managing transitions and post-recording actions
+    CANCELLING = 3 # Recording is stopping, will delete file
+    STOPPING_FOR_ACTION = 4 # Generic stopping before a post-action
+    TRANSCRIBING = 5 # Whisper service will be triggered
+    FABRIC_PROCESSING = 6 # Fabric post-processing will be triggered
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Whisper Transcription UI")
-        self._app_state = AppState.IDLE # Initialize app state
+        self.app_state = AppState.IDLE # Initialize app state
+        self.last_saved_audio_path = None # To store path for post-processing
 
         # Set window flags: frameless and always on top
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
@@ -40,21 +47,29 @@ class MainWindow(QMainWindow):
         self.stop_button = QPushButton("Stop")
         self.pause_button = QPushButton("Pause")
         self.cancel_button = QPushButton("Cancel")
+        self.transcribe_button = QPushButton("Transcribe")
+        self.fabric_button = QPushButton("Fabric")
 
         self.rec_button.setToolTip("Start/Resume Recording (R)")
         self.stop_button.setToolTip("Stop Recording (S)")
         self.pause_button.setToolTip("Pause Recording (P)")
         self.cancel_button.setToolTip("Cancel Recording (C)")
+        self.transcribe_button.setToolTip("Transcribe last recording, or current if active (T)")
+        self.fabric_button.setToolTip("Process with Fabric last recording, or current if active (F)")
 
         self.rec_button.clicked.connect(self._on_rec_clicked)
         self.stop_button.clicked.connect(self._on_stop_clicked)
         self.pause_button.clicked.connect(self._on_pause_clicked)
         self.cancel_button.clicked.connect(self._on_cancel_clicked)
+        self.transcribe_button.clicked.connect(self._on_transcribe_keypress)
+        self.fabric_button.clicked.connect(self._on_fabric_keypress)
 
         controls_layout.addWidget(self.rec_button)
         controls_layout.addWidget(self.stop_button)
         controls_layout.addWidget(self.pause_button)
         controls_layout.addWidget(self.cancel_button)
+        controls_layout.addWidget(self.transcribe_button)
+        controls_layout.addWidget(self.fabric_button)
         main_layout.addLayout(controls_layout) # Add controls layout to main vertical layout
 
         # Status/Error Label
@@ -113,6 +128,21 @@ class MainWindow(QMainWindow):
         # Make the window draggable (since it's frameless)
         self._drag_pos = None
 
+        # Keyboard Shortcuts
+        self._setup_shortcuts()
+
+    def _setup_shortcuts(self):
+        QShortcut(QKeySequence(Qt.Key.Key_R), self, self._on_rec_clicked)
+        QShortcut(QKeySequence(Qt.Key.Key_S), self, self._on_stop_clicked)
+        # Toggle pause/resume with P
+        QShortcut(QKeySequence(Qt.Key.Key_P), self, self._on_pause_clicked) 
+        QShortcut(QKeySequence(Qt.Key.Key_C), self, self._on_cancel_clicked)
+        QShortcut(QKeySequence(Qt.Key.Key_Escape), self, self.close)
+        QShortcut(QKeySequence(Qt.Key.Key_M), self, self._on_minimize_clicked)
+        # New shortcuts for Transcribe and Fabric
+        QShortcut(QKeySequence(Qt.Key.Key_T), self, self._on_transcribe_keypress)
+        QShortcut(QKeySequence(Qt.Key.Key_F), self, self._on_fabric_keypress)
+
     def _connect_audio_recorder_signals(self):
         self.audio_recorder.new_audio_chunk_signal.connect(self._handle_new_audio_chunk)
         self.audio_recorder.recording_started_signal.connect(self._handle_recording_started)
@@ -144,13 +174,43 @@ class MainWindow(QMainWindow):
         print("UI: Recording started")
         self._change_app_state(AppState.RECORDING)
 
-    def _handle_recording_stopped(self, file_path_or_message):
-        print(f"UI: Recording stopped. Info: {file_path_or_message}")
-        if "Error:" in file_path_or_message or "Failed" in file_path_or_message: # Heuristic for error
-            self._set_status_message(file_path_or_message, is_error=True)
-        else:
-            self._set_status_message(f"Saved: {file_path_or_message.split('/')[-1]}", is_error=False)
-        self._change_app_state(AppState.IDLE)
+    def _handle_recording_stopped(self, message_or_path):
+        current_intended_next_state = getattr(self, 'pending_action', None)
+        delattr(self, 'pending_action') if hasattr(self, 'pending_action') else None
+
+        if self.app_state == AppState.CANCELLING:
+            if os.path.exists(str(message_or_path)): # Check if it's a path
+                try:
+                    os.remove(str(message_or_path))
+                    self._set_status_message("Recording cancelled and deleted.")
+                    print(f"Canceled recording, deleted: {message_or_path}")
+                except OSError as e:
+                    self._set_status_message(f"Cancelled, but error deleting file: {e}", is_error=True)
+                    print(f"Error deleting canceled file {message_or_path}: {e}")
+            else: # Message might be an error or status
+                self._set_status_message(f"Recording cancelled. ({message_or_path})")
+            self.last_saved_audio_path = None
+            self._change_app_state(AppState.IDLE)
+
+        elif self.app_state == AppState.STOPPING_FOR_ACTION:
+            self.last_saved_audio_path = None # Reset
+            if os.path.exists(str(message_or_path)): # Successfully saved
+                self.last_saved_audio_path = str(message_or_path)
+                self._set_status_message(f"Recording saved: {os.path.basename(self.last_saved_audio_path)}")
+                if current_intended_next_state == AppState.TRANSCRIBING:
+                    self._change_app_state(AppState.TRANSCRIBING)
+                elif current_intended_next_state == AppState.FABRIC_PROCESSING:
+                    self._change_app_state(AppState.FABRIC_PROCESSING)
+                else: # Normal stop
+                    self._change_app_state(AppState.IDLE)
+            else: # Failed to save or was stopped before data
+                self._set_status_message(f"Recording stopped. ({message_or_path})", is_error=not "finished" in message_or_path.lower())
+                self._change_app_state(AppState.IDLE)
+        
+        else: # Should be an unexpected case or a direct stop not through STOPPING_FOR_ACTION
+             self._set_status_message(f"Recording stopped unexpectedly. Status: {message_or_path}")
+             self.last_saved_audio_path = None
+             self._change_app_state(AppState.IDLE)
 
     def _handle_recording_paused(self):
         print("UI: Recording paused")
@@ -168,37 +228,68 @@ class MainWindow(QMainWindow):
     # --- Button Click Handlers (now control AudioRecorder) ---
     def _on_rec_clicked(self):
         self._clear_status_message()
-        if self._app_state == AppState.IDLE:
+        if self.app_state == AppState.IDLE:
             self.audio_recorder.start_recording()
-        elif self._app_state == AppState.PAUSED:
+        elif self.app_state == AppState.PAUSED:
             self.audio_recorder.resume_recording()
 
     def _on_stop_clicked(self):
-        # Status message will be set by _handle_recording_stopped
-        if self._app_state == AppState.RECORDING or self._app_state == AppState.PAUSED:
+        if self.app_state == AppState.RECORDING or self.app_state == AppState.PAUSED:
+            self._set_status_message("Stopping recording...")
+            # No specific post-action, just a normal stop.
+            # We can use STOPPING_FOR_ACTION generally, or rely on _handle_recording_stopped to go to IDLE
+            self._change_app_state(AppState.STOPPING_FOR_ACTION)
             self.audio_recorder.stop_recording()
+            self._set_status_message("Stopping recording...") # Message for STOPPING_FOR_ACTION
 
     def _on_pause_clicked(self):
         self._clear_status_message()
-        if self._app_state == AppState.RECORDING:
+        if self.app_state == AppState.RECORDING:
             self.audio_recorder.pause_recording()
 
     def _on_cancel_clicked(self):
         self._clear_status_message()
-        if self._app_state == AppState.RECORDING or self._app_state == AppState.PAUSED:
-            print("UI: Cancel clicked, stopping recording.")
-            self.audio_recorder.stop_recording(cancel=True)
+        if self.app_state == AppState.RECORDING or self.app_state == AppState.PAUSED:
+            self._change_app_state(AppState.CANCELLING)
+            self.audio_recorder.stop_recording() # Corrected: No 'cancel' argument
+
+    def _on_minimize_clicked(self):
+        self.showMinimized()
+
+    def _on_transcribe_keypress(self):
+        if self.app_state == AppState.RECORDING or self.app_state == AppState.PAUSED:
+            self._change_app_state(AppState.STOPPING_FOR_ACTION)
+            self._set_status_message("Stopping for Transcription...")
+            self.pending_action = AppState.TRANSCRIBING # Store intended next state
+            self.audio_recorder.stop_recording()
+        elif self.app_state == AppState.IDLE and self.last_saved_audio_path:
+            self._change_app_state(AppState.TRANSCRIBING)
+            # Transcribe last saved file if idle and a path exists
+        else:
+            self._set_status_message("Not recording. Press R to record first.", is_error=True)
+
+    def _on_fabric_keypress(self):
+        if self.app_state == AppState.RECORDING or self.app_state == AppState.PAUSED:
+            self._change_app_state(AppState.STOPPING_FOR_ACTION)
+            self._set_status_message("Stopping for Fabric processing...")
+            self.pending_action = AppState.FABRIC_PROCESSING # Store intended next state
+            self.audio_recorder.stop_recording()
+        elif self.app_state == AppState.IDLE and self.last_saved_audio_path:
+            self._change_app_state(AppState.FABRIC_PROCESSING)
+             # Process last saved file if idle and a path exists
+        else:
+            self._set_status_message("Not recording. Press R to record first.", is_error=True)
 
     def _change_app_state(self, new_state):
-        if self._app_state == new_state and not (new_state == AppState.RECORDING and self.rec_button.text() == "Resume") : # allow re-setting RECORDING if resuming
+        if self.app_state == new_state and not (new_state == AppState.RECORDING and self.rec_button.text() == "Resume") : # allow re-setting RECORDING if resuming
             # avoid redundant UI updates if state is truly the same
             # but allow _update_ui_for_state to run if text needs to change (e.g. Resume to Rec)
-            if not (self._app_state == AppState.PAUSED and new_state == AppState.RECORDING): # from pause to record
+            if not (self.app_state == AppState.PAUSED and new_state == AppState.RECORDING): # from pause to record
                  return
 
-        print(f"Changing app state from {self._app_state} to {new_state}")
-        old_state = self._app_state
-        self._app_state = new_state
+        print(f"Changing app state from {self.app_state} to {new_state}")
+        old_state = self.app_state
+        self.app_state = new_state
         self._update_ui_for_state(old_state)
         
         # Test timer already removed
@@ -206,7 +297,7 @@ class MainWindow(QMainWindow):
             # self._test_waveform_timer.stop()
 
     def _update_ui_for_state(self, old_state=None): # old_state can be used for more nuanced UI updates if needed
-        if self._app_state == AppState.IDLE:
+        if self.app_state == AppState.IDLE:
             self.waveform_widget.set_status(WaveformStatus.IDLE)
             self.rec_button.setEnabled(True)
             self.rec_button.setText("Rec")
@@ -214,7 +305,12 @@ class MainWindow(QMainWindow):
             self.pause_button.setEnabled(False)
             self.pause_button.setText("Pause")
             self.cancel_button.setEnabled(False)
-        elif self._app_state == AppState.RECORDING:
+            self.transcribe_button.setEnabled(bool(self.last_saved_audio_path))
+            self.fabric_button.setEnabled(bool(self.last_saved_audio_path))
+            # Clear status message gently if it's not an error message
+            if not self.status_label.property("is_error"):
+                self._clear_status_message_after_delay()
+        elif self.app_state == AppState.RECORDING:
             self.waveform_widget.set_status(WaveformStatus.RECORDING)
             self.rec_button.setEnabled(False) 
             self.rec_button.setText("Rec") # Keep it as Rec, just disabled
@@ -222,7 +318,10 @@ class MainWindow(QMainWindow):
             self.pause_button.setEnabled(True)
             self.pause_button.setText("Pause")
             self.cancel_button.setEnabled(True)
-        elif self._app_state == AppState.PAUSED:
+            self.transcribe_button.setEnabled(True)
+            self.fabric_button.setEnabled(True)
+            self._set_status_message("Recording...")
+        elif self.app_state == AppState.PAUSED:
             self.waveform_widget.set_status(WaveformStatus.IDLE) # Or a specific PAUSED color
             self.rec_button.setEnabled(True)
             self.rec_button.setText("Resume") 
@@ -230,6 +329,52 @@ class MainWindow(QMainWindow):
             self.pause_button.setEnabled(False)
             # self.pause_button.setText("Resume") # Pause button does not resume in this logic
             self.cancel_button.setEnabled(True)
+            self.transcribe_button.setEnabled(True)
+            self.fabric_button.setEnabled(True)
+            self._set_status_message("Paused.")
+        elif self.app_state == AppState.CANCELLING:
+            self.waveform_widget.set_status(WaveformStatus.IDLE)
+            self.rec_button.setEnabled(False)
+            self.stop_button.setEnabled(False)
+            self.pause_button.setEnabled(False)
+            self.cancel_button.setEnabled(False)
+            self.transcribe_button.setEnabled(False)
+            self.fabric_button.setEnabled(False)
+            self._set_status_message("Cancelling recording...")
+        elif self.app_state == AppState.STOPPING_FOR_ACTION:
+            self.waveform_widget.set_status(WaveformStatus.IDLE)
+            self.rec_button.setEnabled(False)
+            self.stop_button.setEnabled(False)
+            self.pause_button.setEnabled(False)
+            self.cancel_button.setEnabled(False)
+            self.transcribe_button.setEnabled(False)
+            self.fabric_button.setEnabled(False)
+            # Specific message will be set by caller
+            # self._set_status_message("Stopping for action...")
+        elif self.app_state == AppState.TRANSCRIBING:
+            self.waveform_widget.set_status(WaveformStatus.IDLE)
+            self.rec_button.setEnabled(False)
+            self.stop_button.setEnabled(False)
+            self.pause_button.setEnabled(False)
+            self.cancel_button.setEnabled(False)
+            self.transcribe_button.setEnabled(False)
+            self.fabric_button.setEnabled(False)
+            self._set_status_message(f"Transcribing: {os.path.basename(self.last_saved_audio_path) if self.last_saved_audio_path else '...'}")
+            # Placeholder: actual transcription would happen here
+            # For now, simulate work and go back to IDLE
+            QTimer.singleShot(3000, lambda: self._post_action_cleanup(True, "Transcription complete (simulated)."))
+        elif self.app_state == AppState.FABRIC_PROCESSING:
+            self.waveform_widget.set_status(WaveformStatus.IDLE)
+            self.rec_button.setEnabled(False)
+            self.stop_button.setEnabled(False)
+            self.pause_button.setEnabled(False)
+            self.cancel_button.setEnabled(False)
+            self.transcribe_button.setEnabled(False)
+            self.fabric_button.setEnabled(False)
+            self._set_status_message(f"Fabric Processing: {os.path.basename(self.last_saved_audio_path) if self.last_saved_audio_path else '...'}")
+            # Placeholder: Fabric processing (fuzzy search, etc.)
+            # For now, simulate work and go back to IDLE
+            QTimer.singleShot(3000, lambda: self._post_action_cleanup(True, "Fabric processing complete (simulated)."))
 
     def _apply_button_styles(self):
         button_style = """
@@ -258,6 +403,8 @@ class MainWindow(QMainWindow):
         self.pause_button.setStyleSheet(button_style)
         self.cancel_button.setStyleSheet(button_style)
         self.minimize_button.setStyleSheet(button_style)
+        self.transcribe_button.setStyleSheet(button_style)
+        self.fabric_button.setStyleSheet(button_style)
         self.minimize_button.setText("Min")
         self.minimize_button.setFixedSize(40, 28)
 
@@ -279,29 +426,19 @@ class MainWindow(QMainWindow):
         self._drag_pos = None
         event.accept()
 
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key.Key_Escape:
-            self.close()
-            return # Consume event
+    def keyPressEvent(self, event: QEvent):
+        # This method is now primarily for modifier keys or complex events
+        # if simple shortcuts are handled by QShortcut.
+        # We keep it for reference or future complex key handling.
+        # Note: QShortcut handles most of these now.
+        # Leaving the structure here for potential future use or if QShortcut fails for some reason.
 
-        # Keyboard shortcuts for recording controls
-        # Check if button is enabled before triggering its action via shortcut
-        if event.key() == Qt.Key.Key_R:
-            if self.rec_button.isEnabled():
-                self._on_rec_clicked()
-        elif event.key() == Qt.Key.Key_S:
-            if self.stop_button.isEnabled():
-                self._on_stop_clicked()
-        elif event.key() == Qt.Key.Key_P:
-            if self.pause_button.isEnabled():
-                self._on_pause_clicked()
-            elif self._app_state == AppState.PAUSED and self.rec_button.isEnabled(): 
-                 self._on_rec_clicked() 
-        elif event.key() == Qt.Key.Key_C:
-            if self.cancel_button.isEnabled():
-                self._on_cancel_clicked()
-        else:
-            super().keyPressEvent(event)
+        # Example: Allow Escape to close if not handled by QShortcut (it is)
+        # if event.key() == Qt.Key.Key_Escape:
+        #     self.close()
+        #     return
+
+        super().keyPressEvent(event) # Important to call base class
 
     def closeEvent(self, event):
         print("UI: Close event triggered. Stopping audio recorder.")
@@ -335,6 +472,39 @@ class MainWindow(QMainWindow):
 
     def _clear_status_message(self):
         self.status_label.setText("")
+
+    def _post_action_cleanup(self, success, message):
+        """Called after transcribe/fabric (simulated) to reset state."""
+        if success:
+            self._set_status_message(message)
+            # Optionally delete self.last_saved_audio_path here if needed
+            # For now, we keep it for potential re-processing
+        else:
+            self._set_status_message(message, is_error=True)
+            # If the action failed, maybe we should delete the temp audio file?
+            # if self.last_saved_audio_path and os.path.exists(self.last_saved_audio_path):
+            #     try:
+            #         os.remove(self.last_saved_audio_path)
+            #         print(f"Cleaned up temp file: {self.last_saved_audio_path}")
+            #         self.last_saved_audio_path = None
+            #     except OSError as e:
+            #         print(f"Error deleting temp file {self.last_saved_audio_path}: {e}")
+        
+        self._change_app_state(AppState.IDLE)
+
+    def _clear_status_message_after_delay(self, delay_ms=3000):
+        if hasattr(self, '_status_clear_timer') and self._status_clear_timer.isActive():
+            self._status_clear_timer.stop()
+        
+        self._status_clear_timer = QTimer()
+        self._status_clear_timer.setSingleShot(True)
+        # Only clear if it's not an error and current message is the one we set
+        # This check is tricky if messages update rapidly. A simpler approach is to clear if not an error.
+        self._status_clear_timer.timeout.connect(lambda: {
+            self.status_label.setText(""),
+            self.status_label.setProperty("is_error", False) # Reset error state
+        } if not self.status_label.property("is_error") else None)
+        self._status_clear_timer.start(delay_ms)
 
 if __name__ == '__main__':
     # This is for testing the window directly
