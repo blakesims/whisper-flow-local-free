@@ -1,0 +1,19 @@
+1. Overall task objectives
+- Develop a plan to transition the script from running on a local Mac machine to running on an Ubuntu server
+- Create a web interface for the script to be easily used by others, avoiding direct API interaction unless integrated into JavaScript or Flask
+- Ensure the plan is simple and incremental to accommodate the requester's newness to server management
+
+2. Relevant details
+- The script currently runs on a Mac machine
+- The target server runs Ubuntu
+- The existing setup includes both shell scripts and Python scripts
+- The desired user interface is a web interface accessible via a browser
+- The requester prefers not to use direct API calls unless integrated into JavaScript or Flask
+
+3. Missing information
+- Specific functionalities of the current script that need to be maintained or adapted
+- Any dependencies or libraries required by the script
+- Preferred web technologies (e.g., Flask, Django, plain HTML/CSS/JavaScript)
+- Security considerations for running the script on the server
+- User authentication requirements for accessing the web interface
+- Any specific performance or scalability requirements for the server setup
