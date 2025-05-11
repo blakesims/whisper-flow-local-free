@@ -1,0 +1,28 @@
+Rule Name: code-conventions
+Description: Defines coding standards and conventions for the Whisper Transcription App.
+
+# Code Conventions
+
+## Python Style
+
+- Follow PEP 8 style guidelines for Python code
+- Use 4 spaces for indentation (no tabs)
+- Maximum line length of 100 characters
+- Use snake_case for functions, methods, and variables
+- Use CamelCase for classes
+- Use UPPERCASE for constants
+
+## PySide6/Qt Specific
+
+- Use newer style signal/slot connections
+- Never directly modify UI elements from worker threads
+- Use signals and slots for thread communication
+- Prefer programmatic UI construction over .ui files
+
+## Performance and Threading
+
+- Move long-running operations to background threads
+- Provide progress feedback for operations over 500ms
+- Properly release resources when no longer needed
+- Be mindful of memory usage, especially for audio processing
+- Cache expensive computations where appropriate

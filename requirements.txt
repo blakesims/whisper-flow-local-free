@@ -1,0 +1,19 @@
+# Whisper Transcription UI - Requirements
+
+# UI Framework
+PySide6>=6.5.0
+
+# Audio Processing
+sounddevice>=0.4.6
+numpy>=1.24.0
+scipy>=1.10.0
+pyperclip>=1.8.2
+
+# Transcription 
+faster-whisper>=0.10.0
+
+# Packaging
+py2app>=0.28.0
+
+# Fuzzy Search for Fabric pattern selection
+rapidfuzz>=3.0.0 
