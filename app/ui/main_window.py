@@ -13,7 +13,7 @@ from .waveform_widget import WaveformWidget, WaveformStatus
 from app.core.audio_recorder import AudioRecorder # Import AudioRecorder
 from app.core.transcription_service import TranscriptionService
 from app.core.fabric_service import FabricService # <-- ADDED IMPORT
-from .workers import TranscriptionWorker, FabricListPatternsWorker # <-- IMPORTED FabricListPatternsWorker
+from .workers import TranscriptionWorker, FabricListPatternsWorker, LoadModelWorker # <-- IMPORTED LoadModelWorker
 
 # from app.utils.config_manager import ConfigManager # Will be used later
 
@@ -34,6 +34,8 @@ class MainWindow(QMainWindow):
         self.app_state = AppState.IDLE # Initialize app state
         self.last_saved_audio_path = None # To store path for post-processing
         self.close_after_transcription = False # New flag
+        self.current_model_size = "base" # Initialize before model selector
+        self.is_model_loading_busy = False # Flag for model loading
 
         # Set window flags: frameless and always on top
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
@@ -46,6 +48,32 @@ class MainWindow(QMainWindow):
         # Waveform display area
         self.waveform_widget = WaveformWidget()
         main_layout.addWidget(self.waveform_widget) # Add waveform widget to layout
+
+        # Top bar layout for model selector and minimize button
+        top_bar_layout = QHBoxLayout()
+        
+        # Model Size Selector
+        self.model_label = QLabel("Model:")
+        top_bar_layout.addWidget(self.model_label)
+        
+        self.model_size_selector = QComboBox()
+        self.model_size_selector.addItems(["tiny", "base", "small", "medium", "large"])
+        self.model_size_selector.setCurrentText(self.current_model_size)
+        self.model_size_selector.setToolTip("Select Whisper model size for transcription")
+        self.model_size_selector.currentTextChanged.connect(self._on_model_size_changed)
+        top_bar_layout.addWidget(self.model_size_selector)
+        
+        top_bar_layout.addStretch() # Pushes minimize button to the right
+
+        # Minimize button
+        self.minimize_button = QPushButton("Min") # Renamed from "-"
+        self.minimize_button.setToolTip("Minimize Window")
+        self.minimize_button.setFixedSize(40, 28)
+        self.minimize_button.clicked.connect(self.showMinimized)
+        # Place minimize button in a dedicated layout if more top-bar controls are needed
+        # For now, let's ensure it's distinct. A QHBoxLayout for top controls would be better.
+        top_bar_layout.addWidget(self.minimize_button)
+        main_layout.insertLayout(0, top_bar_layout) # Insert at the top
 
         # Control buttons layout
         controls_layout = QHBoxLayout()
@@ -76,40 +104,13 @@ class MainWindow(QMainWindow):
         controls_layout.addWidget(self.cancel_button)
         controls_layout.addWidget(self.transcribe_button)
         controls_layout.addWidget(self.fabric_button)
-        main_layout.addLayout(controls_layout) # Add controls layout to main vertical layout
+        main_layout.addLayout(controls_layout)
 
         # Status/Error Label
         self.status_label = QLabel("")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status_label.setWordWrap(True)
         main_layout.addWidget(self.status_label)
-
-        # Top bar layout for model selector and minimize button
-        top_bar_layout = QHBoxLayout()
-        
-        # Model Size Selector
-        self.model_label = QLabel("Model:")
-        top_bar_layout.addWidget(self.model_label)
-        
-        self.model_size_selector = QComboBox()
-        self.model_size_selector.addItems(["tiny", "base", "small", "medium", "large"])
-        self.model_size_selector.setCurrentText("base") # Default model
-        self.current_model_size = self.model_size_selector.currentText()
-        self.model_size_selector.setToolTip("Select Whisper model size for transcription")
-        self.model_size_selector.currentTextChanged.connect(self._on_model_size_changed)
-        top_bar_layout.addWidget(self.model_size_selector)
-        
-        top_bar_layout.addStretch() # Pushes minimize button to the right
-
-        # Minimize button
-        self.minimize_button = QPushButton("Min") # Renamed from "-"
-        self.minimize_button.setToolTip("Minimize Window")
-        self.minimize_button.setFixedSize(40, 28)
-        self.minimize_button.clicked.connect(self.showMinimized)
-        # Place minimize button in a dedicated layout if more top-bar controls are needed
-        # For now, let's ensure it's distinct. A QHBoxLayout for top controls would be better.
-        top_bar_layout.addWidget(self.minimize_button)
-        main_layout.insertLayout(0, top_bar_layout) # Insert at the top
 
         # Initialize AudioRecorder
         self.audio_recorder = AudioRecorder(parent=self)
@@ -162,13 +163,15 @@ class MainWindow(QMainWindow):
         """)
 
         # Set initial size (can be configurable later)
-        self.resize(350, 250) # Adjusted initial size for status label
+        self.resize(350, 300) # Adjusted initial size for status label
 
         # Make the window draggable (since it's frameless)
         self._drag_pos = None
 
         # Keyboard Shortcuts
         self._setup_shortcuts()
+
+        self._initiate_initial_model_load() # Trigger async model load
 
     def _setup_shortcuts(self):
         QShortcut(QKeySequence(Qt.Key.Key_R), self, self._on_rec_clicked)
@@ -344,19 +347,38 @@ class MainWindow(QMainWindow):
             # self._test_waveform_timer.stop()
 
     def _update_ui_for_state(self, old_state=None): # old_state can be used for more nuanced UI updates if needed
+        # Determine if model is ready and not busy loading
+        model_ready = (hasattr(self, 'transcription_service') and 
+                       self.transcription_service.model is not None and 
+                       not self.is_model_loading_busy)
+        
+        can_transcribe_or_fabric = model_ready or (self.app_state == AppState.IDLE and bool(self.last_saved_audio_path) and model_ready)
+        can_record = not self.is_model_loading_busy # Can record even if model loading for later use
+
+        # Initial state if model is loading
+        if self.is_model_loading_busy:
+            self.rec_button.setEnabled(False)
+            self.stop_button.setEnabled(False)
+            self.pause_button.setEnabled(False)
+            self.cancel_button.setEnabled(False)
+            self.transcribe_button.setEnabled(False)
+            self.fabric_button.setEnabled(False)
+            self.model_size_selector.setEnabled(False)
+            # Status message is set by _request_model_load
+            return # Skip further state updates while model is loading
+
         if self.app_state == AppState.IDLE:
             self.waveform_widget.set_status(WaveformStatus.IDLE)
-            self.rec_button.setEnabled(True)
+            self.rec_button.setEnabled(can_record)
             self.rec_button.setText("Rec")
             self.stop_button.setEnabled(False)
             self.pause_button.setEnabled(False)
             self.pause_button.setText("Pause")
             self.cancel_button.setEnabled(False)
-            self.transcribe_button.setEnabled(bool(self.last_saved_audio_path))
-            self.fabric_button.setEnabled(bool(self.last_saved_audio_path))
-            # Clear status message gently if it's not an error message
-            if not self.status_label.property("is_error"):
-                self._clear_status_message_after_delay()
+            self.transcribe_button.setEnabled(model_ready and bool(self.last_saved_audio_path))
+            self.fabric_button.setEnabled(model_ready and bool(self.last_saved_audio_path))
+            if not self.status_label.property("is_error") and not self.is_model_loading_busy:
+                 self._clear_status_message_after_delay()
         elif self.app_state == AppState.RECORDING:
             self.waveform_widget.set_status(WaveformStatus.RECORDING)
             self.rec_button.setEnabled(False) 
@@ -365,19 +387,19 @@ class MainWindow(QMainWindow):
             self.pause_button.setEnabled(True)
             self.pause_button.setText("Pause")
             self.cancel_button.setEnabled(True)
-            self.transcribe_button.setEnabled(True)
-            self.fabric_button.setEnabled(True)
+            self.transcribe_button.setEnabled(model_ready)
+            self.fabric_button.setEnabled(model_ready)
             self._set_status_message("Recording...")
         elif self.app_state == AppState.PAUSED:
             self.waveform_widget.set_status(WaveformStatus.IDLE) # Or a specific PAUSED color
-            self.rec_button.setEnabled(True)
+            self.rec_button.setEnabled(can_record)
             self.rec_button.setText("Resume") 
             self.stop_button.setEnabled(True)
             self.pause_button.setEnabled(False)
             # self.pause_button.setText("Resume") # Pause button does not resume in this logic
             self.cancel_button.setEnabled(True)
-            self.transcribe_button.setEnabled(True)
-            self.fabric_button.setEnabled(True)
+            self.transcribe_button.setEnabled(model_ready)
+            self.fabric_button.setEnabled(model_ready)
             self._set_status_message("Paused.")
         elif self.app_state == AppState.CANCELLING:
             self.waveform_widget.set_status(WaveformStatus.IDLE)
@@ -409,37 +431,34 @@ class MainWindow(QMainWindow):
             self.model_size_selector.setEnabled(False) # Disable model selection during transcription
             self._set_status_message(f"Transcribing ({self.current_model_size}): {os.path.basename(self.last_saved_audio_path) if self.last_saved_audio_path else '...'}")
             
-            # --- Reinstating TranscriptionWorker --- 
+            # --- Actual TranscriptionWorker Launch --- 
+            if self.is_model_loading_busy or self.transcription_service.model is None:
+                self._handle_transcription_error("Model is not ready or is currently loading.")
+                # No return here, _handle_transcription_error calls _post_action_cleanup which resets state
+                # Ensure _post_action_cleanup correctly enables model_selector if an error occurs mid-transcription setup
+                if self.app_state != AppState.IDLE: # If error handling didn't go to IDLE
+                     self._change_app_state(AppState.IDLE) # Force IDLE on critical error
+                self.model_size_selector.setEnabled(True) # Re-enable selector on error here
+                return # Critical: stop further execution in TRANSCRIBING if model not ready
+
+            # ... (rest of TranscriptionWorker setup from previous state, ensure it's still valid) ...
             if not self.last_saved_audio_path or not os.path.exists(self.last_saved_audio_path):
                 self._handle_transcription_error("Audio file path is missing or invalid for transcription.")
-                return
-            if not hasattr(self, 'transcription_service') or self.transcription_service is None:
-                self._handle_transcription_error("Transcription service not initialized.")
-                return
-            if not hasattr(self, 'thread_pool'):
-                self._handle_transcription_error("Thread pool not initialized for transcription worker.")
-                return
-            
-            # Ensure UI elements exist before trying to use them
-            if hasattr(self, 'transcription_text'):
-                self.transcription_text.clear()
-            if hasattr(self, 'progress_bar'):
-                self.progress_bar.setValue(0)
-                self.progress_bar.show()
+                return 
+            # ... (transcription_service and thread_pool checks should be fine as they are core attributes)
+            if hasattr(self, 'transcription_text'): self.transcription_text.clear()
+            if hasattr(self, 'progress_bar'): self.progress_bar.setValue(0); self.progress_bar.show()
             
             worker = TranscriptionWorker(
                 transcription_service=self.transcription_service, 
                 audio_path=self.last_saved_audio_path, 
-                language=None, # Explicitly set language to None for auto-detection
-                task="transcribe" # task is already a parameter in TranscriptionWorker
+                language=None, 
+                task="transcribe"
             )
             worker.signals.progress.connect(self._handle_transcription_progress)
             worker.signals.finished.connect(self._handle_transcription_finished)
             worker.signals.error.connect(self._handle_transcription_error)
             self.thread_pool.start(worker)
-            # --- End Reinstating TranscriptionWorker ---
-            
-            # QTimer.singleShot(3000, lambda: self._post_action_cleanup(True, "Transcription complete (simulated).")) # This was the incorrect simulation
 
         elif self.app_state == AppState.FABRIC_PROCESSING:
             self.waveform_widget.set_status(WaveformStatus.IDLE)
@@ -462,6 +481,10 @@ class MainWindow(QMainWindow):
             fabric_worker.signals.finished.connect(self._handle_fabric_patterns_listed)
             fabric_worker.signals.error.connect(self._handle_fabric_error)
             self.thread_pool.start(fabric_worker)
+
+        # Make sure model_size_selector gets re-enabled if not in a blocking state
+        if self.app_state not in [AppState.TRANSCRIBING, AppState.FABRIC_PROCESSING, AppState.STOPPING_FOR_ACTION, AppState.CANCELLING] and not self.is_model_loading_busy:
+            self.model_size_selector.setEnabled(True)
 
     def _apply_button_styles(self):
         button_style = """
@@ -585,18 +608,47 @@ class MainWindow(QMainWindow):
              self.audio_recorder.thread.wait()
         super().closeEvent(event)
 
-    def _set_status_message(self, message, is_error=False):
+    def _set_status_message(self, message, is_error=False, clear_automatically=True):
         self.status_label.setText(message)
+        self.status_label.setProperty("is_error", is_error) # Store error state
         if is_error:
             self.status_label.setStyleSheet("color: #f7768e; margin: 2px;") # Tokyo Night Red
         else:
             self.status_label.setStyleSheet("color: #c0caf5; margin: 2px;") # Tokyo Night Text
-        # Optionally, clear message after a delay for non-errors
-        if not is_error and message: 
-            QTimer.singleShot(5000, lambda: self.status_label.setText("") if self.status_label.text() == message else None)
+        
+        # Manage auto-clearing timer
+        if hasattr(self, '_status_clear_timer') and self._status_clear_timer.isActive():
+            self._status_clear_timer.stop()
+
+        if not is_error and clear_automatically and message:
+            if not hasattr(self, '_status_clear_timer'):
+                self._status_clear_timer = QTimer()
+                self._status_clear_timer.setSingleShot(True)
+                self._status_clear_timer.timeout.connect(self._clear_status_label_if_not_error)
+            
+            # Store the message that triggered this timer to avoid clearing a newer message
+            self._message_for_auto_clear = message 
+            self._status_clear_timer.start(5000) # Default 5s, can be parameter if needed
+        elif is_error or not clear_automatically:
+            # If it's an error or auto-clear is off, ensure no pending clear for a *previous* message happens
+            if hasattr(self, '_status_clear_timer') and self._status_clear_timer.isActive():
+                 self._status_clear_timer.stop()
+            self._message_for_auto_clear = None # No message is pending auto-clear
+
+    def _clear_status_label_if_not_error(self):
+        # Only clear if the current message is the one that scheduled the clear and it's not an error
+        if (hasattr(self, '_message_for_auto_clear') and 
+            self.status_label.text() == self._message_for_auto_clear and 
+            not self.status_label.property("is_error")):
+            self.status_label.setText("")
+            self._message_for_auto_clear = None # Reset
 
     def _clear_status_message(self):
         self.status_label.setText("")
+        self.status_label.setProperty("is_error", False)
+        if hasattr(self, '_status_clear_timer') and self._status_clear_timer.isActive():
+            self._status_clear_timer.stop()
+        self._message_for_auto_clear = None
 
     def _post_action_cleanup(self, success, message):
         """Called after transcribe/fabric (simulated) to reset state."""
@@ -615,25 +667,39 @@ class MainWindow(QMainWindow):
             #     except OSError as e:
             #         print(f"Error deleting temp file {self.last_saved_audio_path}: {e}")
         
-        # Do not automatically go to IDLE for fabric listing, 
-        # as we need to show the patterns or an error.
-        # The specific handlers will decide the next state, or user interaction will.
-        if self.app_state != AppState.FABRIC_PROCESSING: # Only go to IDLE if not in fabric processing
+        # Ensure model selector is enabled when returning to IDLE if not still loading
+        if not self.is_model_loading_busy:
+            self.model_size_selector.setEnabled(True)
+        # Only go to IDLE if not in fabric processing (which now manages its own return to IDLE)
+        # And also ensure we don't mess up if app is closing due to close_after_transcription
+        if self.app_state != AppState.FABRIC_PROCESSING and not (hasattr(self, 'close_after_transcription') and self.close_after_transcription):
              self._change_app_state(AppState.IDLE)
 
     def _clear_status_message_after_delay(self, delay_ms=3000):
-        if hasattr(self, '_status_clear_timer') and self._status_clear_timer.isActive():
-            self._status_clear_timer.stop()
-        
-        self._status_clear_timer = QTimer()
-        self._status_clear_timer.setSingleShot(True)
-        # Only clear if it's not an error and current message is the one we set
-        # This check is tricky if messages update rapidly. A simpler approach is to clear if not an error.
-        self._status_clear_timer.timeout.connect(lambda: {
-            self.status_label.setText(""),
-            self.status_label.setProperty("is_error", False) # Reset error state
-        } if not self.status_label.property("is_error") else None)
-        self._status_clear_timer.start(delay_ms)
+        # This method is now largely superseded by the logic in _set_status_message
+        # but is still called by _update_ui_for_state for IDLE state.
+        # We can simplify it or make _set_status_message handle this path too.
+        # For now, let it call _set_status_message with an empty string to trigger its logic.
+        if not self.status_label.property("is_error") and self.status_label.text():
+            # Call _set_status_message which will schedule a clear if appropriate
+            # This feels a bit indirect. Let's refine _set_status_message or this one.
+            # Keeping existing timer logic here for now to minimize disruption for IDLE state clearing
+            if hasattr(self, '_status_idle_clear_timer') and self._status_idle_clear_timer.isActive():
+                self._status_idle_clear_timer.stop()
+            
+            if not hasattr(self, '_status_idle_clear_timer'):
+                self._status_idle_clear_timer = QTimer()
+                self._status_idle_clear_timer.setSingleShot(True)
+                self._status_idle_clear_timer.timeout.connect(self._clear_status_label_if_not_error_idle)
+            self._message_for_idle_clear = self.status_label.text()
+            self._status_idle_clear_timer.start(delay_ms)
+
+    def _clear_status_label_if_not_error_idle(self):
+        if (hasattr(self, '_message_for_idle_clear') and 
+            self.status_label.text() == self._message_for_idle_clear and 
+            not self.status_label.property("is_error")):
+            self.status_label.setText("")
+            self._message_for_idle_clear = None
 
     @Slot(int, str, dict)
     def _handle_transcription_progress(self, percentage, current_text, lang_info):
@@ -700,29 +766,68 @@ class MainWindow(QMainWindow):
             self._set_status_message(f"Found {len(patterns)} Fabric patterns. Check console.")
             # Here you would typically open a dialog for pattern selection.
             # For now, just going back to IDLE after a delay.
-            QTimer.singleShot(1000, lambda: self._change_app_state(AppState.IDLE))
+            QTimer.singleShot(1000, lambda: self._change_app_state(AppState.IDLE) if not self.is_model_loading_busy else None)
         else:
             self._set_status_message("No Fabric patterns found.")
-            QTimer.singleShot(1000, lambda: self._change_app_state(AppState.IDLE))
+            QTimer.singleShot(1000, lambda: self._change_app_state(AppState.IDLE) if not self.is_model_loading_busy else None)
+        if not self.is_model_loading_busy : self.model_size_selector.setEnabled(True)
 
     @Slot(str) # Slot for error messages from FabricListPatternsWorker
     def _handle_fabric_error(self, error_message):
         print(f"Fabric Service Error: {error_message}")
         self._set_status_message(f"Fabric Error: {error_message}", is_error=True)
         # Decide on next state, perhaps IDLE after showing error
-        QTimer.singleShot(1000, lambda: self._change_app_state(AppState.IDLE))
+        QTimer.singleShot(1000, lambda: self._change_app_state(AppState.IDLE) if not self.is_model_loading_busy else None)
+        if not self.is_model_loading_busy : self.model_size_selector.setEnabled(True)
 
     @Slot(str)
     def _on_model_size_changed(self, selected_model):
         self.current_model_size = selected_model
-        print(f"UI: Model size changed to: {self.current_model_size}")
-        if hasattr(self, 'transcription_service') and self.transcription_service is not None:
-            # Call the new set_model method. Assuming default device and compute_type
-            # unless we want to make those configurable in the UI as well.
-            self.transcription_service.set_model(model_name=self.current_model_size)
+        print(f"UI: Model size selection changed to: {self.current_model_size}")
+        # Trigger reload using the service's current device/compute_type settings
+        self._request_model_load(self.current_model_size, 
+                                 self.transcription_service.device, 
+                                 self.transcription_service.compute_type)
+
+    def _initiate_initial_model_load(self):
+        initial_model = self.model_size_selector.currentText() # or self.current_model_size
+        # Use device/compute_type from service, which are its defaults or from config
+        self._request_model_load(initial_model, 
+                                 self.transcription_service.device, 
+                                 self.transcription_service.compute_type)
+
+    def _request_model_load(self, model_name, device, compute_type):
+        if self.is_model_loading_busy:
+            print(f"Model loading is already busy. Request to load {model_name} ignored for now.")
+            # Optionally, could queue requests or cancel previous, but keep it simple first.
+            return
+
+        self.is_model_loading_busy = True
+        self._set_status_message(f"Loading model: {model_name}...", clear_automatically=False)
+        self._update_ui_for_state() # Reflect loading state (buttons disabled etc)
+
+        worker = LoadModelWorker(self.transcription_service, model_name, device, compute_type)
+        # The finished signal from LoadModelWorker emits a tuple: (bool_success, str_message)
+        worker.signals.finished.connect(self._handle_model_load_finished)
+        # If LoadModelWorker also has an error signal for setup issues:
+        # worker.signals.error.connect(self._handle_model_load_error_slot) # Or handle in finished
+        self.thread_pool.start(worker)
+
+    @Slot(object) # Receives tuple (bool, str) from LoadModelWorker's finished signal
+    def _handle_model_load_finished(self, result_tuple):
+        self.is_model_loading_busy = False
+        success, message = result_tuple # Unpack the tuple
+
+        if success:
+            loaded_model_name = message # On success, message is the model name
+            self._set_status_message(f"Model '{loaded_model_name}' loaded.", clear_automatically=True)
+            print(f"Model {loaded_model_name} loaded successfully via worker.")
         else:
-            print("UI Warning: Transcription service not available to set model.")
-        # Future: May trigger saving to config or notifying other components.
+            error_detail = message # On failure, message is the error string
+            self._set_status_message(f"Error loading model: {error_detail}", is_error=True, clear_automatically=False)
+            print(f"Failed to load model via worker: {error_detail}")
+        
+        self._update_ui_for_state() # Refresh UI based on new model state
 
 if __name__ == '__main__':
     # This is for testing the window directly

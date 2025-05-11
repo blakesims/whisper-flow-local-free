@@ -1,10 +1,18 @@
 from PySide6.QtCore import QObject, Signal, Slot, QRunnable
 
 class WorkerSignals(QObject):
-    """ Generic signals for workers """
-    finished = Signal(object)  # Can emit various types of results
+    """
+    Defines signals available from a QRunnable worker.
+    Supported signals are:
+    - progress: int, str, dict (percentage, current_text, lang_info)
+    - finished: dict (result from transcription)
+               OR bool, str (success, model_name_or_error for model loading)
+               OR list (patterns for fabric listing)
+    - error: str (error_message)
+    """
+    progress = Signal(int, str, dict)
+    finished = Signal(object) # Using generic object to handle different finished payloads
     error = Signal(str)
-    progress = Signal(int, str, dict) # Kept for TranscriptionWorker compatibility, can be adapted
 
 class TranscriptionWorker(QRunnable):
     """
@@ -26,12 +34,12 @@ class TranscriptionWorker(QRunnable):
         self.audio_path = audio_path
         self.language = language
         self.task = task
-        self.signals = WorkerSignals() # Use the generic signals object
-        
+        self.signals = WorkerSignals()
         # Connect internal signals to the class-level signals (or rather, the user connects to these)
-        self.progressUpdated = self.signals.progress
-        self.transcriptionFinished = self.signals.finished
-        self.transcriptionError = self.signals.error
+        # These direct assignments were problematic. User should connect to self.signals.progress etc.
+        # self.progressUpdated = self.signals.progress 
+        # self.transcriptionFinished = self.signals.finished
+        # self.transcriptionError = self.signals.error
 
     def _progress_callback(self, percentage, current_text, detected_lang_info):
         self.signals.progress.emit(percentage, current_text, detected_lang_info)
@@ -67,7 +75,7 @@ class FabricListPatternsWorker(QRunnable):
     def __init__(self, fabric_service):
         super().__init__()
         self.fabric_service = fabric_service
-        self.signals = WorkerSignals() # Use the generic signals object
+        self.signals = WorkerSignals()
 
     @Slot()
     def run(self):
@@ -75,13 +83,52 @@ class FabricListPatternsWorker(QRunnable):
         Execute the pattern listing task.
         """
         if not self.fabric_service:
-            self.signals.error.emit("FabricService not provided to worker.")
+            self.signals.error.emit("Fabric service not properly initialized for worker.")
             return
         try:
             patterns = self.fabric_service.list_patterns()
-            if patterns is not None: # list_patterns returns None on error, or [] if empty but successful
-                self.signals.finished.emit(patterns) # Emit list of patterns
-            else:
-                self.signals.error.emit("Failed to list Fabric patterns. Service returned None.")
+            self.signals.finished.emit(patterns) # Emits list for fabric patterns
         except Exception as e:
-            self.signals.error.emit(f"Error listing Fabric patterns: {str(e)}") 
+            self.signals.error.emit(f"Error listing Fabric patterns: {str(e)}")
+
+class LoadModelWorker(QRunnable):
+    """
+    Worker thread for loading the transcription model to avoid blocking the UI.
+    """
+    def __init__(self, transcription_service, model_name, device, compute_type):
+        super().__init__()
+        self.transcription_service = transcription_service
+        self.model_name = model_name
+        self.device = device
+        self.compute_type = compute_type
+        self.signals = WorkerSignals()
+
+    @Slot()
+    def run(self):
+        """Execute the model loading task."""
+        if not self.transcription_service:
+            self.signals.error.emit("LoadModelWorker: Transcription service instance not provided.")
+            # Or self.signals.finished.emit(False, "Transcription service not provided") if using finished for status
+            return
+
+        try:
+            # Configure the service with the target model details
+            self.transcription_service.set_target_model_config(
+                model_name=self.model_name, 
+                device=self.device, 
+                compute_type=self.compute_type
+            )
+            # Perform the synchronous (blocking) load within this worker thread
+            self.transcription_service._load_model()
+            
+            success = self.transcription_service.model is not None
+            if success:
+                # Emit model_name as the success message part
+                self.signals.finished.emit((True, self.model_name)) 
+            else:
+                self.signals.finished.emit((False, f"Failed to load {self.model_name}"))
+        except Exception as e:
+            error_msg = f"Error during model load ({self.model_name}): {str(e)}"
+            print(error_msg) # Also print to console for debugging
+            self.signals.finished.emit((False, error_msg))
+            # Or: self.signals.error.emit(error_msg) if we want separate error signal handling 

@@ -18,54 +18,76 @@ class TranscriptionService:
             config_manager (ConfigManager, optional): Instance of ConfigManager.
         """
         self.config_manager = config_manager
-        self.model_name = "base"
-        self.device = "cpu"
-        self.compute_type = "int8"
-        self.model = None
-        
+        self.model_name = "base"  # Default model name
+        self.device = "cpu"       # Default device
+        self.compute_type = "int8" # Default compute type
+        self.model = None         # Model will be loaded on demand
+
         if self.config_manager:
             self.model_name = self.config_manager.get("transcription_model_name", self.model_name)
             self.device = self.config_manager.get("transcription_device", self.device)
             self.compute_type = self.config_manager.get("transcription_compute_type", self.compute_type)
         
-        self._load_model()
+        # DO NOT load model here: self._load_model() 
 
     def _load_model(self):
+        """
+        Synchronously loads the Whisper model based on current attributes.
+        This is intended to be called by a background worker.
+        """
+        if self.model_name is None: # Should not happen if set_target_model_config is called first
+            print("Error: Model name not specified for loading.")
+            self.model = None
+            return
+
         print(f"Loading Whisper model: {self.model_name} (compute: {self.compute_type} on device: {self.device})")
         try:
-            # faster-whisper handles its own model caching.
             self.model = WhisperModel(self.model_name, device=self.device, compute_type=self.compute_type)
             print(f"Model {self.model_name} loaded successfully.")
         except Exception as e:
             print(f"Error loading Whisper model {self.model_name}: {e}")
-            self.model = None
+            self.model = None # Ensure model is None on failure
 
-    def reload_model_with_config(self):
+    def set_target_model_config(self, model_name: str, device: str = None, compute_type: str = None):
+        """
+        Updates the target model configuration. Does not load the model.
+        Sets self.model to None as the configuration has changed.
+        """
+        print(f"Setting target model config to: Name={model_name}, Device={device or self.device}, Compute={compute_type or self.compute_type}")
+        self.model_name = model_name
+        if device is not None:
+            self.device = device
+        if compute_type is not None:
+            self.compute_type = compute_type
+        self.model = None # Configuration changed, invalidate currently loaded model (if any)
+
+    def reload_model_with_config(self): # This method might need re-evaluation or become a trigger for async load
         """
         Reloads the model based on current settings from ConfigManager or defaults.
-        Useful if transcription settings (model_name, device, compute_type) are changed.
+        This should ideally trigger an asynchronous load process if used.
+        For now, it's less relevant if MainWindow controls loading via set_target_model_config + worker.
         """
-        if self.config_manager:
-            new_model_name = self.config_manager.get("transcription_model_name", "base")
-            new_device = self.config_manager.get("transcription_device", "cpu")
-            new_compute_type = self.config_manager.get("transcription_compute_type", "int8")
-        else:
-            # Fallback to current or default if no config manager
-            new_model_name = self.model_name
-            new_device = self.device
-            new_compute_type = self.compute_type
+        # This method's direct call to _load_model is problematic for async UI.
+        # It's better if MainWindow handles triggering reloads.
+        # Consider deprecating or refactoring this if MainWindow manages all load triggers.
+        print("reload_model_with_config: This method should be used cautiously or refactored for async operation via MainWindow.")
+        # For now, let's make it update config and MainWindow would have to notice or be told to reload.
+        current_model_name = self.model_name
+        current_device = self.device
+        current_compute_type = self.compute_type
 
-        if (new_model_name != self.model_name or
-            new_device != self.device or
-            new_compute_type != self.compute_type or
-            self.model is None):
-            
-            self.model_name = new_model_name
-            self.device = new_device
-            self.compute_type = new_compute_type
-            self._load_model()
+        if self.config_manager:
+            self.model_name = self.config_manager.get("transcription_model_name", self.model_name)
+            self.device = self.config_manager.get("transcription_device", self.device)
+            self.compute_type = self.config_manager.get("transcription_compute_type", self.compute_type)
+        
+        if (self.model_name != current_model_name or 
+            self.device != current_device or 
+            self.compute_type != current_compute_type):
+            self.model = None # Config changed
+            print("Model configuration updated from ConfigManager. UI should trigger reload if needed.")
         else:
-            print("Model configuration hasn't changed. Not reloading.")
+            print("Model configuration from ConfigManager matches current. No change to service state.")
 
     def get_model_details(self):
         """Returns current model details."""
@@ -76,57 +98,16 @@ class TranscriptionService:
             "loaded": self.model is not None
         }
 
-    def set_model(self, model_name: str, device: str = None, compute_type: str = None):
-        """
-        Sets a new model name and reloads the model.
-        Device and compute_type can also be updated, otherwise existing ones are used.
-        """
-        should_reload = False
-        if model_name != self.model_name:
-            self.model_name = model_name
-            should_reload = True
-        
-        # Use existing if None is passed for device/compute_type
-        current_device = device if device is not None else self.device
-        current_compute_type = compute_type if compute_type is not None else self.compute_type
-
-        if current_device != self.device:
-            self.device = current_device
-            should_reload = True
-        
-        if current_compute_type != self.compute_type:
-            self.compute_type = current_compute_type
-            should_reload = True
-            
-        if should_reload or self.model is None:
-            # self.model_name is already updated if it changed
-            print(f"Setting new model configuration: {self.model_name}, Device: {self.device}, Compute: {self.compute_type}")
-            self._load_model() # _load_model uses self.model_name, self.device, self.compute_type
-        else:
-            print(f"Model configuration ({model_name}) hasn't changed significantly. Not reloading.")
-
     def transcribe(self, audio_path: str, language: str = None, task: str = "transcribe", beam_size: int = 5, progress_callback=None):
-        """
-        Transcribes the given audio file.
-
-        Args:
-            audio_path (str): Path to the audio file.
-            language (str, optional): Language code (e.g., "en", "es"). Defaults to None (auto-detect).
-            task (str, optional): "transcribe" or "translate". Defaults to "transcribe".
-            beam_size (int, optional): Beam size for transcription. Defaults to 5.
-            progress_callback (function, optional): A function to call with progress updates.
-                                                  It receives (percentage, current_text, detected_language_info dict or None).
-
-        Returns:
-            dict: A dictionary containing {
-                'text': str, 
-                'detected_language': str or None, 
-                'language_probability': float or None
-            }, or None if transcription fails.
-        """
         if not self.model:
-            print("Transcription model is not loaded. Cannot transcribe.")
-            return None
+            # This check is now more critical as model loading is deferred
+            print("Transcription model is not loaded or is invalid. Cannot transcribe.")
+            # Try to load the configured model synchronously as a last resort?
+            # Or better, ensure UI prevents transcription if model isn't loaded.
+            # For now, just return None. The UI should manage this state.
+            # self._load_model() # Avoid synchronous load here during a transcribe call if UI expects async
+            # if not self.model:
+            return None # Return None if model isn't ready
         if not os.path.exists(audio_path):
             print(f"Audio file not found: {audio_path}")
             return None
@@ -135,16 +116,13 @@ class TranscriptionService:
             print(f"Transcribing {audio_path} (lang: {language or 'auto'}, task: {task})...")
             segments_generator, info = self.model.transcribe(
                 audio_path,
-                language=language, # Pass explicitly specified language
+                language=language, 
                 task=task,
                 beam_size=beam_size
             )
 
             detected_lang_info = None
-            if language is None: # Auto-detection was used
-                # info.language and info.language_probability are available after the first segment
-                # For now, we will report it once at the beginning and at the end.
-                # A more sophisticated approach might update it if it changes (though unlikely for a single file)
+            if language is None: 
                 print(f"Detected language: {info.language} (probability: {info.language_probability:.2f})")
                 detected_lang_info = {
                     "language": info.language,
@@ -152,7 +130,7 @@ class TranscriptionService:
                 }
             
             transcription_text_parts = []
-            total_duration_ms = info.duration * 1000  # Convert to milliseconds
+            total_duration_ms = info.duration * 1000
             first_segment = True
 
             for segment in segments_generator:
@@ -163,26 +141,22 @@ class TranscriptionService:
                     progress_percentage = min(100, int((segment.end * 1000 / total_duration_ms) * 100))
                 
                 if progress_callback:
-                    # Pass detected_lang_info. It becomes available after the first call to transcribe internal logic.
-                    # If language was specified, detected_lang_info remains None (or could be set to the specified lang).
-                    # For simplicity, only passing it when auto-detected.
                     callback_lang_info = detected_lang_info if language is None and first_segment else None
                     progress_callback(progress_percentage, current_text, callback_lang_info)
                     if first_segment and callback_lang_info:
-                        first_segment = False # Sent it once
+                        first_segment = False
             
             transcription_text = "".join(transcription_text_parts)
             
             final_detected_language = None
             final_language_probability = None
-            if detected_lang_info: # If auto-detection was on
+            if detected_lang_info:
                 final_detected_language = detected_lang_info["language"]
                 final_language_probability = detected_lang_info["probability"]
-            elif language: # If a language was specified by the user
-                final_detected_language = language # Reflect the user's choice as the "effective" language
+            elif language: 
+                final_detected_language = language
 
             if progress_callback:
-                # For the final callback, pass the consolidated detected language info
                 final_cb_lang_info = {"language": final_detected_language, "probability": final_language_probability} if final_detected_language else None
                 progress_callback(100, transcription_text, final_cb_lang_info)
 
