@@ -29,24 +29,24 @@ Integrate the fabric CLI with the application, enabling post-processing of trans
 ## Phases Breakdown
 
 ### Phase 1: Fabric CLI Integration
-**Status**: Blocked
+**Status**: Mostly Done, Blocked (run_pattern)
 
 **Objectives**:
 - Create service for interacting with fabric CLI - **Done** (`app.core.fabric_service.py` created with `FabricService` class)
-- Implement pattern listing functionality (`fabric -l`) - **Done** (`list_patterns` method implemented)
-- Develop process execution and output capture - **Done** (Using `subprocess.run` with stdin)
+- Implement pattern listing functionality (`fabric -l`) - **Done** (`list_patterns` method implemented and UI integrated)
+- Develop process execution and output capture - **Done** (Using `subprocess.run` with stdin for `list_patterns`; `run_pattern` structure in place)
 - Create error handling for CLI operations - **Done** (Implemented for common subprocess errors, enhanced for API issues)
-- Test basic fabric integration - **Blocked** (Underlying `fabric` CLI calls are failing due to an Anthropic API credit issue. `FabricService` itself is likely correct.)
+- Test basic fabric integration - **Blocked** (`run_pattern` execution is blocked by an external Anthropic API credit issue. `FabricService.list_patterns` is tested and working through the UI.)
 
-**Actual Time**: ~1 day (Initial service implementation, multiple rounds of testing and refinement)
+**Actual Time**: ~1.2 days (Initial service implementation, multiple rounds of testing, refinement, and initial UI integration for listing)
 
 **Summary of Changes**:
 - Created `app.core.fabric_service.py`.
 - Implemented `FabricService` class with:
     - `__init__(self, fabric_executable_path="fabric")`
-    - `list_patterns(self)`: Executes `fabric -l` and parses plain text output.
-    - `run_pattern(self, pattern_name: str, text_input: str)`: Executes `fabric --pattern <pattern_name>` piping `text_input` to stdin. Includes enhanced error detection for API issues.
-- Testing revealed that `fabric` CLI execution fails due to an external Anthropic API credit balance problem.
+    - `list_patterns(self)`: Executes `fabric -l` and parses plain text output. Confirmed working via UI integration.
+    - `run_pattern(self, pattern_name: str, text_input: str)`: Executes `fabric --pattern <pattern_name>` piping `text_input` to stdin. Includes enhanced error detection for API issues. Execution is currently blocked by an external API issue.
+- Testing revealed that `fabric` CLI execution for `run_pattern` fails due to an external Anthropic API credit balance problem. `list_patterns` is functional.
 
 **Estimated Time**: 2 days
 
@@ -59,24 +59,34 @@ Integrate the fabric CLI with the application, enabling post-processing of trans
 - T004#P1 completion
 
 ### Phase 2: Pattern Selection Interface
-**Status**: Not Started
+**Status**: In Progress
 
 **Objectives**:
-- Implement fuzzy search component for pattern selection
-- Create pattern selection dialog/modal
-- Develop pattern preview functionality if applicable
-- Implement keyboard navigation for pattern selection
-- Test search performance with large pattern lists
+- Implement fuzzy search component for pattern selection - **Partially Done** (Basic substring search implemented in `PatternSelectionDialog`. True fuzzy search requested as an improvement.)
+- Create pattern selection dialog/modal - **Done** (`app.ui.pattern_selection_dialog.PatternSelectionDialog` created and integrated.)
+- Develop pattern preview functionality if applicable - Not Started
+- Implement keyboard navigation for pattern selection - **Partially Done** (Basic list widget navigation exists. Enhanced arrow key selection and interaction requested.)
+- Test search performance with large pattern lists - Not Started (Dialog handles many items, but dedicated performance test pending.)
+
+**Actual Time**: ~1 day (Dialog creation, worker for listing, MainWindow integration for dialog display)
+
+**Summary of Changes**:
+- Created `app.ui.pattern_selection_dialog.py` with `PatternSelectionDialog` class featuring a search bar and list widget.
+- Integrated `FabricListPatternsWorker` into `MainWindow` to fetch patterns.
+- `MainWindow` now displays the `PatternSelectionDialog` when patterns are successfully listed.
+- Implemented new `AppState` members (`PREPARING_FABRIC`, `RUNNING_FABRIC_PATTERN`) and associated logic in `MainWindow` to manage the Fabric workflow up to pattern selection.
+- Added `FabricRunPatternWorker` for executing selected patterns (execution still depends on Phase 1 unblocking).
+- Basic substring search is functional in the dialog.
 
 **Estimated Time**: 2 days
 
 **Resources Needed**:
-- Fuzzy search library documentation
+- Fuzzy search library documentation (e.g., `thefuzz`, `rapidfuzz`)
 - Qt dialog implementation examples
 - UX guidelines for search interfaces
 
 **Dependencies**:
-- Phase 1 completion
+- Phase 1 completion (especially unblocking of `run_pattern`)
 - T002#P3 completion
 
 ### Phase 3: Workflow Implementation
@@ -84,7 +94,7 @@ Integrate the fabric CLI with the application, enabling post-processing of trans
 
 **Objectives**:
 - Develop workflow for direct transcription paste
-- Implement workflow for fabric pattern processing
+- Implement workflow for fabric pattern processing - **Partially Started** (UI flow up to pattern execution worker is in place)
 - Create transition between transcription and fabric processing
 - Implement user choice mechanisms in the UI
 - Test full workflow integration
@@ -118,4 +128,8 @@ Integrate the fabric CLI with the application, enabling post-processing of trans
 **Dependencies**:
 - Phase 3 completion
 
-## Notes & Updates 
+## Notes & Updates
+- **Pattern Selection Dialog Improvements (Phase 2):**
+    - Implement more robust fuzzy search (e.g., using a library like `thefuzz` or `rapidfuzz`) instead of basic substring matching.
+    - Enhance keyboard navigation within the pattern list (e.g., ensure arrow keys reliably move selection, Enter key on selected item accepts).
+- **Blocker (Phase 1):** The `run_pattern` functionality of `FabricService` is currently blocked due to an Anthropic API credit issue. This needs to be resolved to fully test Phase 1 and proceed with `run_pattern` dependent parts of Phase 3. 
