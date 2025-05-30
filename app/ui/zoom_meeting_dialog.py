@@ -83,6 +83,7 @@ class ZoomMeetingDialog(QDialog):
     def _scan_zoom_meetings(self):
         """Scan ~/Documents/Zoom for meeting folders."""
         zoom_dir = Path.home() / "Documents" / "Zoom"
+        print(f"DEBUG: Looking for Zoom directory at: {zoom_dir}")
         
         if not zoom_dir.exists():
             self.details_label.setText(
@@ -99,12 +100,15 @@ class ZoomMeetingDialog(QDialog):
         
         meetings = []
         
+        print(f"DEBUG: Scanning {len(list(zoom_dir.iterdir()))} items in Zoom directory")
+        
         for folder in sorted(zoom_dir.iterdir(), reverse=True):
             if not folder.is_dir():
                 continue
             
             match = folder_pattern.match(folder.name)
             if not match:
+                print(f"DEBUG: Folder doesn't match pattern: {folder.name}")
                 continue
             
             date_str, time_str, host_name = match.groups()
@@ -112,10 +116,12 @@ class ZoomMeetingDialog(QDialog):
             # Check for audio files
             audio_dir = folder / "Audio Record"
             if not audio_dir.exists():
+                print(f"DEBUG: No Audio Record folder in: {folder.name}")
                 continue
             
             # Find audio files
             audio_files = list(audio_dir.glob("audio*.m4a"))
+            print(f"DEBUG: Found {len(audio_files)} audio files in {folder.name}")
             if len(audio_files) < 2:
                 continue  # Need at least 2 participants
             

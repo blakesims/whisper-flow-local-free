@@ -359,48 +359,71 @@ class MainWindow(QMainWindow):
             self._set_status_message("No file selected.")
 
     def _on_meeting_clicked(self):
+        print("DEBUG: Meeting button clicked")
         self._clear_status_message()
         self.close_after_transcription = False
         self.is_meeting_mode = True
         
         # Show Zoom meeting selection dialog
         dialog = ZoomMeetingDialog(self)
+        print("DEBUG: Created ZoomMeetingDialog")
         dialog.files_selected.connect(self._on_zoom_meeting_selected)
+        print("DEBUG: Connected files_selected signal")
         
-        if dialog.exec() == QDialog.DialogCode.Accepted:
+        result = dialog.exec()
+        print(f"DEBUG: Dialog result: {result}, Accepted: {QDialog.DialogCode.Accepted}")
+        
+        if result == QDialog.DialogCode.Accepted:
             # Files were selected, handled by signal
-            pass
+            print("DEBUG: Dialog accepted")
         else:
             # Dialog was cancelled
+            print("DEBUG: Dialog cancelled")
             self.is_meeting_mode = False
             self._set_status_message("Meeting selection cancelled.")
     
     def _on_zoom_meeting_selected(self, file_paths: list, participant_names: list, meeting_dir: str = None):
         """Handle Zoom meeting selection from dialog."""
-        if file_paths and len(file_paths) >= 2:
-            self.meeting_audio_files = file_paths
-            self.meeting_participant_names = participant_names  # Store participant names
-            self.selected_meeting_dir = meeting_dir  # Store meeting directory
-            
-            self._set_status_message(f"Selected meeting with {len(file_paths)} participants")
-            
-            # Show selected meeting info in the transcription text area
-            meeting_info = "📅 Selected Zoom meeting:\n\n"
-            meeting_info += "👥 Participants:\n"
-            for i, (name, path) in enumerate(zip(participant_names, file_paths), 1):
-                file_name = os.path.basename(path)
-                file_size_mb = os.path.getsize(path) / (1024 * 1024)
-                meeting_info += f"  {i}. {name} - {file_name} ({file_size_mb:.1f} MB)\n"
-            
-            meeting_info += "\n📊 Transcription Progress:\n"
-            meeting_info += "Preparing to transcribe...\n"
-            
-            self.transcription_text.setPlainText(meeting_info)
-            
-            # Start meeting transcription process
-            self._change_app_state(AppState.MEETING_TRANSCRIBING)
-        else:
-            self._set_status_message("Invalid meeting selection.", is_error=True)
+        print(f"DEBUG: _on_zoom_meeting_selected called with {len(file_paths) if file_paths else 0} files")
+        print(f"DEBUG: Meeting dir: {meeting_dir}")
+        
+        try:
+            if file_paths and len(file_paths) >= 2:
+                self.meeting_audio_files = file_paths
+                self.meeting_participant_names = participant_names  # Store participant names
+                self.selected_meeting_dir = meeting_dir  # Store meeting directory
+                
+                self._set_status_message(f"Selected meeting with {len(file_paths)} participants")
+                
+                # Show selected meeting info in the transcription text area
+                meeting_info = "📅 Selected Zoom meeting:\n\n"
+                meeting_info += "👥 Participants:\n"
+                for i, (name, path) in enumerate(zip(participant_names, file_paths), 1):
+                    file_name = os.path.basename(path)
+                    try:
+                        file_size_mb = os.path.getsize(path) / (1024 * 1024)
+                        meeting_info += f"  {i}. {name} - {file_name} ({file_size_mb:.1f} MB)\n"
+                    except Exception as e:
+                        meeting_info += f"  {i}. {name} - {file_name} (Error: {e})\n"
+                        print(f"DEBUG: Error getting file size for {path}: {e}")
+                
+                meeting_info += "\n📊 Transcription Progress:\n"
+                meeting_info += "Preparing to transcribe...\n"
+                
+                self.transcription_text.setPlainText(meeting_info)
+                
+                # Start meeting transcription process
+                print(f"DEBUG: Changing state to MEETING_TRANSCRIBING")
+                self._change_app_state(AppState.MEETING_TRANSCRIBING)
+            else:
+                self._set_status_message("Invalid meeting selection.", is_error=True)
+                self.is_meeting_mode = False
+                print(f"DEBUG: Invalid meeting selection - only {len(file_paths) if file_paths else 0} files")
+        except Exception as e:
+            print(f"ERROR in _on_zoom_meeting_selected: {e}")
+            import traceback
+            traceback.print_exc()
+            self._set_status_message(f"Error processing meeting: {str(e)}", is_error=True)
             self.is_meeting_mode = False
     
     def _on_minimize_clicked(self):
@@ -450,7 +473,7 @@ class MainWindow(QMainWindow):
             if not (self.app_state == AppState.PAUSED and new_state == AppState.RECORDING): # from pause to record
                  return
 
-        print(f"Changing app state from {self.app_state} to {new_state}")
+        print(f"DEBUG: Changing app state from {self.app_state} to {new_state}")
         old_state = self.app_state
         self.app_state = new_state
         self._update_ui_for_state(old_state)
@@ -661,6 +684,7 @@ class MainWindow(QMainWindow):
             self.thread_pool.start(run_worker)
 
         elif self.app_state == AppState.MEETING_TRANSCRIBING:
+            print("DEBUG: Entered MEETING_TRANSCRIBING state handler")
             self.waveform_widget.set_status(WaveformStatus.IDLE)
             self.rec_button.setEnabled(False)
             self.stop_button.setEnabled(False)
@@ -674,10 +698,12 @@ class MainWindow(QMainWindow):
             
             # Check if we have the necessary data
             if not self.meeting_audio_files or len(self.meeting_audio_files) < 2:
+                print(f"DEBUG: Meeting error - only {len(self.meeting_audio_files) if self.meeting_audio_files else 0} files")
                 self._handle_meeting_error("No audio files selected for meeting transcription")
                 return
             
             if self.is_model_loading_busy or self.transcription_service.model is None:
+                print(f"DEBUG: Model not ready - loading_busy: {self.is_model_loading_busy}, model: {self.transcription_service.model}")
                 self._handle_meeting_error("Model is not ready for meeting transcription")
                 return
             
@@ -688,21 +714,29 @@ class MainWindow(QMainWindow):
                 self.progress_bar.setValue(0)
                 self.progress_bar.show()
             
-            # Create and start meeting transcription worker
-            meeting_worker = MeetingTranscriptionWorker(
-                transcription_service=self.transcription_service,
+            print(f"DEBUG: Creating MeetingTranscriptionWorker with {len(self.meeting_audio_files)} files")
+            try:
+                # Create and start meeting transcription worker
+                meeting_worker = MeetingTranscriptionWorker(
+                    transcription_service=self.transcription_service,
                 audio_files=self.meeting_audio_files,
                 participant_names=self.meeting_participant_names,
                 language=None,  # Auto-detect
                 task="transcribe"
             )
             
-            meeting_worker.signals.progress.connect(self._handle_meeting_progress)
-            meeting_worker.signals.file_progress.connect(self._handle_meeting_file_progress)
-            meeting_worker.signals.finished.connect(self._handle_meeting_finished)
-            meeting_worker.signals.error.connect(self._handle_meeting_error)
-            
-            self.thread_pool.start(meeting_worker)
+                meeting_worker.signals.progress.connect(self._handle_meeting_progress)
+                meeting_worker.signals.file_progress.connect(self._handle_meeting_file_progress)
+                meeting_worker.signals.finished.connect(self._handle_meeting_finished)
+                meeting_worker.signals.error.connect(self._handle_meeting_error)
+                
+                print("DEBUG: Starting meeting worker in thread pool")
+                self.thread_pool.start(meeting_worker)
+            except Exception as e:
+                print(f"ERROR creating/starting meeting worker: {e}")
+                import traceback
+                traceback.print_exc()
+                self._handle_meeting_error(f"Failed to start meeting transcription: {str(e)}")
 
         elif self.app_state == AppState.MEETING_ENHANCING:
             self.waveform_widget.set_status(WaveformStatus.IDLE)
