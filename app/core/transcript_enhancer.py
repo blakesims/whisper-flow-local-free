@@ -1,0 +1,299 @@
+"""
+Service for enhancing meeting transcripts with visual elements.
+"""
+
+import os
+import json
+from pathlib import Path
+from typing import List, Dict, Optional, Tuple
+from datetime import datetime
+
+from .meeting_transcript import MeetingTranscript, TranscriptSegment
+from .gemini_service import GeminiService, VisualPoint
+from .video_extractor import VideoExtractor
+
+
+class TranscriptEnhancer:
+    """Enhance meeting transcripts with visual confirmation points and extracted images."""
+    
+    def __init__(
+        self,
+        gemini_api_key: Optional[str] = None,
+        video_quality: int = 95
+    ):
+        """
+        Initialize transcript enhancer.
+        
+        Args:
+            gemini_api_key: Google API key for Gemini
+            video_quality: JPEG quality for extracted frames (1-100)
+        """
+        self.gemini_service = GeminiService(api_key=gemini_api_key)
+        self.video_extractor = VideoExtractor(output_quality=video_quality)
+    
+    def enhance_meeting_transcript(
+        self,
+        meeting_dir: str,
+        transcript: MeetingTranscript,
+        custom_prompt: Optional[str] = None,
+        max_visual_points: Optional[int] = 20
+    ) -> Dict[str, any]:
+        """
+        Enhance a meeting transcript with visual analysis and extracted frames.
+        
+        Args:
+            meeting_dir: Path to Zoom meeting directory
+            transcript: MeetingTranscript object
+            custom_prompt: Optional custom prompt for Gemini
+            max_visual_points: Maximum number of visual points to extract
+        
+        Returns:
+            Dictionary with paths to created files and analysis results
+        """
+        meeting_path = Path(meeting_dir)
+        action_notes_dir = meeting_path / "action-notes"
+        images_dir = action_notes_dir / "images"
+        
+        # Create directories
+        action_notes_dir.mkdir(exist_ok=True)
+        images_dir.mkdir(exist_ok=True)
+        
+        results = {
+            "meeting_dir": str(meeting_path),
+            "action_notes_dir": str(action_notes_dir),
+            "files_created": [],
+            "visual_points": [],
+            "extracted_frames": {},
+            "errors": []
+        }
+        
+        try:
+            # Step 1: Save original transcript
+            transcript_json_path = action_notes_dir / "transcript.json"
+            transcript_data = transcript.to_json()
+            with open(transcript_json_path, 'w', encoding='utf-8') as f:
+                json.dump(transcript_data, f, indent=2, ensure_ascii=False)
+            results["files_created"].append(str(transcript_json_path))
+            
+            # Save markdown version too
+            transcript_md_path = action_notes_dir / "transcript.md"
+            with open(transcript_md_path, 'w', encoding='utf-8') as f:
+                f.write(transcript.to_markdown())
+            results["files_created"].append(str(transcript_md_path))
+            
+            # Step 2: Analyze transcript for visual points
+            print("Analyzing transcript for visual confirmation points...")
+            visual_points = self.gemini_service.analyze_transcript_for_visual_points(
+                transcript_data,
+                custom_prompt=custom_prompt,
+                max_points=max_visual_points
+            )
+            results["visual_points"] = [point.to_dict() for point in visual_points]
+            
+            # Save visual points analysis
+            visual_points_path = action_notes_dir / "visual-points.json"
+            self.gemini_service.export_visual_points(visual_points, str(visual_points_path))
+            results["files_created"].append(str(visual_points_path))
+            
+            # Step 3: Find video file
+            video_path = self.video_extractor.find_video_file(str(meeting_path))
+            if not video_path:
+                results["errors"].append("No video file found in meeting directory")
+                print("Warning: No video file found, skipping frame extraction")
+            else:
+                # Step 4: Extract frames at visual points
+                print(f"Extracting frames from video: {os.path.basename(video_path)}")
+                timestamps = [(point.timestamp, point.timestamp_seconds) for point in visual_points]
+                
+                extracted_frames = self.video_extractor.extract_frames_at_timestamps(
+                    video_path,
+                    timestamps,
+                    str(images_dir)
+                )
+                results["extracted_frames"] = extracted_frames
+                
+                # Step 5: Create enhanced transcript with image references
+                enhanced_md = self._create_enhanced_transcript(
+                    transcript,
+                    visual_points,
+                    extracted_frames,
+                    str(action_notes_dir)
+                )
+                
+                enhanced_path = action_notes_dir / "transcript-enhanced.md"
+                with open(enhanced_path, 'w', encoding='utf-8') as f:
+                    f.write(enhanced_md)
+                results["files_created"].append(str(enhanced_path))
+            
+            # Step 6: Create summary report
+            summary = self._create_summary_report(results, transcript, visual_points)
+            summary_path = action_notes_dir / "enhancement-summary.md"
+            with open(summary_path, 'w', encoding='utf-8') as f:
+                f.write(summary)
+            results["files_created"].append(str(summary_path))
+            
+        except Exception as e:
+            results["errors"].append(f"Enhancement error: {str(e)}")
+            print(f"Error during enhancement: {e}")
+        
+        return results
+    
+    def _create_enhanced_transcript(
+        self,
+        transcript: MeetingTranscript,
+        visual_points: List[VisualPoint],
+        extracted_frames: Dict[str, str],
+        action_notes_dir: str
+    ) -> str:
+        """Create enhanced markdown transcript with embedded images."""
+        lines = []
+        
+        # Header
+        lines.append("# Enhanced Meeting Transcript")
+        lines.append(f"Date: {transcript.date.strftime('%Y-%m-%d %H:%M:%S')}")
+        lines.append(f"Participants: {', '.join(transcript.participants)}")
+        lines.append(f"Duration: {self._format_duration(transcript.duration)}")
+        lines.append("")
+        
+        # Visual points summary
+        lines.append("## Visual Confirmation Points")
+        lines.append(f"*{len(visual_points)} points identified requiring visual context*")
+        lines.append("")
+        
+        # Create a map of timestamps to visual points
+        visual_map = {point.timestamp_seconds: point for point in visual_points}
+        
+        # Transcript with embedded visuals
+        lines.append("## Enhanced Transcript")
+        lines.append("")
+        
+        transcript.sort_segments()
+        
+        for segment in transcript.segments:
+            # Check if this segment has a visual point
+            visual_point = None
+            for vp in visual_points:
+                if abs(segment.start_time - vp.timestamp_seconds) < 2:  # Within 2 seconds
+                    visual_point = vp
+                    break
+            
+            # Add transcript line
+            timestamp = segment.format_timestamp(segment.start_time)
+            lines.append(f"[{timestamp}] **{segment.speaker}**: {segment.text}")
+            
+            # Add visual element if applicable
+            if visual_point and visual_point.timestamp in extracted_frames:
+                lines.append("")
+                lines.append(f"> 🎯 **Visual Context Required**")
+                lines.append(f"> *{visual_point.reason}*")
+                lines.append(f">")
+                
+                # Add image with relative path
+                image_path = extracted_frames[visual_point.timestamp]
+                relative_path = os.path.relpath(image_path, action_notes_dir)
+                lines.append(f"> ![{visual_point.description}]({relative_path})")
+                lines.append(f">")
+                lines.append(f"> *Priority: {visual_point.priority}/5*")
+                lines.append("")
+            
+            lines.append("")
+        
+        # Appendix with all visual points
+        lines.append("## Appendix: All Visual Points")
+        lines.append("")
+        
+        for i, vp in enumerate(visual_points, 1):
+            lines.append(f"### {i}. [{vp.timestamp}] {vp.description}")
+            lines.append(f"**Speaker:** {vp.speaker}")
+            lines.append(f"**Quote:** \"{vp.quote}\"")
+            lines.append(f"**Reason:** {vp.reason}")
+            lines.append(f"**Priority:** {vp.priority}/5")
+            
+            if vp.timestamp in extracted_frames:
+                image_path = extracted_frames[vp.timestamp]
+                relative_path = os.path.relpath(image_path, action_notes_dir)
+                lines.append(f"**Image:** [{os.path.basename(image_path)}]({relative_path})")
+            
+            lines.append("")
+        
+        return "\n".join(lines)
+    
+    def _create_summary_report(
+        self,
+        results: dict,
+        transcript: MeetingTranscript,
+        visual_points: List[VisualPoint]
+    ) -> str:
+        """Create a summary report of the enhancement process."""
+        lines = []
+        
+        lines.append("# Meeting Enhancement Summary")
+        lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        lines.append("")
+        
+        lines.append("## Meeting Information")
+        lines.append(f"- Date: {transcript.date.strftime('%Y-%m-%d %H:%M:%S')}")
+        lines.append(f"- Participants: {', '.join(transcript.participants)}")
+        lines.append(f"- Duration: {self._format_duration(transcript.duration)}")
+        lines.append(f"- Total Segments: {len(transcript.segments)}")
+        lines.append("")
+        
+        lines.append("## Enhancement Results")
+        lines.append(f"- Visual Points Identified: {len(visual_points)}")
+        lines.append(f"- Frames Extracted: {len(results['extracted_frames'])}")
+        lines.append(f"- Files Created: {len(results['files_created'])}")
+        lines.append("")
+        
+        if visual_points:
+            lines.append("## Top Priority Visual Points")
+            top_points = sorted(visual_points, key=lambda p: p.priority)[:5]
+            for i, vp in enumerate(top_points, 1):
+                lines.append(f"{i}. [{vp.timestamp}] {vp.description} (Priority: {vp.priority})")
+            lines.append("")
+        
+        lines.append("## Files Generated")
+        for file_path in results['files_created']:
+            lines.append(f"- {os.path.basename(file_path)}")
+        lines.append("")
+        
+        if results['errors']:
+            lines.append("## Errors")
+            for error in results['errors']:
+                lines.append(f"- {error}")
+            lines.append("")
+        
+        lines.append("## Directory Structure")
+        lines.append("```")
+        lines.append("action-notes/")
+        lines.append("├── transcript.json          # Original transcript data")
+        lines.append("├── transcript.md            # Original transcript (markdown)")
+        lines.append("├── visual-points.json       # LLM analysis results")
+        lines.append("├── transcript-enhanced.md   # Enhanced transcript with images")
+        lines.append("├── enhancement-summary.md   # This file")
+        lines.append("└── images/                  # Extracted video frames")
+        
+        if len(results['extracted_frames']) > 0:
+            for timestamp in sorted(results['extracted_frames'].keys())[:3]:
+                filename = os.path.basename(results['extracted_frames'][timestamp])
+                lines.append(f"    ├── {filename}")
+            if len(results['extracted_frames']) > 3:
+                lines.append(f"    └── ... ({len(results['extracted_frames']) - 3} more)")
+        
+        lines.append("```")
+        
+        return "\n".join(lines)
+    
+    def _format_duration(self, seconds: float) -> str:
+        """Format duration as HH:MM:SS or MM:SS."""
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = int(seconds % 60)
+        
+        if hours > 0:
+            return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+        else:
+            return f"{minutes:02d}:{secs:02d}"
+    
+    def set_gemini_prompt(self, prompt: str):
+        """Set custom Gemini prompt for visual analysis."""
+        self.gemini_service.set_custom_prompt(prompt)

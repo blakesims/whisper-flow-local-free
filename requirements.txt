@@ -17,3 +17,6 @@ py2app>=0.28.0
 
 # Fuzzy Search for Fabric pattern selection
 rapidfuzz>=3.0.0 
+
+# AI/LLM Integration
+google-genai>=0.1.0

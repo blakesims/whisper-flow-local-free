@@ -19,8 +19,8 @@ from PySide6.QtCore import Qt, Signal
 class ZoomMeetingDialog(QDialog):
     """Dialog for selecting Zoom meeting recordings."""
     
-    # Signal emitted when files are selected: (file_paths, participant_names)
-    files_selected = Signal(list, list)
+    # Signal emitted when files are selected: (file_paths, participant_names, meeting_dir)
+    files_selected = Signal(list, list, str)
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -193,7 +193,8 @@ class ZoomMeetingDialog(QDialog):
         if self.selected_meeting:
             self.files_selected.emit(
                 self.selected_meeting['file_paths'],
-                self.selected_meeting['participants']
+                self.selected_meeting['participants'],
+                self.selected_meeting['path']
             )
             self.accept()
     

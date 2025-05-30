@@ -89,25 +89,32 @@ Extend the existing upload functionality to support multi-file uploads for meeti
 - Phase 1 completion
 - T004 (transcription engine)
 
-### Phase 4: Transcript Merging & Speaker Identification
-**Status**: Not Started
+### Phase 4: Visual Analysis Integration
+**Status**: Complete
 
 **Objectives**:
-- Implement timestamp-based merging algorithm
-- Add speaker identification based on source file
-- Handle overlapping speech segments
-- Format output with clear speaker labels
-- Add export options (text, markdown, etc.)
+- ✓ Integrate Google Gemini for LLM analysis
+- ✓ Identify points requiring visual confirmation
+- ✓ Extract video frames at specific timestamps
+- ✓ Create enhanced transcript with embedded images
+- ✓ Generate action-notes directory structure
 
 **Estimated Time**: 4 days
 
 **Resources Needed**:
-- Algorithm design for timestamp merging
-- Text formatting utilities
-- Export format specifications
+- Google Gemini API key
+- ffmpeg for video frame extraction
+- Structured output documentation
 
 **Dependencies**:
 - Phase 3 completion
+
+**Implementation Details**:
+- Created `gemini_service.py` for LLM integration with structured output
+- Created `video_extractor.py` for frame extraction using ffmpeg
+- Created `transcript_enhancer.py` to orchestrate the enhancement process
+- Added "Enhance" button and shortcut (E) to UI
+- Outputs to `~/Documents/Zoom/[Meeting]/action-notes/` directory
 
 ### Phase 5: Testing & Refinement
 **Status**: Not Started
@@ -132,3 +139,8 @@ Extend the existing upload functionality to support multi-file uploads for meeti
 ## Notes & Updates
 - 2025-05-30: Task created based on user request for meeting summary functionality
 - Key consideration: Need to extract participant names from filenames (e.g., "audioBlakeSims21667483884.m4a")
+- 2025-05-30: Phase 4 completed - Added visual analysis feature using Google Gemini API
+  - Integrated structured output for identifying ambiguous references
+  - Added video frame extraction at specified timestamps
+  - Created enhanced transcript with embedded images
+  - Output structure: action-notes/transcript.json, visual-points.json, transcript-enhanced.md, images/

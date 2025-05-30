@@ -18,6 +18,7 @@ from .workers import TranscriptionWorker, FabricListPatternsWorker, LoadModelWor
 from .pattern_selection_dialog import PatternSelectionDialog # <-- IMPORTED PatternSelectionDialog
 from .zoom_meeting_dialog import ZoomMeetingDialog # <-- IMPORTED ZoomMeetingDialog
 from .meeting_worker import MeetingTranscriptionWorker # <-- IMPORTED MeetingTranscriptionWorker
+from .enhancement_worker import MeetingEnhancementWorker # <-- IMPORTED MeetingEnhancementWorker
 
 # from app.utils.config_manager import ConfigManager # Will be used later
 
@@ -32,6 +33,7 @@ class AppState:
     PREPARING_FABRIC = 7      # New: Listing patterns, possibly transcribing for Fabric
     RUNNING_FABRIC_PATTERN = 8 # New: Executing the selected Fabric pattern
     MEETING_TRANSCRIBING = 9  # New: Transcribing meeting with multiple files
+    MEETING_ENHANCING = 10    # New: Enhancing meeting with visual analysis
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -47,6 +49,8 @@ class MainWindow(QMainWindow):
         self.meeting_audio_files = []  # List of selected audio files for meeting
         self.meeting_participant_names = []  # List of participant names
         self.is_meeting_mode = False  # Flag to track if we're in meeting mode
+        self.last_meeting_transcript = None  # Store transcript for enhancement
+        self.selected_meeting_dir = None  # Store meeting directory path
 
         # New attributes for Fabric workflow
         self.fabric_patterns = None
@@ -104,6 +108,7 @@ class MainWindow(QMainWindow):
         self.fabric_button = QPushButton("Fabric")
         self.upload_button = QPushButton("Upload")
         self.meeting_button = QPushButton("Meeting")
+        self.enhance_button = QPushButton("Enhance")
 
         self.rec_button.setToolTip("Start/Resume Recording (R)")
         self.stop_button.setToolTip("Stop Recording (S)")
@@ -113,6 +118,7 @@ class MainWindow(QMainWindow):
         self.fabric_button.setToolTip("Process with Fabric last recording, or current if active (F)")
         self.upload_button.setToolTip("Upload audio file for transcription (U)")
         self.meeting_button.setToolTip("Select Zoom meeting for summary (M)")
+        self.enhance_button.setToolTip("Enhance meeting transcript with visual analysis (E)")
 
         self.rec_button.clicked.connect(self._on_rec_clicked)
         self.stop_button.clicked.connect(self._on_stop_clicked)
@@ -122,6 +128,7 @@ class MainWindow(QMainWindow):
         self.fabric_button.clicked.connect(self._on_fabric_keypress)
         self.upload_button.clicked.connect(self._on_upload_clicked)
         self.meeting_button.clicked.connect(self._on_meeting_clicked)
+        self.enhance_button.clicked.connect(self._on_enhance_clicked)
 
         controls_layout.addWidget(self.rec_button)
         controls_layout.addWidget(self.stop_button)
@@ -131,6 +138,7 @@ class MainWindow(QMainWindow):
         controls_layout.addWidget(self.fabric_button)
         controls_layout.addWidget(self.upload_button)
         controls_layout.addWidget(self.meeting_button)
+        controls_layout.addWidget(self.enhance_button)
         main_layout.addLayout(controls_layout)
 
         # Status/Error Label
@@ -213,6 +221,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence(Qt.Key.Key_F), self, self._on_fabric_keypress)
         QShortcut(QKeySequence(Qt.Key.Key_U), self, self._on_upload_clicked)
         QShortcut(QKeySequence(Qt.Key.Key_M), self, self._on_meeting_clicked)  # M for Meeting
+        QShortcut(QKeySequence(Qt.Key.Key_E), self, self._on_enhance_clicked)  # E for Enhance
         QShortcut(QKeySequence(Qt.Key.Key_Q), self, self.close) # Q to quit
 
     def _connect_audio_recorder_signals(self):
@@ -366,11 +375,12 @@ class MainWindow(QMainWindow):
             self.is_meeting_mode = False
             self._set_status_message("Meeting selection cancelled.")
     
-    def _on_zoom_meeting_selected(self, file_paths: list, participant_names: list):
+    def _on_zoom_meeting_selected(self, file_paths: list, participant_names: list, meeting_dir: str = None):
         """Handle Zoom meeting selection from dialog."""
         if file_paths and len(file_paths) >= 2:
             self.meeting_audio_files = file_paths
             self.meeting_participant_names = participant_names  # Store participant names
+            self.selected_meeting_dir = meeting_dir  # Store meeting directory
             
             self._set_status_message(f"Selected meeting with {len(file_paths)} participants")
             
@@ -467,6 +477,7 @@ class MainWindow(QMainWindow):
             self.fabric_button.setEnabled(False)
             self.upload_button.setEnabled(False)
             self.meeting_button.setEnabled(False)
+            self.enhance_button.setEnabled(False)
             self.model_size_selector.setEnabled(False)
             # Status message is set by _request_model_load
             return # Skip further state updates while model is loading
@@ -484,6 +495,7 @@ class MainWindow(QMainWindow):
             self.fabric_button.setEnabled(model_ready and (bool(self.last_saved_audio_path) or bool(self.transcription_text.toPlainText())))
             self.upload_button.setEnabled(model_ready)
             self.meeting_button.setEnabled(model_ready)
+            self.enhance_button.setEnabled(model_ready and bool(self.last_meeting_transcript))
             if not self.status_label.property("is_error") and not self.is_model_loading_busy:
                  self._clear_status_message_after_delay()
         elif self.app_state == AppState.RECORDING:
@@ -692,8 +704,48 @@ class MainWindow(QMainWindow):
             
             self.thread_pool.start(meeting_worker)
 
+        elif self.app_state == AppState.MEETING_ENHANCING:
+            self.waveform_widget.set_status(WaveformStatus.IDLE)
+            self.rec_button.setEnabled(False)
+            self.stop_button.setEnabled(False)
+            self.pause_button.setEnabled(False)
+            self.cancel_button.setEnabled(False)
+            self.transcribe_button.setEnabled(False)
+            self.fabric_button.setEnabled(False)
+            self.upload_button.setEnabled(False)
+            self.meeting_button.setEnabled(False)
+            self.enhance_button.setEnabled(False)
+            self.model_size_selector.setEnabled(False)
+            
+            # Check if we have the necessary data
+            if not self.last_meeting_transcript or not self.selected_meeting_dir:
+                self._handle_enhancement_error("Missing transcript or meeting directory")
+                return
+            
+            # Check for Gemini API key
+            gemini_api_key = os.getenv("GOOGLE_API_KEY")
+            if not gemini_api_key:
+                self._handle_enhancement_error("GOOGLE_API_KEY environment variable not set")
+                return
+            
+            self._set_status_message("Starting visual analysis...")
+            
+            # Create and start enhancement worker
+            enhancement_worker = MeetingEnhancementWorker(
+                meeting_dir=self.selected_meeting_dir,
+                transcript=self.last_meeting_transcript,
+                gemini_api_key=gemini_api_key,
+                max_visual_points=20
+            )
+            
+            enhancement_worker.signals.progress.connect(self._handle_enhancement_progress)
+            enhancement_worker.signals.finished.connect(self._handle_enhancement_finished)
+            enhancement_worker.signals.error.connect(self._handle_enhancement_error)
+            
+            self.thread_pool.start(enhancement_worker)
+
         # Make sure model_size_selector gets re-enabled if not in a blocking state
-        if self.app_state not in [AppState.TRANSCRIBING, AppState.PREPARING_FABRIC, AppState.RUNNING_FABRIC_PATTERN, AppState.STOPPING_FOR_ACTION, AppState.CANCELLING, AppState.MEETING_TRANSCRIBING] and not self.is_model_loading_busy:
+        if self.app_state not in [AppState.TRANSCRIBING, AppState.PREPARING_FABRIC, AppState.RUNNING_FABRIC_PATTERN, AppState.STOPPING_FOR_ACTION, AppState.CANCELLING, AppState.MEETING_TRANSCRIBING, AppState.MEETING_ENHANCING] and not self.is_model_loading_busy:
             self.model_size_selector.setEnabled(True)
 
     def _apply_button_styles(self):
@@ -727,6 +779,7 @@ class MainWindow(QMainWindow):
         self.fabric_button.setStyleSheet(button_style)
         self.upload_button.setStyleSheet(button_style)
         self.meeting_button.setStyleSheet(button_style)
+        self.enhance_button.setStyleSheet(button_style)
         self.minimize_button.setText("Min")
         self.minimize_button.setFixedSize(40, 28)
 
@@ -1167,6 +1220,9 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'progress_bar'):
             self.progress_bar.hide()
         
+        # Store the transcript for potential enhancement
+        self.last_meeting_transcript = meeting_transcript
+        
         # Display the transcript
         markdown_text = meeting_transcript.to_markdown()
         self.transcription_text.setPlainText(markdown_text)
@@ -1189,13 +1245,19 @@ class MainWindow(QMainWindow):
             print(f"Error with clipboard/paste: {e}")
             self._set_status_message("Meeting transcript complete", is_error=False)
         
-        # Reset meeting mode
-        self.is_meeting_mode = False
-        self.meeting_audio_files = []
-        self.meeting_participant_names = []
-        
-        # Return to idle state
-        self._change_app_state(AppState.IDLE)
+        # Check if we should offer enhancement (only if meeting directory is known)
+        if self.selected_meeting_dir and os.path.exists(self.selected_meeting_dir):
+            # Ask user if they want to enhance with visual analysis
+            self._prompt_for_enhancement()
+        else:
+            # Reset meeting mode
+            self.is_meeting_mode = False
+            self.meeting_audio_files = []
+            self.meeting_participant_names = []
+            self.selected_meeting_dir = None
+            
+            # Return to idle state
+            self._change_app_state(AppState.IDLE)
     
     @Slot(str)
     def _handle_meeting_error(self, error_message: str):
@@ -1263,6 +1325,79 @@ class MainWindow(QMainWindow):
             print(f"Failed to load model via worker: {error_detail}")
         
         self._update_ui_for_state() # Refresh UI based on new model state
+    
+    def _on_enhance_clicked(self):
+        """Handle enhance button click."""
+        self._clear_status_message()
+        
+        # Check if we have a meeting transcript and directory
+        if self.last_meeting_transcript and self.selected_meeting_dir:
+            self._change_app_state(AppState.MEETING_ENHANCING)
+        else:
+            self._set_status_message("No meeting transcript available for enhancement", is_error=True)
+    
+    def _prompt_for_enhancement(self):
+        """Prompt user to enhance meeting transcript."""
+        # Add enhance button or status message
+        enhancement_msg = "\n\n🎯 Visual analysis available!\nPress 'E' or click 'Enhance' to identify moments requiring visual confirmation."
+        current_text = self.transcription_text.toPlainText()
+        self.transcription_text.setPlainText(current_text + enhancement_msg)
+        
+        # Enable enhance button
+        self.enhance_button.setEnabled(True)
+        self._set_status_message("Meeting complete. Press 'E' to enhance with visual analysis.")
+    
+    @Slot(str)
+    def _handle_enhancement_progress(self, status: str):
+        """Handle enhancement progress updates."""
+        self._set_status_message(status)
+    
+    @Slot(dict)
+    def _handle_enhancement_finished(self, results: dict):
+        """Handle completed enhancement."""
+        visual_count = len(results.get("visual_points", []))
+        frame_count = len(results.get("extracted_frames", {}))
+        
+        # Update status
+        if results.get("errors"):
+            self._set_status_message(f"Enhancement completed with errors: {'; '.join(results['errors'])}", is_error=True)
+        else:
+            self._set_status_message(f"Enhancement complete: {visual_count} visual points, {frame_count} frames extracted")
+        
+        # Show summary in text area
+        action_notes_dir = results.get("action_notes_dir", "")
+        summary_text = f"✅ Enhancement Complete!\n\n"
+        summary_text += f"📁 Files saved to: {action_notes_dir}\n\n"
+        summary_text += f"📊 Results:\n"
+        summary_text += f"  • Visual points identified: {visual_count}\n"
+        summary_text += f"  • Video frames extracted: {frame_count}\n"
+        summary_text += f"  • Files created: {len(results.get('files_created', []))}\n\n"
+        
+        if visual_count > 0:
+            summary_text += "🎯 Top Visual Points:\n"
+            for i, vp in enumerate(results.get("visual_points", [])[:5], 1):
+                summary_text += f"  {i}. [{vp['timestamp']}] {vp['description']}\n"
+        
+        self.transcription_text.setPlainText(summary_text)
+        
+        # Reset state
+        self._reset_meeting_state()
+        self._change_app_state(AppState.IDLE)
+    
+    @Slot(str)
+    def _handle_enhancement_error(self, error_message: str):
+        """Handle enhancement error."""
+        self._set_status_message(f"Enhancement error: {error_message}", is_error=True)
+        self._reset_meeting_state()
+        self._change_app_state(AppState.IDLE)
+    
+    def _reset_meeting_state(self):
+        """Reset all meeting-related state."""
+        self.is_meeting_mode = False
+        self.meeting_audio_files = []
+        self.meeting_participant_names = []
+        self.selected_meeting_dir = None
+        self.last_meeting_transcript = None
 
 if __name__ == '__main__':
     # This is for testing the window directly
