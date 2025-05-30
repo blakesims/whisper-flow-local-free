@@ -1,5 +1,7 @@
 from faster_whisper import WhisperModel
 import os
+import sys
+import platform
 from app.utils.config_manager import ConfigManager
 
 # Determine a sensible cache directory for models if needed,
@@ -19,14 +21,20 @@ class TranscriptionService:
         """
         self.config_manager = config_manager
         self.model_name = "base"  # Default model name
-        self.device = "cpu"       # Default device
-        self.compute_type = "int8" # Default compute type
+        # On Apple Silicon, faster-whisper only supports CPU device
+        # MPS (Metal Performance Shaders) is not supported by CTranslate2
+        self.device = "cpu"       # Only supported device on Apple Silicon
+        # int8 provides best performance on Apple Silicon CPU
+        # float32 is the fallback option, but int8 is faster
+        self.compute_type = "int8" # Optimal for Apple Silicon
+        self.cpu_threads = 0      # Default (auto-detect)
         self.model = None         # Model will be loaded on demand
 
         if self.config_manager:
             self.model_name = self.config_manager.get("transcription_model_name", self.model_name)
             self.device = self.config_manager.get("transcription_device", self.device)
             self.compute_type = self.config_manager.get("transcription_compute_type", self.compute_type)
+            self.cpu_threads = self.config_manager.get("transcription_cpu_threads", self.cpu_threads)
         
         # DO NOT load model here: self._load_model() 
 
@@ -40,10 +48,42 @@ class TranscriptionService:
             self.model = None
             return
 
+        # Optimize CPU thread usage
+        cpu_threads = self.cpu_threads  # Use configured value
+        if self.device == "cpu" and cpu_threads == 0:
+            # Auto-detect optimal thread count
+            logical_cores = os.cpu_count() or 4
+            
+            # Apple Silicon optimization
+            # M1/M2/M3 have high-performance and efficiency cores
+            # Using all logical cores on Apple Silicon is actually beneficial
+            if sys.platform == "darwin" and "arm" in platform.machine().lower():
+                # Apple Silicon detected - use more aggressive threading
+                cpu_threads = logical_cores - 1  # Leave 1 core for system
+                print(f"Apple Silicon detected: Using {cpu_threads} threads ({logical_cores} cores total)")
+            else:
+                # Intel/AMD - use conservative approach
+                cpu_threads = max(4, min(logical_cores - 2, logical_cores // 2))
+                print(f"CPU mode: Auto-detected {cpu_threads} threads (detected {logical_cores} logical cores)")
+        elif self.device == "cpu":
+            print(f"CPU mode: Using configured {cpu_threads} threads")
+
         print(f"Loading Whisper model: {self.model_name} (compute: {self.compute_type} on device: {self.device})")
         try:
-            self.model = WhisperModel(self.model_name, device=self.device, compute_type=self.compute_type)
-            print(f"Model {self.model_name} loaded successfully.")
+            # Note: On Apple Silicon (M1/M2/M3), faster-whisper only supports CPU device
+            # MPS is not supported by the underlying CTranslate2 library
+            # However, CPU performance is still excellent due to:
+            # 1. CTranslate2's optimized inference engine
+            # 2. int8 quantization support on ARM64
+            # 3. Apple Accelerate framework integration
+            self.model = WhisperModel(
+                self.model_name, 
+                device=self.device, 
+                compute_type=self.compute_type,
+                cpu_threads=cpu_threads,
+                num_workers=1  # Keep at 1 for stability with Qt
+            )
+            print(f"Model {self.model_name} loaded successfully with {cpu_threads} CPU threads.")
         except Exception as e:
             print(f"Error loading Whisper model {self.model_name}: {e}")
             self.model = None # Ensure model is None on failure
@@ -98,7 +138,7 @@ class TranscriptionService:
             "loaded": self.model is not None
         }
 
-    def transcribe(self, audio_path: str, language: str = None, task: str = "transcribe", beam_size: int = 5, progress_callback=None):
+    def transcribe(self, audio_path: str, language: str = None, task: str = "transcribe", beam_size: int = 1, progress_callback=None):
         if not self.model:
             # This check is now more critical as model loading is deferred
             print("Transcription model is not loaded or is invalid. Cannot transcribe.")
@@ -114,11 +154,25 @@ class TranscriptionService:
 
         try:
             print(f"Transcribing {audio_path} (lang: {language or 'auto'}, task: {task})...")
+            # Optimized settings for Apple Silicon
             segments_generator, info = self.model.transcribe(
                 audio_path,
                 language=language, 
                 task=task,
-                beam_size=beam_size
+                beam_size=beam_size,
+                best_of=1,  # Reduce computation, minimal quality impact
+                patience=1.0,  # Faster beam search termination
+                length_penalty=1.0,  # Neutral length penalty
+                temperature=0.0,  # Deterministic, faster
+                vad_filter=True,  # Voice Activity Detection for faster processing
+                vad_parameters=dict(
+                    threshold=0.5,
+                    min_speech_duration_ms=250,
+                    max_speech_duration_s=float('inf'),
+                    min_silence_duration_ms=2000,
+                    window_size_samples=1024,
+                    speech_pad_ms=400
+                )
             )
 
             detected_lang_info = None
