@@ -12,10 +12,12 @@ import subprocess # For running paste command
 from .waveform_widget import WaveformWidget, WaveformStatus
 from app.core.audio_recorder import AudioRecorder # Import AudioRecorder
 from app.core.transcription_service import TranscriptionService
+from app.core.transcription_service_ext import TranscriptionServiceExt
 from app.core.fabric_service import FabricService # <-- ADDED IMPORT
 from .workers import TranscriptionWorker, FabricListPatternsWorker, LoadModelWorker, FabricRunPatternWorker # <-- IMPORTED LoadModelWorker, FabricRunPatternWorker
 from .pattern_selection_dialog import PatternSelectionDialog # <-- IMPORTED PatternSelectionDialog
 from .zoom_meeting_dialog import ZoomMeetingDialog # <-- IMPORTED ZoomMeetingDialog
+from .meeting_worker import MeetingTranscriptionWorker # <-- IMPORTED MeetingTranscriptionWorker
 
 # from app.utils.config_manager import ConfigManager # Will be used later
 
@@ -29,6 +31,7 @@ class AppState:
     FABRIC_PROCESSING = 6 # Fabric post-processing will be triggered
     PREPARING_FABRIC = 7      # New: Listing patterns, possibly transcribing for Fabric
     RUNNING_FABRIC_PATTERN = 8 # New: Executing the selected Fabric pattern
+    MEETING_TRANSCRIBING = 9  # New: Transcribing meeting with multiple files
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -141,7 +144,7 @@ class MainWindow(QMainWindow):
         self._connect_audio_recorder_signals()
 
         # Initialize TranscriptionService and thread pool
-        self.transcription_service = TranscriptionService()
+        self.transcription_service = TranscriptionServiceExt()  # Use extended service for timestamps
         self.fabric_service = FabricService() # <-- INITIALIZED SERVICE
         self.thread_pool = QThreadPool.globalInstance()
 
@@ -380,9 +383,8 @@ class MainWindow(QMainWindow):
             
             self.transcription_text.setPlainText(meeting_info)
             
-            # TODO: Start meeting transcription process
-            # For now, just show a message
-            self._set_status_message(f"Meeting mode: {len(participant_names)} participants. Feature in development.", is_error=False)
+            # Start meeting transcription process
+            self._change_app_state(AppState.MEETING_TRANSCRIBING)
         else:
             self._set_status_message("Invalid meeting selection.", is_error=True)
             self.is_meeting_mode = False
@@ -642,8 +644,52 @@ class MainWindow(QMainWindow):
             run_worker.signals.error.connect(self._handle_fabric_run_error)
             self.thread_pool.start(run_worker)
 
+        elif self.app_state == AppState.MEETING_TRANSCRIBING:
+            self.waveform_widget.set_status(WaveformStatus.IDLE)
+            self.rec_button.setEnabled(False)
+            self.stop_button.setEnabled(False)
+            self.pause_button.setEnabled(False)
+            self.cancel_button.setEnabled(False)
+            self.transcribe_button.setEnabled(False)
+            self.fabric_button.setEnabled(False)
+            self.upload_button.setEnabled(False)
+            self.meeting_button.setEnabled(False)
+            self.model_size_selector.setEnabled(False)
+            
+            # Check if we have the necessary data
+            if not self.meeting_audio_files or len(self.meeting_audio_files) < 2:
+                self._handle_meeting_error("No audio files selected for meeting transcription")
+                return
+            
+            if self.is_model_loading_busy or self.transcription_service.model is None:
+                self._handle_meeting_error("Model is not ready for meeting transcription")
+                return
+            
+            self._set_status_message(f"Transcribing meeting with {len(self.meeting_audio_files)} participants...")
+            
+            # Show progress bar
+            if hasattr(self, 'progress_bar'):
+                self.progress_bar.setValue(0)
+                self.progress_bar.show()
+            
+            # Create and start meeting transcription worker
+            meeting_worker = MeetingTranscriptionWorker(
+                transcription_service=self.transcription_service,
+                audio_files=self.meeting_audio_files,
+                participant_names=self.meeting_participant_names,
+                language=None,  # Auto-detect
+                task="transcribe"
+            )
+            
+            meeting_worker.signals.progress.connect(self._handle_meeting_progress)
+            meeting_worker.signals.file_progress.connect(self._handle_meeting_file_progress)
+            meeting_worker.signals.finished.connect(self._handle_meeting_finished)
+            meeting_worker.signals.error.connect(self._handle_meeting_error)
+            
+            self.thread_pool.start(meeting_worker)
+
         # Make sure model_size_selector gets re-enabled if not in a blocking state
-        if self.app_state not in [AppState.TRANSCRIBING, AppState.PREPARING_FABRIC, AppState.RUNNING_FABRIC_PATTERN, AppState.STOPPING_FOR_ACTION, AppState.CANCELLING] and not self.is_model_loading_busy:
+        if self.app_state not in [AppState.TRANSCRIBING, AppState.PREPARING_FABRIC, AppState.RUNNING_FABRIC_PATTERN, AppState.STOPPING_FOR_ACTION, AppState.CANCELLING, AppState.MEETING_TRANSCRIBING] and not self.is_model_loading_busy:
             self.model_size_selector.setEnabled(True)
 
     def _apply_button_styles(self):
@@ -1064,6 +1110,74 @@ class MainWindow(QMainWindow):
         self._post_action_cleanup(False, f"Fabric run failed: {error_message}") # Resets state to IDLE
         # Ensure self.selected_fabric_pattern etc. are reset by _post_action_cleanup
 
+    # --- Meeting Transcription Handlers ---
+    @Slot(int, str)
+    def _handle_meeting_progress(self, progress: int, status: str):
+        """Handle overall meeting transcription progress."""
+        if hasattr(self, 'progress_bar'):
+            self.progress_bar.setValue(progress)
+        self._set_status_message(status)
+    
+    @Slot(str, int, str)
+    def _handle_meeting_file_progress(self, speaker: str, progress: int, text: str):
+        """Handle individual file transcription progress."""
+        # Could update UI to show per-file progress if desired
+        pass
+    
+    @Slot(object)
+    def _handle_meeting_finished(self, meeting_transcript):
+        """Handle completed meeting transcription."""
+        if hasattr(self, 'progress_bar'):
+            self.progress_bar.hide()
+        
+        # Display the transcript
+        markdown_text = meeting_transcript.to_markdown()
+        self.transcription_text.setPlainText(markdown_text)
+        
+        # Copy to clipboard
+        try:
+            import pyperclip
+            pyperclip.copy(markdown_text)
+            print("Meeting transcript copied to clipboard.")
+            
+            # Auto-paste
+            paste_command = """
+            osascript -e 'tell application "System Events" to keystroke "v" using command down'
+            """
+            subprocess.run(paste_command, shell=True, check=False)
+            print("Paste command executed.")
+            
+            self._set_status_message("Meeting transcript complete (copied & pasted)")
+        except Exception as e:
+            print(f"Error with clipboard/paste: {e}")
+            self._set_status_message("Meeting transcript complete", is_error=False)
+        
+        # Reset meeting mode
+        self.is_meeting_mode = False
+        self.meeting_audio_files = []
+        self.meeting_participant_names = []
+        
+        # Return to idle state
+        self._change_app_state(AppState.IDLE)
+    
+    @Slot(str)
+    def _handle_meeting_error(self, error_message: str):
+        """Handle meeting transcription error."""
+        if hasattr(self, 'progress_bar'):
+            self.progress_bar.hide()
+        
+        self._set_status_message(f"Meeting transcription error: {error_message}", is_error=True)
+        
+        # Reset meeting mode
+        self.is_meeting_mode = False
+        self.meeting_audio_files = []
+        self.meeting_participant_names = []
+        
+        # Return to idle state
+        self._change_app_state(AppState.IDLE)
+        if not self.is_model_loading_busy:
+            self.model_size_selector.setEnabled(True)
+    
     @Slot(str)
     def _on_model_size_changed(self, selected_model):
         self.current_model_size = selected_model
