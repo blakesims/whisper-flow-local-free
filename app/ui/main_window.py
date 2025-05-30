@@ -375,11 +375,15 @@ class MainWindow(QMainWindow):
             self._set_status_message(f"Selected meeting with {len(file_paths)} participants")
             
             # Show selected meeting info in the transcription text area
-            meeting_info = "Selected Zoom meeting:\n\n"
-            meeting_info += "Participants:\n"
+            meeting_info = "📅 Selected Zoom meeting:\n\n"
+            meeting_info += "👥 Participants:\n"
             for i, (name, path) in enumerate(zip(participant_names, file_paths), 1):
                 file_name = os.path.basename(path)
-                meeting_info += f"{i}. {name} - {file_name}\n"
+                file_size_mb = os.path.getsize(path) / (1024 * 1024)
+                meeting_info += f"  {i}. {name} - {file_name} ({file_size_mb:.1f} MB)\n"
+            
+            meeting_info += "\n📊 Transcription Progress:\n"
+            meeting_info += "Preparing to transcribe...\n"
             
             self.transcription_text.setPlainText(meeting_info)
             
@@ -1121,8 +1125,41 @@ class MainWindow(QMainWindow):
     @Slot(str, int, str)
     def _handle_meeting_file_progress(self, speaker: str, progress: int, text: str):
         """Handle individual file transcription progress."""
-        # Could update UI to show per-file progress if desired
-        pass
+        # Update transcription text area to show live progress
+        current_status = self.transcription_text.toPlainText()
+        
+        # Parse existing content to update specific speaker's progress
+        lines = current_status.split('\n')
+        updated_lines = []
+        speaker_found = False
+        
+        for line in lines:
+            if f"🎙️ {speaker}:" in line or f"⏳ {speaker}:" in line:
+                # Update this speaker's line with progress
+                if progress < 100:
+                    updated_lines.append(f"⏳ {speaker}: Processing... {progress}%")
+                else:
+                    updated_lines.append(f"✅ {speaker}: Complete!")
+                speaker_found = True
+            elif f"✅ {speaker}:" in line:
+                # Already marked as complete, keep it
+                updated_lines.append(line)
+                speaker_found = True
+            else:
+                updated_lines.append(line)
+        
+        if not speaker_found:
+            # Add new speaker progress line
+            if "Selected Zoom meeting:" in current_status:
+                # Insert after the participant list
+                for i, line in enumerate(updated_lines):
+                    if line.strip() == "":  # Find first empty line after participants
+                        updated_lines.insert(i, f"⏳ {speaker}: Processing... {progress}%")
+                        break
+            else:
+                updated_lines.append(f"⏳ {speaker}: Processing... {progress}%")
+        
+        self.transcription_text.setPlainText('\n'.join(updated_lines))
     
     @Slot(object)
     def _handle_meeting_finished(self, meeting_transcript):

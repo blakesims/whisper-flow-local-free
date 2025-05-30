@@ -2,6 +2,7 @@
 Worker for processing meeting transcriptions with multiple audio files.
 """
 
+import os
 from typing import List, Dict, Optional
 from datetime import datetime
 from PySide6.QtCore import QObject, Signal, QRunnable, QThreadPool
@@ -58,16 +59,29 @@ class MeetingTranscriptionWorker(QRunnable):
                     self.signals.error.emit("Transcription cancelled")
                     return
                 
-                # Update overall progress
-                overall_progress = int((idx / total_files) * 100)
+                # Update overall progress (more accurate calculation)
+                # Each file contributes equally to overall progress
+                file_start_progress = int((idx / total_files) * 100)
+                # Get file size for status
+                file_size_mb = os.path.getsize(audio_file) / (1024 * 1024)
                 self.signals.progress.emit(
-                    overall_progress,
-                    f"Processing {speaker_name}... ({idx + 1}/{total_files})"
+                    file_start_progress,
+                    f"Processing {speaker_name} ({file_size_mb:.1f} MB) - File {idx + 1} of {total_files}"
                 )
                 
                 # Create progress callback for this file
                 def file_progress_callback(progress, text, lang_info):
+                    # Emit file-specific progress
                     self.signals.file_progress.emit(speaker_name, progress, text)
+                    
+                    # Calculate and emit overall progress
+                    # Each file contributes equally to total progress
+                    file_contribution = 100.0 / total_files
+                    overall = file_start_progress + (progress * file_contribution / 100.0)
+                    self.signals.progress.emit(
+                        int(overall),
+                        f"Processing {speaker_name}... (File {idx + 1} of {total_files})"
+                    )
                 
                 # Transcribe with timestamps
                 result = self.transcription_service.transcribe_with_timestamps(
