@@ -84,5 +84,26 @@ The system identifies timestamps when:
 - Validated frame extraction functionality
 - End-to-end testing with sample transcripts
 
+## Additional Features Added
+
+### Settings Dialog
+- Added Settings dialog (⚙ button in top bar) for configuration:
+  - Google API key management with show/hide functionality
+  - Gemini model selection with ability to refresh from API
+  - Max visual points setting (1-100)
+  - Video quality setting for JPEG extraction (1-100)
+- Settings stored in platform-appropriate config directory
+- API key can be set via environment variable or settings
+
+### Re-Enhancement Functionality
+- Added Re-Enhance button (Shift+E shortcut) for existing transcripts
+- ReEnhanceDialog shows all meetings with existing transcripts
+- Displays enhancement status (enhanced/not enhanced, count)
+- Supports iterating results to avoid overwriting:
+  - First enhancement: visual-points.json, transcript-enhanced.md
+  - Second enhancement: visual-points-2.json, transcript-enhanced-2.md
+  - And so on...
+- Allows testing different models/settings on same transcript
+
 ## Next Steps
 Phase 5 will focus on testing with real meeting recordings and refining the visual point detection based on user feedback.
