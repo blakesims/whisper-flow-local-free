@@ -6,8 +6,15 @@ from setuptools import setup
 APP = ['app/main.py']
 DATA_FILES = []
 OPTIONS = {
-    'argv_emulation': True,
-    'packages': ['PySide6', 'faster_whisper', 'sounddevice', 'numpy', 'scipy', 'pyperclip', 'rapidfuzz'],
+    'argv_emulation': False,  # Faster startup
+    'packages': ['PySide6', 'sounddevice', 'numpy', 'scipy', 'pyperclip'],
+    'includes': ['app', 'app.core', 'app.ui', 'app.utils', 'app.core.audio_recorder', 
+                 'app.core.transcription_service', 'app.core.fabric_service',
+                 'app.ui.main_window', 'app.ui.waveform_widget', 'app.ui.workers',
+                 'app.ui.pattern_selection_dialog', 'app.utils.config_manager'],
+    'excludes': ['matplotlib', 'PIL', 'IPython', 'jupyter', 'pytest', 'test'],
+    'semi_standalone': True,  # Use system Python to avoid some issues
+    'site_packages': True,
     'plist': {
         'CFBundleName': 'Whisper Transcription UI',
         'CFBundleDisplayName': 'Whisper Transcription UI',
