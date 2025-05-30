@@ -151,7 +151,8 @@ class ZoomMeetingDialog(QDialog):
                     'host': host_name,
                     'participants': participants,
                     'file_paths': file_paths,
-                    'folder': folder
+                    'folder': folder,
+                    'path': str(folder)  # Add path for compatibility
                 })
         
         self.meetings = meetings
