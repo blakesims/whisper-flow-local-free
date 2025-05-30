@@ -15,6 +15,7 @@ from app.core.transcription_service import TranscriptionService
 from app.core.fabric_service import FabricService # <-- ADDED IMPORT
 from .workers import TranscriptionWorker, FabricListPatternsWorker, LoadModelWorker, FabricRunPatternWorker # <-- IMPORTED LoadModelWorker, FabricRunPatternWorker
 from .pattern_selection_dialog import PatternSelectionDialog # <-- IMPORTED PatternSelectionDialog
+from .zoom_meeting_dialog import ZoomMeetingDialog # <-- IMPORTED ZoomMeetingDialog
 
 # from app.utils.config_manager import ConfigManager # Will be used later
 
@@ -41,6 +42,7 @@ class MainWindow(QMainWindow):
         
         # Meeting mode attributes
         self.meeting_audio_files = []  # List of selected audio files for meeting
+        self.meeting_participant_names = []  # List of participant names
         self.is_meeting_mode = False  # Flag to track if we're in meeting mode
 
         # New attributes for Fabric workflow
@@ -107,7 +109,7 @@ class MainWindow(QMainWindow):
         self.transcribe_button.setToolTip("Transcribe last recording, or current if active (T)")
         self.fabric_button.setToolTip("Process with Fabric last recording, or current if active (F)")
         self.upload_button.setToolTip("Upload audio file for transcription (U)")
-        self.meeting_button.setToolTip("Upload multiple audio files for meeting summary (G)")
+        self.meeting_button.setToolTip("Select Zoom meeting for summary (M)")
 
         self.rec_button.clicked.connect(self._on_rec_clicked)
         self.stop_button.clicked.connect(self._on_stop_clicked)
@@ -202,12 +204,12 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence(Qt.Key.Key_P), self, self._on_pause_clicked) 
         QShortcut(QKeySequence(Qt.Key.Key_C), self, self._on_cancel_clicked)
         QShortcut(QKeySequence(Qt.Key.Key_Escape), self, self.close)
-        QShortcut(QKeySequence(Qt.Key.Key_M), self, self._on_minimize_clicked)
+        # M is now used for Meeting, not minimize
         # New shortcuts for Transcribe and Fabric
         QShortcut(QKeySequence(Qt.Key.Key_T), self, self._on_transcribe_keypress)
         QShortcut(QKeySequence(Qt.Key.Key_F), self, self._on_fabric_keypress)
         QShortcut(QKeySequence(Qt.Key.Key_U), self, self._on_upload_clicked)
-        QShortcut(QKeySequence(Qt.Key.Key_G), self, self._on_meeting_clicked)  # G for meetinG
+        QShortcut(QKeySequence(Qt.Key.Key_M), self, self._on_meeting_clicked)  # M for Meeting
         QShortcut(QKeySequence(Qt.Key.Key_Q), self, self.close) # Q to quit
 
     def _connect_audio_recorder_signals(self):
@@ -349,33 +351,40 @@ class MainWindow(QMainWindow):
         self.close_after_transcription = False
         self.is_meeting_mode = True
         
-        # Show file dialog to select multiple audio files
-        file_paths, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Select Audio Files for Meeting Summary",
-            "",
-            "Audio Files (*.wav *.mp3 *.m4a *.flac *.ogg *.opus *.webm);;All Files (*.*)"
-        )
+        # Show Zoom meeting selection dialog
+        dialog = ZoomMeetingDialog(self)
+        dialog.files_selected.connect(self._on_zoom_meeting_selected)
         
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Files were selected, handled by signal
+            pass
+        else:
+            # Dialog was cancelled
+            self.is_meeting_mode = False
+            self._set_status_message("Meeting selection cancelled.")
+    
+    def _on_zoom_meeting_selected(self, file_paths: list, participant_names: list):
+        """Handle Zoom meeting selection from dialog."""
         if file_paths and len(file_paths) >= 2:
             self.meeting_audio_files = file_paths
-            file_names = [os.path.basename(f) for f in file_paths]
-            self._set_status_message(f"Selected {len(file_paths)} files for meeting summary")
+            self.meeting_participant_names = participant_names  # Store participant names
             
-            # Show selected files in the transcription text area temporarily
-            file_list = "Selected files for meeting summary:\n"
-            for i, name in enumerate(file_names, 1):
-                file_list += f"{i}. {name}\n"
-            self.transcription_text.setPlainText(file_list)
+            self._set_status_message(f"Selected meeting with {len(file_paths)} participants")
+            
+            # Show selected meeting info in the transcription text area
+            meeting_info = "Selected Zoom meeting:\n\n"
+            meeting_info += "Participants:\n"
+            for i, (name, path) in enumerate(zip(participant_names, file_paths), 1):
+                file_name = os.path.basename(path)
+                meeting_info += f"{i}. {name} - {file_name}\n"
+            
+            self.transcription_text.setPlainText(meeting_info)
             
             # TODO: Start meeting transcription process
             # For now, just show a message
-            self._set_status_message(f"Meeting mode: {len(file_paths)} files selected. Feature in development.", is_error=False)
-        elif file_paths and len(file_paths) < 2:
-            self._set_status_message("Please select at least 2 audio files for meeting summary.", is_error=True)
-            self.is_meeting_mode = False
+            self._set_status_message(f"Meeting mode: {len(participant_names)} participants. Feature in development.", is_error=False)
         else:
-            self._set_status_message("No files selected.")
+            self._set_status_message("Invalid meeting selection.", is_error=True)
             self.is_meeting_mode = False
     
     def _on_minimize_clicked(self):

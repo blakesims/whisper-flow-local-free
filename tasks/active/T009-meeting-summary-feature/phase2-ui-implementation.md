@@ -1,5 +1,20 @@
 # Phase 2: UI Implementation for Multi-File Upload
 
+## Updates (v2)
+
+### Keyboard Shortcut Change
+- Changed Meeting feature shortcut from 'G' to 'M' 
+- Removed minimize shortcut (was 'M')
+- Updated tooltip to reflect new shortcut
+
+### Custom Zoom Meeting Dialog
+- Created `ZoomMeetingDialog` to automatically scan `~/Documents/Zoom`
+- Parses meeting folders with format: `YYYY-MM-DD HH.MM.SS Name's Personal Meeting Room`
+- Automatically detects audio files in `Audio Record` subfolder
+- Extracts participant names from filenames (e.g., `audioBlakeSims123.m4a` → "Blake Sims")
+- Shows meetings in reverse chronological order
+- Only displays meetings with 2+ participants
+
 ## Completed Tasks
 
 ### 1. Added Meeting Button to UI
