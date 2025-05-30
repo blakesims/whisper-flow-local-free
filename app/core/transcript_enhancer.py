@@ -4,6 +4,7 @@ Service for enhancing meeting transcripts with visual elements.
 
 import os
 import json
+import re
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime
@@ -19,7 +20,8 @@ class TranscriptEnhancer:
     def __init__(
         self,
         gemini_api_key: Optional[str] = None,
-        video_quality: int = 95
+        video_quality: int = 95,
+        model_name: Optional[str] = None
     ):
         """
         Initialize transcript enhancer.
@@ -27,8 +29,9 @@ class TranscriptEnhancer:
         Args:
             gemini_api_key: Google API key for Gemini
             video_quality: JPEG quality for extracted frames (1-100)
+            model_name: Gemini model to use
         """
-        self.gemini_service = GeminiService(api_key=gemini_api_key)
+        self.gemini_service = GeminiService(api_key=gemini_api_key, model_name=model_name) if model_name else GeminiService(api_key=gemini_api_key)
         self.video_extractor = VideoExtractor(output_quality=video_quality)
     
     def enhance_meeting_transcript(
@@ -57,6 +60,9 @@ class TranscriptEnhancer:
         # Create directories
         action_notes_dir.mkdir(exist_ok=True)
         images_dir.mkdir(exist_ok=True)
+        
+        # Check for existing enhancements and iterate filenames
+        enhancement_num = self._get_next_enhancement_number(action_notes_dir)
         
         results = {
             "meeting_dir": str(meeting_path),
@@ -90,8 +96,11 @@ class TranscriptEnhancer:
             )
             results["visual_points"] = [point.to_dict() for point in visual_points]
             
-            # Save visual points analysis
-            visual_points_path = action_notes_dir / "visual-points.json"
+            # Save visual points analysis with iteration number
+            if enhancement_num > 1:
+                visual_points_path = action_notes_dir / f"visual-points-{enhancement_num}.json"
+            else:
+                visual_points_path = action_notes_dir / "visual-points.json"
             self.gemini_service.export_visual_points(visual_points, str(visual_points_path))
             results["files_created"].append(str(visual_points_path))
             
@@ -120,14 +129,21 @@ class TranscriptEnhancer:
                     str(action_notes_dir)
                 )
                 
-                enhanced_path = action_notes_dir / "transcript-enhanced.md"
+                # Use iteration number for enhanced transcript
+                if enhancement_num > 1:
+                    enhanced_path = action_notes_dir / f"transcript-enhanced-{enhancement_num}.md"
+                else:
+                    enhanced_path = action_notes_dir / "transcript-enhanced.md"
                 with open(enhanced_path, 'w', encoding='utf-8') as f:
                     f.write(enhanced_md)
                 results["files_created"].append(str(enhanced_path))
             
             # Step 6: Create summary report
             summary = self._create_summary_report(results, transcript, visual_points)
-            summary_path = action_notes_dir / "enhancement-summary.md"
+            if enhancement_num > 1:
+                summary_path = action_notes_dir / f"enhancement-summary-{enhancement_num}.md"
+            else:
+                summary_path = action_notes_dir / "enhancement-summary.md"
             with open(summary_path, 'w', encoding='utf-8') as f:
                 f.write(summary)
             results["files_created"].append(str(summary_path))
@@ -297,3 +313,23 @@ class TranscriptEnhancer:
     def set_gemini_prompt(self, prompt: str):
         """Set custom Gemini prompt for visual analysis."""
         self.gemini_service.set_custom_prompt(prompt)
+    
+    def _get_next_enhancement_number(self, action_notes_dir: Path) -> int:
+        """Get the next enhancement number for iterating results."""
+        # Look for existing visual-points files
+        existing_files = list(action_notes_dir.glob("visual-points*.json"))
+        
+        if not existing_files:
+            return 1
+        
+        # Extract numbers from filenames
+        numbers = [1]  # Start with 1 for the base file
+        for file in existing_files:
+            if file.name == "visual-points.json":
+                continue
+            # Extract number from visual-points-N.json
+            match = re.search(r'visual-points-(\d+)\.json', file.name)
+            if match:
+                numbers.append(int(match.group(1)))
+        
+        return max(numbers) + 1

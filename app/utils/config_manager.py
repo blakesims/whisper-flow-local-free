@@ -54,6 +54,10 @@ class ConfigManager:
                 json.dump(self.config, f, indent=4)
         except IOError as e:
             print(f"Error saving config to {self.config_path}: {e}")
+    
+    def save_config(self):
+        """Public method to save config."""
+        self._save_config()
 
 # Example usage (optional, for testing)
 if __name__ == '__main__':

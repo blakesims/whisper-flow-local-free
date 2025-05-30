@@ -19,8 +19,10 @@ from .pattern_selection_dialog import PatternSelectionDialog # <-- IMPORTED Patt
 from .zoom_meeting_dialog import ZoomMeetingDialog # <-- IMPORTED ZoomMeetingDialog
 from .meeting_worker import MeetingTranscriptionWorker # <-- IMPORTED MeetingTranscriptionWorker
 from .enhancement_worker import MeetingEnhancementWorker # <-- IMPORTED MeetingEnhancementWorker
+from .settings_dialog import SettingsDialog # <-- IMPORTED SettingsDialog
+from .reenhance_dialog import ReEnhanceDialog # <-- IMPORTED ReEnhanceDialog
 
-# from app.utils.config_manager import ConfigManager # Will be used later
+from app.utils.config_manager import ConfigManager
 
 class AppState:
     IDLE = 0
@@ -51,6 +53,9 @@ class MainWindow(QMainWindow):
         self.is_meeting_mode = False  # Flag to track if we're in meeting mode
         self.last_meeting_transcript = None  # Store transcript for enhancement
         self.selected_meeting_dir = None  # Store meeting directory path
+        
+        # Initialize config manager
+        self.config_manager = ConfigManager()
 
         # New attributes for Fabric workflow
         self.fabric_patterns = None
@@ -86,7 +91,14 @@ class MainWindow(QMainWindow):
         self.model_size_selector.currentTextChanged.connect(self._on_model_size_changed)
         top_bar_layout.addWidget(self.model_size_selector)
         
-        top_bar_layout.addStretch() # Pushes minimize button to the right
+        top_bar_layout.addStretch() # Pushes buttons to the right
+
+        # Settings button
+        self.settings_button = QPushButton("⚙")
+        self.settings_button.setToolTip("Settings")
+        self.settings_button.setFixedSize(30, 28)
+        self.settings_button.clicked.connect(self._on_settings_clicked)
+        top_bar_layout.addWidget(self.settings_button)
 
         # Minimize button
         self.minimize_button = QPushButton("Min") # Renamed from "-"
@@ -109,6 +121,7 @@ class MainWindow(QMainWindow):
         self.upload_button = QPushButton("Upload")
         self.meeting_button = QPushButton("Meeting")
         self.enhance_button = QPushButton("Enhance")
+        self.reenhance_button = QPushButton("Re-Enhance")
 
         self.rec_button.setToolTip("Start/Resume Recording (R)")
         self.stop_button.setToolTip("Stop Recording (S)")
@@ -119,6 +132,7 @@ class MainWindow(QMainWindow):
         self.upload_button.setToolTip("Upload audio file for transcription (U)")
         self.meeting_button.setToolTip("Select Zoom meeting for summary (M)")
         self.enhance_button.setToolTip("Enhance meeting transcript with visual analysis (E)")
+        self.reenhance_button.setToolTip("Re-enhance existing transcript with visual analysis (Shift+E)")
 
         self.rec_button.clicked.connect(self._on_rec_clicked)
         self.stop_button.clicked.connect(self._on_stop_clicked)
@@ -129,6 +143,7 @@ class MainWindow(QMainWindow):
         self.upload_button.clicked.connect(self._on_upload_clicked)
         self.meeting_button.clicked.connect(self._on_meeting_clicked)
         self.enhance_button.clicked.connect(self._on_enhance_clicked)
+        self.reenhance_button.clicked.connect(self._on_reenhance_clicked)
 
         controls_layout.addWidget(self.rec_button)
         controls_layout.addWidget(self.stop_button)
@@ -139,6 +154,7 @@ class MainWindow(QMainWindow):
         controls_layout.addWidget(self.upload_button)
         controls_layout.addWidget(self.meeting_button)
         controls_layout.addWidget(self.enhance_button)
+        controls_layout.addWidget(self.reenhance_button)
         main_layout.addLayout(controls_layout)
 
         # Status/Error Label
@@ -222,6 +238,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence(Qt.Key.Key_U), self, self._on_upload_clicked)
         QShortcut(QKeySequence(Qt.Key.Key_M), self, self._on_meeting_clicked)  # M for Meeting
         QShortcut(QKeySequence(Qt.Key.Key_E), self, self._on_enhance_clicked)  # E for Enhance
+        QShortcut(QKeySequence(Qt.Modifier.SHIFT | Qt.Key.Key_E), self, self._on_reenhance_clicked)  # Shift+E for Re-enhance
         QShortcut(QKeySequence(Qt.Key.Key_Q), self, self.close) # Q to quit
 
     def _connect_audio_recorder_signals(self):
@@ -519,6 +536,7 @@ class MainWindow(QMainWindow):
             self.upload_button.setEnabled(model_ready)
             self.meeting_button.setEnabled(model_ready)
             self.enhance_button.setEnabled(model_ready and bool(self.last_meeting_transcript))
+            self.reenhance_button.setEnabled(model_ready)  # Always enabled when model is ready
             if not self.status_label.property("is_error") and not self.is_model_loading_busy:
                  self._clear_status_message_after_delay()
         elif self.app_state == AppState.RECORDING:
@@ -533,6 +551,7 @@ class MainWindow(QMainWindow):
             self.fabric_button.setEnabled(model_ready)
             self.upload_button.setEnabled(False)
             self.meeting_button.setEnabled(False)
+            self.reenhance_button.setEnabled(False)
             self._set_status_message("Recording...")
         elif self.app_state == AppState.PAUSED:
             self.waveform_widget.set_status(WaveformStatus.IDLE) # Or a specific PAUSED color
@@ -546,6 +565,7 @@ class MainWindow(QMainWindow):
             self.fabric_button.setEnabled(model_ready)
             self.upload_button.setEnabled(False)
             self.meeting_button.setEnabled(False)
+            self.reenhance_button.setEnabled(False)
             self._set_status_message("Paused.")
         elif self.app_state == AppState.CANCELLING:
             self.waveform_widget.set_status(WaveformStatus.IDLE)
@@ -757,19 +777,22 @@ class MainWindow(QMainWindow):
                 return
             
             # Check for Gemini API key
-            gemini_api_key = os.getenv("GOOGLE_API_KEY")
+            gemini_api_key = os.getenv("GOOGLE_API_KEY") or self.config_manager.get("google_api_key")
             if not gemini_api_key:
-                self._handle_enhancement_error("GOOGLE_API_KEY environment variable not set")
+                self._handle_enhancement_error("Google API key not set. Please configure in Settings.")
                 return
             
             self._set_status_message("Starting visual analysis...")
+            
+            # Get settings from config
+            max_visual_points = self.config_manager.get("max_visual_points", 20)
             
             # Create and start enhancement worker
             enhancement_worker = MeetingEnhancementWorker(
                 meeting_dir=self.selected_meeting_dir,
                 transcript=self.last_meeting_transcript,
                 gemini_api_key=gemini_api_key,
-                max_visual_points=20
+                max_visual_points=max_visual_points
             )
             
             enhancement_worker.signals.progress.connect(self._handle_enhancement_progress)
@@ -814,6 +837,8 @@ class MainWindow(QMainWindow):
         self.upload_button.setStyleSheet(button_style)
         self.meeting_button.setStyleSheet(button_style)
         self.enhance_button.setStyleSheet(button_style)
+        self.reenhance_button.setStyleSheet(button_style)
+        self.settings_button.setStyleSheet(button_style)
         self.minimize_button.setText("Min")
         self.minimize_button.setFixedSize(40, 28)
 
@@ -1432,6 +1457,80 @@ class MainWindow(QMainWindow):
         self.meeting_participant_names = []
         self.selected_meeting_dir = None
         self.last_meeting_transcript = None
+    
+    def _on_settings_clicked(self):
+        """Show settings dialog."""
+        dialog = SettingsDialog(self)
+        dialog.settings_changed.connect(self._on_settings_changed)
+        dialog.exec()
+    
+    def _on_settings_changed(self):
+        """Handle settings change."""
+        # Reload config
+        self.config_manager = ConfigManager()
+        print("Settings updated")
+    
+    def _on_reenhance_clicked(self):
+        """Handle re-enhance button click."""
+        dialog = ReEnhanceDialog(self)
+        dialog.transcript_selected.connect(self._on_reenhance_transcript_selected)
+        
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Transcript selected, will be handled by signal
+            pass
+    
+    def _on_reenhance_transcript_selected(self, meeting_dir: str, transcript_path: str):
+        """Handle re-enhance transcript selection."""
+        print(f"DEBUG: Re-enhancing transcript from {meeting_dir}")
+        
+        try:
+            # Load the existing transcript
+            with open(transcript_path, 'r', encoding='utf-8') as f:
+                transcript_data = json.load(f)
+            
+            # Convert to MeetingTranscript object
+            from app.core.meeting_transcript import MeetingTranscript, TranscriptSegment
+            from datetime import datetime
+            
+            meeting_info = transcript_data.get("meeting", {})
+            transcript = MeetingTranscript(
+                date=datetime.fromisoformat(meeting_info.get("date", datetime.now().isoformat())),
+                participants=meeting_info.get("participants", []),
+                audio_files=meeting_info.get("audio_files", {})
+            )
+            
+            # Add segments
+            for segment_data in transcript_data.get("segments", []):
+                segment = TranscriptSegment(
+                    speaker=segment_data["speaker"],
+                    text=segment_data["text"],
+                    start_time=segment_data["start_time"],
+                    end_time=segment_data["end_time"],
+                    confidence=segment_data.get("confidence", 1.0)
+                )
+                transcript.add_segment(segment)
+            
+            # Set up for enhancement
+            self.selected_meeting_dir = meeting_dir
+            self.last_meeting_transcript = transcript
+            
+            # Show info in text area
+            info = f"📁 Re-enhancing meeting:\n{os.path.basename(meeting_dir)}\n\n"
+            info += f"👥 Participants: {', '.join(transcript.participants)}\n"
+            info += f"📊 Segments: {len(transcript.segments)}\n\n"
+            info += "Press 'E' or click 'Enhance' to analyze with updated settings."
+            
+            self.transcription_text.setPlainText(info)
+            self._set_status_message("Ready to re-enhance. Press 'E' to start.")
+            
+            # Enable enhance button
+            self.enhance_button.setEnabled(True)
+            
+        except Exception as e:
+            print(f"ERROR loading transcript: {e}")
+            import traceback
+            traceback.print_exc()
+            self._set_status_message(f"Error loading transcript: {str(e)}", is_error=True)
 
 if __name__ == '__main__':
     # This is for testing the window directly

@@ -51,7 +51,19 @@ class MeetingEnhancementWorker(QRunnable):
         try:
             # Initialize enhancer
             self.signals.progress.emit("Initializing enhancement service...")
-            enhancer = TranscriptEnhancer(gemini_api_key=self.gemini_api_key)
+            
+            # Get settings from config if available
+            from app.utils.config_manager import ConfigManager
+            config = ConfigManager()
+            
+            model_name = config.get("gemini_model", None)
+            video_quality = config.get("video_quality", 95)
+            
+            enhancer = TranscriptEnhancer(
+                gemini_api_key=self.gemini_api_key,
+                video_quality=video_quality,
+                model_name=model_name
+            )
             
             if self._is_cancelled:
                 return
