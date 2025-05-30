@@ -1,7 +1,7 @@
 # Placeholder for main_window.py 
 
 import sys
-from PySide6.QtWidgets import QMainWindow, QApplication, QLabel, QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QTextEdit, QProgressBar, QComboBox, QDialog
+from PySide6.QtWidgets import QMainWindow, QApplication, QLabel, QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QTextEdit, QProgressBar, QComboBox, QDialog, QFileDialog
 from PySide6.QtCore import Qt, QTimer, Signal, Slot, QPoint, QEvent, QThreadPool
 from PySide6.QtGui import QKeySequence, QShortcut, QColor
 import numpy as np
@@ -93,6 +93,7 @@ class MainWindow(QMainWindow):
         self.cancel_button = QPushButton("Cancel")
         self.transcribe_button = QPushButton("Transcribe")
         self.fabric_button = QPushButton("Fabric")
+        self.upload_button = QPushButton("Upload")
 
         self.rec_button.setToolTip("Start/Resume Recording (R)")
         self.stop_button.setToolTip("Stop Recording (S)")
@@ -100,6 +101,7 @@ class MainWindow(QMainWindow):
         self.cancel_button.setToolTip("Cancel Recording (C)")
         self.transcribe_button.setToolTip("Transcribe last recording, or current if active (T)")
         self.fabric_button.setToolTip("Process with Fabric last recording, or current if active (F)")
+        self.upload_button.setToolTip("Upload audio file for transcription (U)")
 
         self.rec_button.clicked.connect(self._on_rec_clicked)
         self.stop_button.clicked.connect(self._on_stop_clicked)
@@ -107,6 +109,7 @@ class MainWindow(QMainWindow):
         self.cancel_button.clicked.connect(self._on_cancel_clicked)
         self.transcribe_button.clicked.connect(self._on_transcribe_keypress)
         self.fabric_button.clicked.connect(self._on_fabric_keypress)
+        self.upload_button.clicked.connect(self._on_upload_clicked)
 
         controls_layout.addWidget(self.rec_button)
         controls_layout.addWidget(self.stop_button)
@@ -114,6 +117,7 @@ class MainWindow(QMainWindow):
         controls_layout.addWidget(self.cancel_button)
         controls_layout.addWidget(self.transcribe_button)
         controls_layout.addWidget(self.fabric_button)
+        controls_layout.addWidget(self.upload_button)
         main_layout.addLayout(controls_layout)
 
         # Status/Error Label
@@ -173,7 +177,7 @@ class MainWindow(QMainWindow):
         """)
 
         # Set initial size (can be configurable later)
-        self.resize(350, 300) # Adjusted initial size for status label
+        self.resize(400, 300) # Adjusted initial size for status label and extra button
 
         # Make the window draggable (since it's frameless)
         self._drag_pos = None
@@ -194,6 +198,7 @@ class MainWindow(QMainWindow):
         # New shortcuts for Transcribe and Fabric
         QShortcut(QKeySequence(Qt.Key.Key_T), self, self._on_transcribe_keypress)
         QShortcut(QKeySequence(Qt.Key.Key_F), self, self._on_fabric_keypress)
+        QShortcut(QKeySequence(Qt.Key.Key_U), self, self._on_upload_clicked)
         QShortcut(QKeySequence(Qt.Key.Key_Q), self, self.close) # Q to quit
 
     def _connect_audio_recorder_signals(self):
@@ -308,6 +313,28 @@ class MainWindow(QMainWindow):
             self._change_app_state(AppState.CANCELLING)
             self.audio_recorder.stop_recording() # Corrected: No 'cancel' argument
 
+    def _on_upload_clicked(self):
+        self._clear_status_message()
+        self.close_after_transcription = False
+        
+        # Show file dialog to select audio file
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Audio File",
+            "",
+            "Audio Files (*.wav *.mp3 *.m4a *.flac *.ogg *.opus *.webm);;All Files (*.*)"
+        )
+        
+        if file_path and os.path.exists(file_path):
+            self.last_saved_audio_path = file_path
+            self._set_status_message(f"File selected: {os.path.basename(file_path)}")
+            # Automatically start transcription
+            self._change_app_state(AppState.TRANSCRIBING)
+        elif file_path:
+            self._set_status_message(f"File not found: {file_path}", is_error=True)
+        else:
+            self._set_status_message("No file selected.")
+
     def _on_minimize_clicked(self):
         self.showMinimized()
 
@@ -380,6 +407,7 @@ class MainWindow(QMainWindow):
             self.cancel_button.setEnabled(False)
             self.transcribe_button.setEnabled(False)
             self.fabric_button.setEnabled(False)
+            self.upload_button.setEnabled(False)
             self.model_size_selector.setEnabled(False)
             # Status message is set by _request_model_load
             return # Skip further state updates while model is loading
@@ -395,6 +423,7 @@ class MainWindow(QMainWindow):
             # Enable Transcribe/Fabric if model is ready AND (there's a last saved path OR there's text in the box for Fabric)
             self.transcribe_button.setEnabled(model_ready and bool(self.last_saved_audio_path))
             self.fabric_button.setEnabled(model_ready and (bool(self.last_saved_audio_path) or bool(self.transcription_text.toPlainText())))
+            self.upload_button.setEnabled(model_ready)
             if not self.status_label.property("is_error") and not self.is_model_loading_busy:
                  self._clear_status_message_after_delay()
         elif self.app_state == AppState.RECORDING:
@@ -407,6 +436,7 @@ class MainWindow(QMainWindow):
             self.cancel_button.setEnabled(True)
             self.transcribe_button.setEnabled(model_ready)
             self.fabric_button.setEnabled(model_ready)
+            self.upload_button.setEnabled(False)
             self._set_status_message("Recording...")
         elif self.app_state == AppState.PAUSED:
             self.waveform_widget.set_status(WaveformStatus.IDLE) # Or a specific PAUSED color
@@ -418,6 +448,7 @@ class MainWindow(QMainWindow):
             self.cancel_button.setEnabled(True)
             self.transcribe_button.setEnabled(model_ready)
             self.fabric_button.setEnabled(model_ready)
+            self.upload_button.setEnabled(False)
             self._set_status_message("Paused.")
         elif self.app_state == AppState.CANCELLING:
             self.waveform_widget.set_status(WaveformStatus.IDLE)
@@ -427,6 +458,7 @@ class MainWindow(QMainWindow):
             self.cancel_button.setEnabled(False)
             self.transcribe_button.setEnabled(False)
             self.fabric_button.setEnabled(False)
+            self.upload_button.setEnabled(False)
             self._set_status_message("Cancelling recording...")
         elif self.app_state == AppState.STOPPING_FOR_ACTION:
             self.waveform_widget.set_status(WaveformStatus.IDLE)
@@ -436,6 +468,7 @@ class MainWindow(QMainWindow):
             self.cancel_button.setEnabled(False)
             self.transcribe_button.setEnabled(False)
             self.fabric_button.setEnabled(False)
+            self.upload_button.setEnabled(False)
             # Specific message will be set by caller
             # self._set_status_message("Stopping for action...")
         elif self.app_state == AppState.TRANSCRIBING:
@@ -446,6 +479,7 @@ class MainWindow(QMainWindow):
             self.cancel_button.setEnabled(False)
             self.transcribe_button.setEnabled(False)
             self.fabric_button.setEnabled(False)
+            self.upload_button.setEnabled(False)
             self.model_size_selector.setEnabled(False) # Disable model selection during transcription
             self._set_status_message(f"Transcribing ({self.current_model_size}): {os.path.basename(self.last_saved_audio_path) if self.last_saved_audio_path else '...'}")
             
@@ -486,6 +520,7 @@ class MainWindow(QMainWindow):
             self.cancel_button.setEnabled(False)
             self.transcribe_button.setEnabled(False)
             self.fabric_button.setEnabled(False)
+            self.upload_button.setEnabled(False)
             self.model_size_selector.setEnabled(False)
 
             # Logic to decide whether to transcribe or go straight to listing patterns
@@ -529,6 +564,7 @@ class MainWindow(QMainWindow):
             self.rec_button.setEnabled(False); self.stop_button.setEnabled(False)
             self.pause_button.setEnabled(False); self.cancel_button.setEnabled(False)
             self.transcribe_button.setEnabled(False); self.fabric_button.setEnabled(False)
+            self.upload_button.setEnabled(False)
             self.model_size_selector.setEnabled(False)
             self._set_status_message(f"Running Fabric pattern: {self.selected_fabric_pattern}...", clear_automatically=False)
 
@@ -578,6 +614,7 @@ class MainWindow(QMainWindow):
         self.minimize_button.setStyleSheet(button_style)
         self.transcribe_button.setStyleSheet(button_style)
         self.fabric_button.setStyleSheet(button_style)
+        self.upload_button.setStyleSheet(button_style)
         self.minimize_button.setText("Min")
         self.minimize_button.setFixedSize(40, 28)
 
