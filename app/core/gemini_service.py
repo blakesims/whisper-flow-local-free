@@ -112,7 +112,7 @@ class GeminiService:
             user_prompt += f"\n\nPlease limit your response to the {max_points} most important points."
         
         try:
-            # Create the generation config for JSON output
+            # Create the generation config for JSON output with system instruction
             config = GenerateContentConfig(
                 temperature=0.3,  # Lower temperature for more consistent output
                 response_mime_type="application/json",
@@ -130,15 +130,15 @@ class GeminiService:
                         },
                         "required": ["timestamp", "description", "speaker", "quote", "reason", "priority"]
                     }
-                }
+                },
+                system_instruction=system_prompt  # System instruction goes in config
             )
             
-            # Generate response with system instruction
+            # Generate response
             response = self.client.models.generate_content(
                 model=self.model_name,
                 contents=user_prompt,
-                config=config,
-                system_instruction=system_prompt
+                config=config
             )
             
             # Parse the JSON response
