@@ -38,6 +38,10 @@ class MainWindow(QMainWindow):
         self.close_after_transcription = False # New flag
         self.current_model_size = "base" # Initialize before model selector
         self.is_model_loading_busy = False # Flag for model loading
+        
+        # Meeting mode attributes
+        self.meeting_audio_files = []  # List of selected audio files for meeting
+        self.is_meeting_mode = False  # Flag to track if we're in meeting mode
 
         # New attributes for Fabric workflow
         self.fabric_patterns = None
@@ -94,6 +98,7 @@ class MainWindow(QMainWindow):
         self.transcribe_button = QPushButton("Transcribe")
         self.fabric_button = QPushButton("Fabric")
         self.upload_button = QPushButton("Upload")
+        self.meeting_button = QPushButton("Meeting")
 
         self.rec_button.setToolTip("Start/Resume Recording (R)")
         self.stop_button.setToolTip("Stop Recording (S)")
@@ -102,6 +107,7 @@ class MainWindow(QMainWindow):
         self.transcribe_button.setToolTip("Transcribe last recording, or current if active (T)")
         self.fabric_button.setToolTip("Process with Fabric last recording, or current if active (F)")
         self.upload_button.setToolTip("Upload audio file for transcription (U)")
+        self.meeting_button.setToolTip("Upload multiple audio files for meeting summary (G)")
 
         self.rec_button.clicked.connect(self._on_rec_clicked)
         self.stop_button.clicked.connect(self._on_stop_clicked)
@@ -110,6 +116,7 @@ class MainWindow(QMainWindow):
         self.transcribe_button.clicked.connect(self._on_transcribe_keypress)
         self.fabric_button.clicked.connect(self._on_fabric_keypress)
         self.upload_button.clicked.connect(self._on_upload_clicked)
+        self.meeting_button.clicked.connect(self._on_meeting_clicked)
 
         controls_layout.addWidget(self.rec_button)
         controls_layout.addWidget(self.stop_button)
@@ -118,6 +125,7 @@ class MainWindow(QMainWindow):
         controls_layout.addWidget(self.transcribe_button)
         controls_layout.addWidget(self.fabric_button)
         controls_layout.addWidget(self.upload_button)
+        controls_layout.addWidget(self.meeting_button)
         main_layout.addLayout(controls_layout)
 
         # Status/Error Label
@@ -177,7 +185,7 @@ class MainWindow(QMainWindow):
         """)
 
         # Set initial size (can be configurable later)
-        self.resize(400, 300) # Adjusted initial size for status label and extra button
+        self.resize(450, 350) # Adjusted initial size for status label and extra buttons
 
         # Make the window draggable (since it's frameless)
         self._drag_pos = None
@@ -199,6 +207,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence(Qt.Key.Key_T), self, self._on_transcribe_keypress)
         QShortcut(QKeySequence(Qt.Key.Key_F), self, self._on_fabric_keypress)
         QShortcut(QKeySequence(Qt.Key.Key_U), self, self._on_upload_clicked)
+        QShortcut(QKeySequence(Qt.Key.Key_G), self, self._on_meeting_clicked)  # G for meetinG
         QShortcut(QKeySequence(Qt.Key.Key_Q), self, self.close) # Q to quit
 
     def _connect_audio_recorder_signals(self):
@@ -335,6 +344,40 @@ class MainWindow(QMainWindow):
         else:
             self._set_status_message("No file selected.")
 
+    def _on_meeting_clicked(self):
+        self._clear_status_message()
+        self.close_after_transcription = False
+        self.is_meeting_mode = True
+        
+        # Show file dialog to select multiple audio files
+        file_paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Select Audio Files for Meeting Summary",
+            "",
+            "Audio Files (*.wav *.mp3 *.m4a *.flac *.ogg *.opus *.webm);;All Files (*.*)"
+        )
+        
+        if file_paths and len(file_paths) >= 2:
+            self.meeting_audio_files = file_paths
+            file_names = [os.path.basename(f) for f in file_paths]
+            self._set_status_message(f"Selected {len(file_paths)} files for meeting summary")
+            
+            # Show selected files in the transcription text area temporarily
+            file_list = "Selected files for meeting summary:\n"
+            for i, name in enumerate(file_names, 1):
+                file_list += f"{i}. {name}\n"
+            self.transcription_text.setPlainText(file_list)
+            
+            # TODO: Start meeting transcription process
+            # For now, just show a message
+            self._set_status_message(f"Meeting mode: {len(file_paths)} files selected. Feature in development.", is_error=False)
+        elif file_paths and len(file_paths) < 2:
+            self._set_status_message("Please select at least 2 audio files for meeting summary.", is_error=True)
+            self.is_meeting_mode = False
+        else:
+            self._set_status_message("No files selected.")
+            self.is_meeting_mode = False
+    
     def _on_minimize_clicked(self):
         self.showMinimized()
 
@@ -408,6 +451,7 @@ class MainWindow(QMainWindow):
             self.transcribe_button.setEnabled(False)
             self.fabric_button.setEnabled(False)
             self.upload_button.setEnabled(False)
+            self.meeting_button.setEnabled(False)
             self.model_size_selector.setEnabled(False)
             # Status message is set by _request_model_load
             return # Skip further state updates while model is loading
@@ -424,6 +468,7 @@ class MainWindow(QMainWindow):
             self.transcribe_button.setEnabled(model_ready and bool(self.last_saved_audio_path))
             self.fabric_button.setEnabled(model_ready and (bool(self.last_saved_audio_path) or bool(self.transcription_text.toPlainText())))
             self.upload_button.setEnabled(model_ready)
+            self.meeting_button.setEnabled(model_ready)
             if not self.status_label.property("is_error") and not self.is_model_loading_busy:
                  self._clear_status_message_after_delay()
         elif self.app_state == AppState.RECORDING:
@@ -437,6 +482,7 @@ class MainWindow(QMainWindow):
             self.transcribe_button.setEnabled(model_ready)
             self.fabric_button.setEnabled(model_ready)
             self.upload_button.setEnabled(False)
+            self.meeting_button.setEnabled(False)
             self._set_status_message("Recording...")
         elif self.app_state == AppState.PAUSED:
             self.waveform_widget.set_status(WaveformStatus.IDLE) # Or a specific PAUSED color
@@ -449,6 +495,7 @@ class MainWindow(QMainWindow):
             self.transcribe_button.setEnabled(model_ready)
             self.fabric_button.setEnabled(model_ready)
             self.upload_button.setEnabled(False)
+            self.meeting_button.setEnabled(False)
             self._set_status_message("Paused.")
         elif self.app_state == AppState.CANCELLING:
             self.waveform_widget.set_status(WaveformStatus.IDLE)
@@ -459,6 +506,7 @@ class MainWindow(QMainWindow):
             self.transcribe_button.setEnabled(False)
             self.fabric_button.setEnabled(False)
             self.upload_button.setEnabled(False)
+            self.meeting_button.setEnabled(False)
             self._set_status_message("Cancelling recording...")
         elif self.app_state == AppState.STOPPING_FOR_ACTION:
             self.waveform_widget.set_status(WaveformStatus.IDLE)
@@ -469,6 +517,7 @@ class MainWindow(QMainWindow):
             self.transcribe_button.setEnabled(False)
             self.fabric_button.setEnabled(False)
             self.upload_button.setEnabled(False)
+            self.meeting_button.setEnabled(False)
             # Specific message will be set by caller
             # self._set_status_message("Stopping for action...")
         elif self.app_state == AppState.TRANSCRIBING:
@@ -480,6 +529,7 @@ class MainWindow(QMainWindow):
             self.transcribe_button.setEnabled(False)
             self.fabric_button.setEnabled(False)
             self.upload_button.setEnabled(False)
+            self.meeting_button.setEnabled(False)
             self.model_size_selector.setEnabled(False) # Disable model selection during transcription
             self._set_status_message(f"Transcribing ({self.current_model_size}): {os.path.basename(self.last_saved_audio_path) if self.last_saved_audio_path else '...'}")
             
@@ -521,6 +571,7 @@ class MainWindow(QMainWindow):
             self.transcribe_button.setEnabled(False)
             self.fabric_button.setEnabled(False)
             self.upload_button.setEnabled(False)
+            self.meeting_button.setEnabled(False)
             self.model_size_selector.setEnabled(False)
 
             # Logic to decide whether to transcribe or go straight to listing patterns
@@ -565,6 +616,7 @@ class MainWindow(QMainWindow):
             self.pause_button.setEnabled(False); self.cancel_button.setEnabled(False)
             self.transcribe_button.setEnabled(False); self.fabric_button.setEnabled(False)
             self.upload_button.setEnabled(False)
+            self.meeting_button.setEnabled(False)
             self.model_size_selector.setEnabled(False)
             self._set_status_message(f"Running Fabric pattern: {self.selected_fabric_pattern}...", clear_automatically=False)
 
@@ -615,6 +667,7 @@ class MainWindow(QMainWindow):
         self.transcribe_button.setStyleSheet(button_style)
         self.fabric_button.setStyleSheet(button_style)
         self.upload_button.setStyleSheet(button_style)
+        self.meeting_button.setStyleSheet(button_style)
         self.minimize_button.setText("Min")
         self.minimize_button.setFixedSize(40, 28)
 
