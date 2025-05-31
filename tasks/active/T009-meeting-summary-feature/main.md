@@ -116,12 +116,53 @@ Extend the existing upload functionality to support multi-file uploads for meeti
 - Added "Enhance" button and shortcut (E) to UI
 - Outputs to `~/Documents/Zoom/[Meeting]/action-notes/` directory
 
-### Phase 5: Testing & Refinement
+### Phase 5: Transcript Sectioning for Long Meetings
+**Status**: Not Started
+
+**Objectives**:
+- Implement configurable line length threshold in settings
+- Create new Google Gemini prompt for intelligent transcript sectioning
+- Design JSON structure for sectioned transcripts
+- Implement parallel processing of sections for visual analysis
+- Integrate sectioning into the enhancement workflow
+
+**Estimated Time**: 3 days
+
+**Resources Needed**:
+- New prompt file: `app/prompts/transcript-sectioner.md`
+- Google Gemini API with structured output
+- Settings dialog extension
+
+**Dependencies**:
+- Phase 4 completion
+
+### Phase 6: Parallel Visual Analysis for Sections
+**Status**: Not Started
+
+**Objectives**:
+- Modify visual analysis to work with transcript sections
+- Implement parallel API calls for each section
+- Merge visual points from all sections
+- Update enhanced transcript generation for sectioned format
+- Handle section boundaries in frame extraction
+
+**Estimated Time**: 2 days
+
+**Resources Needed**:
+- Threading/async utilities for parallel processing
+- Section merging algorithm
+- Progress tracking for multiple sections
+
+**Dependencies**:
+- Phase 5 completion
+
+### Phase 7: Testing & Refinement
 **Status**: Not Started
 
 **Objectives**:
 - Test with various meeting recordings
 - Handle edge cases (silence, overlapping speech, audio sync issues)
+- Test sectioning with very long meetings (2+ hours)
 - Optimize performance for long meetings
 - Add user preferences for output formatting
 - Implement error handling and user feedback
@@ -130,11 +171,12 @@ Extend the existing upload functionality to support multi-file uploads for meeti
 
 **Resources Needed**:
 - Diverse test audio samples
+- Long meeting recordings for section testing
 - User feedback mechanism
 - Performance profiling tools
 
 **Dependencies**:
-- Phase 4 completion
+- Phase 6 completion
 
 ## Notes & Updates
 - 2025-05-30: Task created based on user request for meeting summary functionality
@@ -144,3 +186,8 @@ Extend the existing upload functionality to support multi-file uploads for meeti
   - Added video frame extraction at specified timestamps
   - Created enhanced transcript with embedded images
   - Output structure: action-notes/transcript.json, visual-points.json, transcript-enhanced.md, images/
+- 2025-05-31: Added Phase 5 & 6 for transcript sectioning
+  - Phase 5: Implement intelligent sectioning for long transcripts
+  - Phase 6: Parallel processing of sections for improved performance
+  - Will add configurable line threshold in settings
+  - Sections will be processed in parallel for visual analysis

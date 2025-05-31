@@ -9,7 +9,7 @@
 | T006 | Settings and Configuration | 3 | 0/4 | PLANNING | T001, T002, T004 | task-documentation | [main.md](active/T006-settings-and-configuration/main.md) |
 | T007 | Packaging and Distribution | 4 | 0/3 | PLANNING | T001, T002, T003, T004, T005, T006 | task-documentation | [main.md](active/T007-packaging-and-distribution/main.md) |
 | T008 | Testing and Refinement | 3 | 0/5 | PLANNING | T001, T002, T003, T004, T005, T006 | task-documentation | [main.md](active/T008-testing-and-refinement/main.md) |
-| T009 | Meeting Summary Feature | 3 | 4/5 | ACTIVE | T002#P3, T004 | task-documentation, code-conventions, project-architecture | [main.md](active/T009-meeting-summary-feature/main.md) |
+| T009 | Meeting Summary Feature | 3 | 4/7 | ACTIVE | T002#P3, T004 | task-documentation, code-conventions, project-architecture | [main.md](active/T009-meeting-summary-feature/main.md) |
 
 ## Notes
 - Priority: 1=Highest, 5=Lowest
