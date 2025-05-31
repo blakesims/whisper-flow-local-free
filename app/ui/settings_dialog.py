@@ -10,7 +10,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QComboBox, QPushButton, QLabel,
-    QGroupBox, QMessageBox, QDialogButtonBox
+    QGroupBox, QMessageBox, QDialogButtonBox, QWidget
 )
 from PySide6.QtCore import Qt, Signal
 
