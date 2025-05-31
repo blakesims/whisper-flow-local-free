@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt, QTimer, Signal, Slot, QPoint, QEvent, QThreadPool
 from PySide6.QtGui import QKeySequence, QShortcut, QColor
 import numpy as np
 import os # Added for os.remove
+import json  # Added for json loading in re-enhance
 import pyperclip # For clipboard
 import subprocess # For running paste command
 
@@ -783,23 +784,35 @@ class MainWindow(QMainWindow):
                 return
             
             self._set_status_message("Starting visual analysis...")
+            print(f"DEBUG: Starting enhancement with API key: {'*' * 10 if gemini_api_key else 'NOT SET'}")
             
             # Get settings from config
             max_visual_points = self.config_manager.get("max_visual_points", 20)
+            print(f"DEBUG: Max visual points: {max_visual_points}")
+            print(f"DEBUG: Meeting dir: {self.selected_meeting_dir}")
+            print(f"DEBUG: Transcript segments: {len(self.last_meeting_transcript.segments) if self.last_meeting_transcript else 'None'}")
             
             # Create and start enhancement worker
-            enhancement_worker = MeetingEnhancementWorker(
-                meeting_dir=self.selected_meeting_dir,
-                transcript=self.last_meeting_transcript,
-                gemini_api_key=gemini_api_key,
-                max_visual_points=max_visual_points
-            )
-            
-            enhancement_worker.signals.progress.connect(self._handle_enhancement_progress)
-            enhancement_worker.signals.finished.connect(self._handle_enhancement_finished)
-            enhancement_worker.signals.error.connect(self._handle_enhancement_error)
-            
-            self.thread_pool.start(enhancement_worker)
+            try:
+                enhancement_worker = MeetingEnhancementWorker(
+                    meeting_dir=self.selected_meeting_dir,
+                    transcript=self.last_meeting_transcript,
+                    gemini_api_key=gemini_api_key,
+                    max_visual_points=max_visual_points
+                )
+                
+                enhancement_worker.signals.progress.connect(self._handle_enhancement_progress)
+                enhancement_worker.signals.finished.connect(self._handle_enhancement_finished)
+                enhancement_worker.signals.error.connect(self._handle_enhancement_error)
+                
+                print("DEBUG: Starting enhancement worker in thread pool")
+                self.thread_pool.start(enhancement_worker)
+                print("DEBUG: Enhancement worker started")
+            except Exception as e:
+                print(f"ERROR starting enhancement worker: {e}")
+                import traceback
+                traceback.print_exc()
+                self._handle_enhancement_error(f"Failed to start enhancement: {str(e)}")
 
         # Make sure model_size_selector gets re-enabled if not in a blocking state
         if self.app_state not in [AppState.TRANSCRIBING, AppState.PREPARING_FABRIC, AppState.RUNNING_FABRIC_PATTERN, AppState.STOPPING_FOR_ACTION, AppState.CANCELLING, AppState.MEETING_TRANSCRIBING, AppState.MEETING_ENHANCING] and not self.is_model_loading_busy:
@@ -1387,12 +1400,16 @@ class MainWindow(QMainWindow):
     
     def _on_enhance_clicked(self):
         """Handle enhance button click."""
+        print("DEBUG: Enhance button clicked")
         self._clear_status_message()
         
         # Check if we have a meeting transcript and directory
         if self.last_meeting_transcript and self.selected_meeting_dir:
+            print(f"DEBUG: Have transcript with {len(self.last_meeting_transcript.segments)} segments")
+            print(f"DEBUG: Meeting dir: {self.selected_meeting_dir}")
             self._change_app_state(AppState.MEETING_ENHANCING)
         else:
+            print("DEBUG: No transcript or meeting dir available")
             self._set_status_message("No meeting transcript available for enhancement", is_error=True)
     
     def _prompt_for_enhancement(self):
@@ -1410,6 +1427,40 @@ class MainWindow(QMainWindow):
     def _handle_enhancement_progress(self, status: str):
         """Handle enhancement progress updates."""
         self._set_status_message(status)
+        
+        # Also update the text area with progress
+        current_text = self.transcription_text.toPlainText()
+        if "Enhancement Progress:" not in current_text:
+            # Add progress section
+            self.transcription_text.setPlainText(
+                current_text + "\n\n🔄 Enhancement Progress:\n" + f"• {status}"
+            )
+        else:
+            # Update existing progress
+            lines = current_text.split('\n')
+            new_lines = []
+            in_progress = False
+            
+            for line in lines:
+                if line.startswith("🔄 Enhancement Progress:"):
+                    new_lines.append(line)
+                    in_progress = True
+                elif in_progress and line.startswith("•"):
+                    # Keep existing progress lines
+                    new_lines.append(line)
+                elif in_progress and not line.strip():
+                    # Add new progress before empty line
+                    new_lines.append(f"• {status}")
+                    new_lines.append(line)
+                    in_progress = False
+                else:
+                    new_lines.append(line)
+            
+            # If we didn't add it yet, add at the end
+            if in_progress:
+                new_lines.append(f"• {status}")
+            
+            self.transcription_text.setPlainText('\n'.join(new_lines))
     
     @Slot(dict)
     def _handle_enhancement_finished(self, results: dict):
@@ -1518,7 +1569,8 @@ class MainWindow(QMainWindow):
             info = f"📁 Re-enhancing meeting:\n{os.path.basename(meeting_dir)}\n\n"
             info += f"👥 Participants: {', '.join(transcript.participants)}\n"
             info += f"📊 Segments: {len(transcript.segments)}\n\n"
-            info += "Press 'E' or click 'Enhance' to analyze with updated settings."
+            info += "✨ Press 'E' or click 'Enhance' to analyze with updated settings.\n\n"
+            info += "Note: The enhancement process may take 30-60 seconds depending on transcript length."
             
             self.transcription_text.setPlainText(info)
             self._set_status_message("Ready to re-enhance. Press 'E' to start.")
@@ -1526,11 +1578,22 @@ class MainWindow(QMainWindow):
             # Enable enhance button
             self.enhance_button.setEnabled(True)
             
+            print(f"DEBUG: Re-enhance setup complete. Transcript has {len(transcript.segments)} segments")
+            
+            # Automatically start enhancement after a short delay to show the info
+            QTimer.singleShot(1000, self._auto_start_enhancement)
+            
         except Exception as e:
             print(f"ERROR loading transcript: {e}")
             import traceback
             traceback.print_exc()
             self._set_status_message(f"Error loading transcript: {str(e)}", is_error=True)
+    
+    def _auto_start_enhancement(self):
+        """Auto-start enhancement after re-enhance selection."""
+        if self.last_meeting_transcript and self.selected_meeting_dir:
+            print("DEBUG: Auto-starting enhancement")
+            self._on_enhance_clicked()
 
 if __name__ == '__main__':
     # This is for testing the window directly

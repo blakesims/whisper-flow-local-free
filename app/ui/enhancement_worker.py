@@ -48,13 +48,16 @@ class MeetingEnhancementWorker(QRunnable):
     
     def run(self):
         """Run the enhancement process."""
+        print("DEBUG: Enhancement worker run() started")
         try:
             # Initialize enhancer
             self.signals.progress.emit("Initializing enhancement service...")
+            print("DEBUG: Emitted initialization progress")
             
             # Get settings from config if available
             from app.utils.config_manager import ConfigManager
             config = ConfigManager()
+            print("DEBUG: Loaded config manager")
             
             model_name = config.get("gemini_model", None)
             video_quality = config.get("video_quality", 95)
@@ -64,6 +67,9 @@ class MeetingEnhancementWorker(QRunnable):
                 video_quality=video_quality,
                 model_name=model_name
             )
+            
+            # Set progress callback to emit signals
+            enhancer.set_progress_callback(lambda msg: self.signals.progress.emit(msg))
             
             if self._is_cancelled:
                 return

@@ -58,7 +58,6 @@ class SettingsDialog(QDialog):
         self.api_key_edit = QLineEdit()
         self.api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.api_key_edit.setPlaceholderText("Enter your Google API key")
-        google_layout.addRow("API Key:", self.api_key_edit)
         
         # Show/Hide API key button
         self.toggle_api_key_btn = QPushButton("Show")
@@ -68,12 +67,16 @@ class SettingsDialog(QDialog):
         api_key_layout = QHBoxLayout()
         api_key_layout.addWidget(self.api_key_edit)
         api_key_layout.addWidget(self.toggle_api_key_btn)
-        google_layout.setLayout(0, QFormLayout.ItemRole.FieldRole, api_key_layout)
+        # Create container widget for the layout
+        api_key_container = QWidget()
+        api_key_container.setLayout(api_key_layout)
+        google_layout.addRow("API Key:", api_key_container)
         
         # Model selection
         model_layout = QHBoxLayout()
         self.model_combo = QComboBox()
         self.model_combo.setEditable(True)  # Allow custom model names
+        self.model_combo.setMinimumWidth(300)  # Make it wider to accommodate model names
         self.refresh_models_btn = QPushButton("Refresh Models")
         self.refresh_models_btn.clicked.connect(self._refresh_models_list)
         
@@ -162,7 +165,6 @@ class SettingsDialog(QDialog):
             
             # List models
             self.model_info_label.setText("Fetching models...")
-            models_response = client.models.list()
             
             # Clear and populate combo box
             current_text = self.model_combo.currentText()
@@ -170,21 +172,30 @@ class SettingsDialog(QDialog):
             
             # Add models that support content generation
             generation_models = []
-            for model in models_response:
-                # Check if model supports generateContent
-                if hasattr(model, 'supported_generation_methods') and \
-                   'generateContent' in model.supported_generation_methods:
+            
+            # The list() method returns an iterator of Model objects
+            for model in client.models.list():
+                try:
+                    # The model has these attributes: name, display_name, description, supported_actions
                     model_name = model.name
+                    
                     # Remove 'models/' prefix if present
                     if model_name.startswith('models/'):
                         model_name = model_name[7:]
                     
-                    # Add to list with description
-                    display_name = model_name
-                    if hasattr(model, 'display_name') and model.display_name:
-                        display_name = f"{model_name} ({model.display_name})"
-                    
-                    generation_models.append((model_name, display_name))
+                    # Check if it supports content generation
+                    # Look for 'generateContent' in supported_actions
+                    if hasattr(model, 'supported_actions') and model.supported_actions:
+                        if 'generateContent' in model.supported_actions:
+                            # Add to list with description
+                            display_name = model_name
+                            if model.display_name:
+                                display_name = f"{model_name} ({model.display_name})"
+                            
+                            generation_models.append((model_name, display_name))
+                except Exception as e:
+                    print(f"Error processing model {model}: {e}")
+                    continue
             
             # Sort by model name
             generation_models.sort(key=lambda x: x[0])

@@ -86,7 +86,8 @@ class GeminiService:
         self,
         transcript_json: dict,
         custom_prompt: Optional[str] = None,
-        max_points: Optional[int] = None
+        max_points: Optional[int] = None,
+        progress_callback: Optional[callable] = None
     ) -> List[VisualPoint]:
         """
         Analyze a meeting transcript to identify points needing visual confirmation.
@@ -95,12 +96,20 @@ class GeminiService:
             transcript_json: Meeting transcript in JSON format (from MeetingTranscript.to_json())
             custom_prompt: Optional custom prompt to override default
             max_points: Optional maximum number of points to return
+            progress_callback: Optional callback function for progress updates
         
         Returns:
             List of VisualPoint objects
         """
         # Prepare the transcript text with timestamps
+        if progress_callback:
+            progress_callback("Formatting transcript for analysis...")
+        
         transcript_text = self._format_transcript_for_analysis(transcript_json)
+        
+        # Calculate approximate token count (rough estimate: 1 token ≈ 4 chars)
+        approx_tokens = len(transcript_text) // 4
+        print(f"Transcript length: {len(transcript_text)} chars, ~{approx_tokens} tokens")
         
         # Use custom prompt or loaded system instruction
         system_prompt = custom_prompt or self.system_instruction
@@ -112,6 +121,9 @@ class GeminiService:
             user_prompt += f"\n\nPlease limit your response to the {max_points} most important points."
         
         try:
+            if progress_callback:
+                progress_callback("Creating Gemini API request...")
+            
             # Create the generation config for JSON output with system instruction
             config = GenerateContentConfig(
                 temperature=0.3,  # Lower temperature for more consistent output
@@ -134,23 +146,99 @@ class GeminiService:
                 system_instruction=system_prompt  # System instruction goes in config
             )
             
-            # Generate response
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=user_prompt,
-                config=config
-            )
+            if progress_callback:
+                progress_callback("Sending request to Gemini API (this may take 30-60 seconds)...")
+            
+            # Generate response with timeout handling
+            import time
+            start_time = time.time()
+            
+            try:
+                # Use streaming for better progress feedback
+                stream = self.client.models.generate_content_stream(
+                    model=self.model_name,
+                    contents=user_prompt,
+                    config=config
+                )
+                
+                # Collect all chunks
+                full_response = ""
+                chunk_count = 0
+                last_progress_time = time.time()
+                
+                for chunk in stream:
+                    if hasattr(chunk, 'text') and chunk.text:
+                        full_response += chunk.text
+                        chunk_count += 1
+                        
+                        # Update progress every 2 seconds
+                        current_time = time.time()
+                        if current_time - last_progress_time > 2.0 and progress_callback:
+                            elapsed = current_time - start_time
+                            progress_callback(f"Receiving response from Gemini API... ({elapsed:.0f}s, {chunk_count} chunks)")
+                            last_progress_time = current_time
+                
+                elapsed_time = time.time() - start_time
+                print(f"Gemini API response received in {elapsed_time:.1f} seconds ({chunk_count} chunks)")
+                
+                # Create a mock response object with text attribute
+                class StreamedResponse:
+                    def __init__(self, text):
+                        self.text = text
+                
+                response = StreamedResponse(full_response)
+                
+            except Exception as api_error:
+                elapsed_time = time.time() - start_time
+                error_msg = f"Gemini API error after {elapsed_time:.1f} seconds: {str(api_error)}"
+                print(error_msg)
+                
+                # Check for specific error types
+                if "429" in str(api_error):
+                    raise Exception("Rate limit exceeded. Please wait a moment and try again.")
+                elif "timeout" in str(api_error).lower():
+                    raise Exception("Request timed out. The transcript may be too long. Try reducing the max visual points.")
+                elif "400" in str(api_error):
+                    raise Exception("Invalid request. Please check your API key and model settings.")
+                elif "401" in str(api_error) or "403" in str(api_error):
+                    raise Exception("Authentication failed. Please check your API key in Settings.")
+                elif "404" in str(api_error):
+                    raise Exception(f"Model '{self.model_name}' not found. Please check the model name in Settings.")
+                else:
+                    raise Exception(f"API Error: {str(api_error)}")
+            
+            if progress_callback:
+                progress_callback("Parsing Gemini response...")
+            
+            # Check if response has text
+            if not hasattr(response, 'text') or not response.text:
+                raise Exception("Empty response from Gemini API")
             
             # Parse the JSON response
-            result = json.loads(response.text)
+            try:
+                result = json.loads(response.text)
+            except json.JSONDecodeError as e:
+                print(f"Failed to parse JSON response: {response.text}")
+                raise Exception(f"Invalid JSON response from API: {str(e)}")
+            
+            if not isinstance(result, list):
+                raise Exception(f"Expected list response, got {type(result)}")
+            
+            if progress_callback:
+                progress_callback(f"Processing {len(result)} visual points...")
             
             # Convert to VisualPoint objects and add timestamp_seconds
             visual_points = []
-            for point_data in result:
-                # Calculate timestamp_seconds from HH:MM:SS format
-                timestamp_seconds = self._timestamp_to_seconds(point_data["timestamp"])
-                point_data["timestamp_seconds"] = timestamp_seconds
-                visual_points.append(VisualPoint.from_dict(point_data))
+            for i, point_data in enumerate(result):
+                try:
+                    # Calculate timestamp_seconds from HH:MM:SS format
+                    timestamp_seconds = self._timestamp_to_seconds(point_data["timestamp"])
+                    point_data["timestamp_seconds"] = timestamp_seconds
+                    visual_points.append(VisualPoint.from_dict(point_data))
+                except Exception as e:
+                    print(f"Error processing visual point {i}: {e}")
+                    print(f"Point data: {point_data}")
+                    continue
             
             # Sort by priority (1 is highest) and timestamp
             visual_points.sort(key=lambda p: (p.priority, p.timestamp_seconds))

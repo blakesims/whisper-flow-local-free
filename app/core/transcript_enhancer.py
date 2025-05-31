@@ -33,6 +33,11 @@ class TranscriptEnhancer:
         """
         self.gemini_service = GeminiService(api_key=gemini_api_key, model_name=model_name) if model_name else GeminiService(api_key=gemini_api_key)
         self.video_extractor = VideoExtractor(output_quality=video_quality)
+        self._progress_callback = None
+    
+    def set_progress_callback(self, callback):
+        """Set a callback function for progress updates."""
+        self._progress_callback = callback
     
     def enhance_meeting_transcript(
         self,
@@ -89,10 +94,18 @@ class TranscriptEnhancer:
             
             # Step 2: Analyze transcript for visual points
             print("Analyzing transcript for visual confirmation points...")
+            
+            # Create a progress callback if we have a progress_callback parameter
+            def gemini_progress(msg):
+                print(f"Gemini: {msg}")
+                if hasattr(self, '_progress_callback') and self._progress_callback:
+                    self._progress_callback(f"Gemini: {msg}")
+            
             visual_points = self.gemini_service.analyze_transcript_for_visual_points(
                 transcript_data,
                 custom_prompt=custom_prompt,
-                max_points=max_visual_points
+                max_points=max_visual_points,
+                progress_callback=gemini_progress
             )
             results["visual_points"] = [point.to_dict() for point in visual_points]
             
