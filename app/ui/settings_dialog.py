@@ -112,6 +112,41 @@ class SettingsDialog(QDialog):
         enhance_group.setLayout(enhance_layout)
         layout.addWidget(enhance_group)
         
+        # Transcript Sectioning Settings
+        section_group = QGroupBox("Transcript Sectioning")
+        section_layout = QFormLayout()
+        
+        # Line threshold
+        self.line_threshold_spin = QLineEdit()
+        self.line_threshold_spin.setPlaceholderText("500")
+        self.line_threshold_spin.setMaximumWidth(100)
+        section_layout.addRow("Line Threshold:", self.line_threshold_spin)
+        
+        # Sectioning strategy
+        self.sectioning_strategy_combo = QComboBox()
+        self.sectioning_strategy_combo.addItems([
+            "Topic-based (Intelligent)",
+            "Time-based (Fixed duration)",
+            "Hybrid (Topic-aware with limits)"
+        ])
+        self.sectioning_strategy_combo.setCurrentIndex(0)
+        section_layout.addRow("Strategy:", self.sectioning_strategy_combo)
+        
+        # Max section duration (minutes)
+        self.max_section_duration_spin = QLineEdit()
+        self.max_section_duration_spin.setPlaceholderText("15")
+        self.max_section_duration_spin.setMaximumWidth(100)
+        section_layout.addRow("Max Duration (min):", self.max_section_duration_spin)
+        
+        # Info label
+        section_info = QLabel("Transcripts exceeding the line threshold will be split into sections for better processing")
+        section_info.setWordWrap(True)
+        section_info.setStyleSheet("color: #888; font-size: 12px;")
+        section_layout.addRow("", section_info)
+        
+        section_group.setLayout(section_layout)
+        layout.addWidget(section_group)
+        
         # Add stretch
         layout.addStretch()
         
@@ -151,6 +186,17 @@ class SettingsDialog(QDialog):
         
         video_quality = self.config.get("video_quality", 95)
         self.video_quality_spin.setText(str(video_quality))
+        
+        # Sectioning settings
+        line_threshold = self.config.get("transcript_line_threshold", 500)
+        self.line_threshold_spin.setText(str(line_threshold))
+        
+        sectioning_strategy = self.config.get("sectioning_strategy", "topic_based")
+        strategy_index = {"topic_based": 0, "time_based": 1, "hybrid": 2}.get(sectioning_strategy, 0)
+        self.sectioning_strategy_combo.setCurrentIndex(strategy_index)
+        
+        max_duration = self.config.get("max_section_duration_minutes", 15)
+        self.max_section_duration_spin.setText(str(max_duration))
     
     def _refresh_models_list(self):
         """Fetch available models from Google API."""
@@ -238,6 +284,23 @@ class SettingsDialog(QDialog):
             QMessageBox.warning(self, "Invalid Input", str(e))
             return
         
+        # Validate sectioning settings
+        try:
+            line_threshold = int(self.line_threshold_spin.text()) if self.line_threshold_spin.text() else 500
+            if line_threshold < 10:
+                raise ValueError("Line threshold must be at least 10")
+        except ValueError as e:
+            QMessageBox.warning(self, "Invalid Input", str(e))
+            return
+        
+        try:
+            max_duration = int(self.max_section_duration_spin.text()) if self.max_section_duration_spin.text() else 15
+            if max_duration < 1 or max_duration > 60:
+                raise ValueError("Max section duration must be between 1 and 60 minutes")
+        except ValueError as e:
+            QMessageBox.warning(self, "Invalid Input", str(e))
+            return
+        
         # Save settings
         api_key = self.api_key_edit.text().strip()
         if api_key:
@@ -258,6 +321,15 @@ class SettingsDialog(QDialog):
         self.config["gemini_model"] = model_name
         self.config["max_visual_points"] = max_points
         self.config["video_quality"] = video_quality
+        
+        # Save sectioning settings
+        self.config["transcript_line_threshold"] = line_threshold
+        
+        # Map combo index to strategy value
+        strategy_map = {0: "topic_based", 1: "time_based", 2: "hybrid"}
+        self.config["sectioning_strategy"] = strategy_map.get(self.sectioning_strategy_combo.currentIndex(), "topic_based")
+        
+        self.config["max_section_duration_minutes"] = max_duration
         
         # Save config
         self.config_manager.save_config()

@@ -12,6 +12,7 @@ from datetime import datetime
 from .meeting_transcript import MeetingTranscript, TranscriptSegment
 from .gemini_service import GeminiService, VisualPoint
 from .video_extractor import VideoExtractor
+from .transcript_sectioner import TranscriptSectioner, TranscriptSection
 
 
 class TranscriptEnhancer:
@@ -32,6 +33,7 @@ class TranscriptEnhancer:
             model_name: Gemini model to use
         """
         self.gemini_service = GeminiService(api_key=gemini_api_key, model_name=model_name) if model_name else GeminiService(api_key=gemini_api_key)
+        self.transcript_sectioner = TranscriptSectioner(api_key=gemini_api_key, model_name=model_name) if model_name else TranscriptSectioner(api_key=gemini_api_key)
         self.video_extractor = VideoExtractor(output_quality=video_quality)
         self._progress_callback = None
     
@@ -92,21 +94,103 @@ class TranscriptEnhancer:
                 f.write(transcript.to_markdown())
             results["files_created"].append(str(transcript_md_path))
             
-            # Step 2: Analyze transcript for visual points
+            # Step 2: Check if sectioning is needed
+            # Get settings from config
+            from app.utils.config_manager import ConfigManager
+            config = ConfigManager()
+            line_threshold = config.get("transcript_line_threshold", 500)
+            sectioning_strategy = config.get("sectioning_strategy", "topic_based")
+            max_section_duration_minutes = config.get("max_section_duration_minutes", 15)
+            
+            # Count lines in transcript
+            transcript_lines = sum(1 for segment in transcript.segments)
+            print(f"Transcript has {transcript_lines} segments/lines")
+            
+            sections = None
+            section_metadata = None
+            
+            if transcript_lines > line_threshold:
+                print(f"Transcript exceeds {line_threshold} line threshold, initiating sectioning...")
+                if self._progress_callback:
+                    self._progress_callback(f"Transcript has {transcript_lines} lines, sectioning for better processing...")
+                
+                # Create sectioning progress callback
+                def section_progress(msg):
+                    print(f"Sectioner: {msg}")
+                    if self._progress_callback:
+                        self._progress_callback(f"Sectioner: {msg}")
+                
+                # Convert minutes to seconds for max duration
+                max_duration_seconds = max_section_duration_minutes * 60 if sectioning_strategy != "topic_based" else None
+                
+                # Section the transcript
+                sections, section_metadata = self.transcript_sectioner.section_transcript(
+                    transcript_data,
+                    max_section_duration=max_duration_seconds,
+                    progress_callback=section_progress
+                )
+                
+                # Save sections to file
+                sections_path = action_notes_dir / f"transcript-sections{'-' + str(enhancement_num) if enhancement_num > 1 else ''}.json"
+                self.transcript_sectioner.export_sections(sections, section_metadata, str(sections_path))
+                results["files_created"].append(str(sections_path))
+                results["sections"] = [section.to_dict() for section in sections]
+                results["section_metadata"] = section_metadata
+                
+                print(f"Created {len(sections)} sections")
+                if self._progress_callback:
+                    self._progress_callback(f"Created {len(sections)} sections for analysis")
+            
+            # Step 3: Analyze transcript for visual points
             print("Analyzing transcript for visual confirmation points...")
             
-            # Create a progress callback if we have a progress_callback parameter
+            # Create a progress callback for visual analysis
             def gemini_progress(msg):
-                print(f"Gemini: {msg}")
+                print(f"Visual Analysis: {msg}")
                 if hasattr(self, '_progress_callback') and self._progress_callback:
-                    self._progress_callback(f"Gemini: {msg}")
+                    self._progress_callback(f"Visual Analysis: {msg}")
             
-            visual_points = self.gemini_service.analyze_transcript_for_visual_points(
-                transcript_data,
-                custom_prompt=custom_prompt,
-                max_points=max_visual_points,
-                progress_callback=gemini_progress
-            )
+            visual_points = []
+            
+            if sections:
+                # Process each section separately
+                for i, section in enumerate(sections):
+                    if self._progress_callback:
+                        self._progress_callback(f"Analyzing section {i+1}/{len(sections)}: {section.title}")
+                    
+                    # Create a sub-transcript for this section
+                    section_segments = transcript_data["segments"][section.start_segment_index:section.end_segment_index + 1]
+                    section_transcript_data = {
+                        "meeting": transcript_data["meeting"],
+                        "segments": section_segments
+                    }
+                    
+                    # Analyze this section
+                    section_visual_points = self.gemini_service.analyze_transcript_for_visual_points(
+                        section_transcript_data,
+                        custom_prompt=custom_prompt,
+                        max_points=max_visual_points // len(sections) if max_visual_points else None,  # Distribute points across sections
+                        progress_callback=lambda msg: gemini_progress(f"Section {i+1}: {msg}")
+                    )
+                    
+                    visual_points.extend(section_visual_points)
+                    print(f"Section {i+1} yielded {len(section_visual_points)} visual points")
+            else:
+                # Process entire transcript as one
+                visual_points = self.gemini_service.analyze_transcript_for_visual_points(
+                    transcript_data,
+                    custom_prompt=custom_prompt,
+                    max_points=max_visual_points,
+                    progress_callback=gemini_progress
+                )
+            
+            # Sort all visual points by priority and timestamp
+            visual_points.sort(key=lambda p: (p.priority, p.timestamp_seconds))
+            
+            # Limit total points if needed
+            if max_visual_points and len(visual_points) > max_visual_points:
+                visual_points = visual_points[:max_visual_points]
+            
             results["visual_points"] = [point.to_dict() for point in visual_points]
             
             # Save visual points analysis with iteration number
@@ -139,7 +223,8 @@ class TranscriptEnhancer:
                     transcript,
                     visual_points,
                     extracted_frames,
-                    str(action_notes_dir)
+                    str(action_notes_dir),
+                    sections=sections  # Pass sections if available
                 )
                 
                 # Use iteration number for enhanced transcript
@@ -172,7 +257,8 @@ class TranscriptEnhancer:
         transcript: MeetingTranscript,
         visual_points: List[VisualPoint],
         extracted_frames: Dict[str, str],
-        action_notes_dir: str
+        action_notes_dir: str,
+        sections: Optional[List[TranscriptSection]] = None
     ) -> str:
         """Create enhanced markdown transcript with embedded images."""
         lines = []
@@ -189,6 +275,16 @@ class TranscriptEnhancer:
         lines.append(f"*{len(visual_points)} points identified requiring visual context*")
         lines.append("")
         
+        # Sections summary if available
+        if sections:
+            lines.append("## Meeting Sections")
+            lines.append(f"*Meeting divided into {len(sections)} sections for clarity*")
+            lines.append("")
+            for section in sections:
+                lines.append(f"- **{section.title}** ({section.start_timestamp} - {section.end_timestamp})")
+                lines.append(f"  - {section.description}")
+            lines.append("")
+        
         # Create a map of timestamps to visual points
         visual_map = {point.timestamp_seconds: point for point in visual_points}
         
@@ -198,7 +294,25 @@ class TranscriptEnhancer:
         
         transcript.sort_segments()
         
-        for segment in transcript.segments:
+        # If we have sections, track current section
+        current_section_idx = 0 if sections else None
+        
+        for i, segment in enumerate(transcript.segments):
+            # Check if we need to add a section header
+            if sections and current_section_idx < len(sections):
+                current_section = sections[current_section_idx]
+                # Check if this segment starts a new section
+                if i == current_section.start_segment_index:
+                    lines.append("")
+                    lines.append(f"### 📌 Section {current_section.section_id}: {current_section.title}")
+                    lines.append(f"*{current_section.description}*")
+                    lines.append(f"*Duration: {current_section.start_timestamp} - {current_section.end_timestamp}*")
+                    lines.append("")
+                
+                # Move to next section if we've passed the current one
+                if i > current_section.end_segment_index and current_section_idx < len(sections) - 1:
+                    current_section_idx += 1
+            
             # Check if this segment has a visual point
             visual_point = None
             for vp in visual_points:
@@ -268,6 +382,12 @@ class TranscriptEnhancer:
         lines.append("")
         
         lines.append("## Enhancement Results")
+        
+        # Add sectioning info if available
+        if 'sections' in results and results['sections']:
+            lines.append(f"- Transcript Sections: {len(results['sections'])}")
+            lines.append(f"- Sectioning Strategy: {results.get('section_metadata', {}).get('sectioning_strategy', 'N/A')}")
+        
         lines.append(f"- Visual Points Identified: {len(visual_points)}")
         lines.append(f"- Frames Extracted: {len(results['extracted_frames'])}")
         lines.append(f"- Files Created: {len(results['files_created'])}")
