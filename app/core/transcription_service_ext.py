@@ -62,9 +62,7 @@ class TranscriptionServiceExt(TranscriptionService):
                 word_timestamps=True,  # Enable for hallucination detection
                 condition_on_previous_text=False,  # Prevent hallucinations from previous context
                 no_speech_threshold=0.3,  # Lower threshold to detect silence better
-                compression_ratio_threshold=2.4,  # Standard anti-hallucination setting
-                logprob_threshold=-0.5,  # Filter out low-confidence segments
-                hallucination_silence_threshold=2.0  # Skip silent periods > 2 seconds when hallucination detected
+                compression_ratio_threshold=2.4  # Standard anti-hallucination setting
             )
 
             detected_lang_info = None
