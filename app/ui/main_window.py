@@ -1,9 +1,9 @@
 # Placeholder for main_window.py 
 
 import sys
-from PySide6.QtWidgets import QMainWindow, QApplication, QLabel, QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QTextEdit, QProgressBar, QComboBox, QDialog, QFileDialog
+from PySide6.QtWidgets import QMainWindow, QApplication, QLabel, QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QTextEdit, QProgressBar, QComboBox, QDialog, QFileDialog, QPlainTextEdit
 from PySide6.QtCore import Qt, QTimer, Signal, Slot, QPoint, QEvent, QThreadPool
-from PySide6.QtGui import QKeySequence, QShortcut, QColor
+from PySide6.QtGui import QKeySequence, QShortcut, QColor, QTextCursor
 import numpy as np
 import os # Added for os.remove
 import json  # Added for json loading in re-enhance
@@ -178,6 +178,26 @@ class MainWindow(QMainWindow):
         self.transcription_text.setReadOnly(True)
         self.transcription_text.setPlaceholderText("Transcribed text will appear here...")
         main_layout.addWidget(self.transcription_text)
+
+        # Log display for real-time feedback (collapsible)
+        self.log_widget = QPlainTextEdit()
+        self.log_widget.setReadOnly(True)
+        self.log_widget.setMaximumHeight(80)  # Compact height
+        self.log_widget.setPlaceholderText("Processing logs...")
+        self.log_widget.hide()  # Hidden by default
+        
+        # Style the log widget
+        self.log_widget.setStyleSheet("""
+            QPlainTextEdit {
+                background-color: #24283b;
+                color: #73daca;
+                border: 1px solid #414868;
+                font-family: 'Consolas', 'Monaco', monospace;
+                font-size: 11px;
+                padding: 2px;
+            }
+        """)
+        main_layout.addWidget(self.log_widget)
 
         # Progress bar for transcription
         self.progress_bar = QProgressBar()
@@ -735,6 +755,11 @@ class MainWindow(QMainWindow):
                 self.progress_bar.setValue(0)
                 self.progress_bar.show()
             
+            # Show log widget for real-time feedback
+            self.log_widget.clear()
+            self.log_widget.show()
+            self._append_log_message(f"Starting meeting transcription with {len(self.meeting_audio_files)} audio files...")
+            
             print(f"DEBUG: Creating MeetingTranscriptionWorker with {len(self.meeting_audio_files)} files")
             try:
                 # Create and start meeting transcription worker
@@ -750,6 +775,7 @@ class MainWindow(QMainWindow):
                 meeting_worker.signals.file_progress.connect(self._handle_meeting_file_progress)
                 meeting_worker.signals.finished.connect(self._handle_meeting_finished)
                 meeting_worker.signals.error.connect(self._handle_meeting_error)
+                meeting_worker.signals.log.connect(self._append_log_message)
                 
                 print("DEBUG: Starting meeting worker in thread pool")
                 self.thread_pool.start(meeting_worker)
@@ -986,6 +1012,23 @@ class MainWindow(QMainWindow):
         if hasattr(self, '_status_clear_timer') and self._status_clear_timer.isActive():
             self._status_clear_timer.stop()
         self._message_for_auto_clear = None
+    
+    def _append_log_message(self, message: str):
+        """Append a message to the log widget with auto-scroll."""
+        self.log_widget.appendPlainText(message)
+        # Auto-scroll to bottom
+        cursor = self.log_widget.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        self.log_widget.setTextCursor(cursor)
+        
+        # Keep only last 100 lines to prevent memory issues
+        document = self.log_widget.document()
+        if document.lineCount() > 100:
+            cursor = QTextCursor(document)
+            cursor.movePosition(QTextCursor.MoveOperation.Start)
+            cursor.movePosition(QTextCursor.MoveOperation.Down, QTextCursor.MoveMode.KeepAnchor, 
+                              document.lineCount() - 100)
+            cursor.removeSelectedText()
 
     def _post_action_cleanup(self, success, message):
         """Called after transcribe/fabric (simulated) to reset state."""
@@ -1291,6 +1334,9 @@ class MainWindow(QMainWindow):
         """Handle completed meeting transcription."""
         if hasattr(self, 'progress_bar'):
             self.progress_bar.hide()
+        
+        # Hide log widget
+        self.log_widget.hide()
         
         # Store the transcript for potential enhancement
         self.last_meeting_transcript = meeting_transcript

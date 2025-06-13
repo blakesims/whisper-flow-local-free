@@ -10,7 +10,8 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QComboBox, QPushButton, QLabel,
-    QGroupBox, QMessageBox, QDialogButtonBox, QWidget
+    QGroupBox, QMessageBox, QDialogButtonBox, QWidget,
+    QCheckBox
 )
 from PySide6.QtCore import Qt, Signal
 
@@ -147,6 +148,42 @@ class SettingsDialog(QDialog):
         section_group.setLayout(section_layout)
         layout.addWidget(section_group)
         
+        # Advanced Transcription Settings
+        advanced_group = QGroupBox("Advanced Transcription Settings")
+        advanced_layout = QFormLayout()
+        
+        # Hallucination detection toggle
+        self.enable_hallucination_filter = QCheckBox("Enable hallucination filtering")
+        self.enable_hallucination_filter.setChecked(True)
+        advanced_layout.addRow("", self.enable_hallucination_filter)
+        
+        # Minimum repetitions for detection
+        self.min_repetitions_spin = QLineEdit()
+        self.min_repetitions_spin.setPlaceholderText("3")
+        self.min_repetitions_spin.setMaximumWidth(100)
+        advanced_layout.addRow("Min word repetitions:", self.min_repetitions_spin)
+        
+        # No speech threshold
+        self.no_speech_threshold_spin = QLineEdit()
+        self.no_speech_threshold_spin.setPlaceholderText("0.3")
+        self.no_speech_threshold_spin.setMaximumWidth(100)
+        advanced_layout.addRow("No speech threshold:", self.no_speech_threshold_spin)
+        
+        # Compression ratio threshold
+        self.compression_ratio_spin = QLineEdit()
+        self.compression_ratio_spin.setPlaceholderText("2.4")
+        self.compression_ratio_spin.setMaximumWidth(100)
+        advanced_layout.addRow("Compression ratio:", self.compression_ratio_spin)
+        
+        # Info label
+        advanced_info = QLabel("Fine-tune transcription parameters to reduce hallucinations")
+        advanced_info.setWordWrap(True)
+        advanced_info.setStyleSheet("color: #888; font-size: 12px;")
+        advanced_layout.addRow("", advanced_info)
+        
+        advanced_group.setLayout(advanced_layout)
+        layout.addWidget(advanced_group)
+        
         # Add stretch
         layout.addStretch()
         
@@ -197,6 +234,18 @@ class SettingsDialog(QDialog):
         
         max_duration = self.config.get("max_section_duration_minutes", 15)
         self.max_section_duration_spin.setText(str(max_duration))
+        
+        # Advanced transcription settings
+        self.enable_hallucination_filter.setChecked(self.config.get("enable_hallucination_filter", True))
+        
+        min_repetitions = self.config.get("min_word_repetitions", 3)
+        self.min_repetitions_spin.setText(str(min_repetitions))
+        
+        no_speech_threshold = self.config.get("no_speech_threshold", 0.3)
+        self.no_speech_threshold_spin.setText(str(no_speech_threshold))
+        
+        compression_ratio = self.config.get("compression_ratio_threshold", 2.4)
+        self.compression_ratio_spin.setText(str(compression_ratio))
     
     def _refresh_models_list(self):
         """Fetch available models from Google API."""
@@ -330,6 +379,36 @@ class SettingsDialog(QDialog):
         self.config["sectioning_strategy"] = strategy_map.get(self.sectioning_strategy_combo.currentIndex(), "topic_based")
         
         self.config["max_section_duration_minutes"] = max_duration
+        
+        # Save advanced transcription settings
+        self.config["enable_hallucination_filter"] = self.enable_hallucination_filter.isChecked()
+        
+        try:
+            min_repetitions = int(self.min_repetitions_spin.text()) if self.min_repetitions_spin.text() else 3
+            if min_repetitions < 2:
+                raise ValueError("Minimum repetitions must be at least 2")
+            self.config["min_word_repetitions"] = min_repetitions
+        except ValueError as e:
+            QMessageBox.warning(self, "Invalid Input", str(e))
+            return
+            
+        try:
+            no_speech_threshold = float(self.no_speech_threshold_spin.text()) if self.no_speech_threshold_spin.text() else 0.3
+            if no_speech_threshold < 0 or no_speech_threshold > 1:
+                raise ValueError("No speech threshold must be between 0 and 1")
+            self.config["no_speech_threshold"] = no_speech_threshold
+        except ValueError as e:
+            QMessageBox.warning(self, "Invalid Input", str(e))
+            return
+            
+        try:
+            compression_ratio = float(self.compression_ratio_spin.text()) if self.compression_ratio_spin.text() else 2.4
+            if compression_ratio < 1:
+                raise ValueError("Compression ratio must be at least 1")
+            self.config["compression_ratio_threshold"] = compression_ratio
+        except ValueError as e:
+            QMessageBox.warning(self, "Invalid Input", str(e))
+            return
         
         # Save config
         self.config_manager.save_config()

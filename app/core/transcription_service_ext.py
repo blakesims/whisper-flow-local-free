@@ -18,7 +18,8 @@ class TranscriptionServiceExt(TranscriptionService):
         language: str = None, 
         task: str = "transcribe", 
         beam_size: int = 1,
-        progress_callback: Optional[Callable] = None
+        progress_callback: Optional[Callable] = None,
+        log_callback: Optional[Callable] = None
     ) -> Optional[Dict]:
         """
         Transcribe audio and return timestamped segments.
@@ -39,7 +40,19 @@ class TranscriptionServiceExt(TranscriptionService):
             return None
 
         try:
-            print(f"Transcribing with timestamps: {audio_path} (speaker: {speaker_name})...")
+            msg = f"Transcribing with timestamps: {audio_path} (speaker: {speaker_name})..."
+            print(msg)
+            if log_callback:
+                log_callback(msg)
+            
+            # Get settings from config
+            from app.utils.config_manager import ConfigManager
+            config = ConfigManager()
+            
+            # Get advanced transcription settings
+            enable_filter = config.get("enable_hallucination_filter", True)
+            no_speech_threshold = config.get("no_speech_threshold", 0.3)
+            compression_ratio = config.get("compression_ratio_threshold", 2.4)
             
             # Transcribe with optimized settings and anti-hallucination parameters
             segments_generator, info = self.model.transcribe(
@@ -61,13 +74,16 @@ class TranscriptionServiceExt(TranscriptionService):
                 ),
                 word_timestamps=True,  # Enable for hallucination detection
                 condition_on_previous_text=False,  # Prevent hallucinations from previous context
-                no_speech_threshold=0.3,  # Lower threshold to detect silence better
-                compression_ratio_threshold=2.4  # Standard anti-hallucination setting
+                no_speech_threshold=no_speech_threshold,  # Configurable threshold
+                compression_ratio_threshold=compression_ratio  # Configurable compression ratio
             )
 
             detected_lang_info = None
             if language is None: 
-                print(f"Detected language: {info.language} (probability: {info.language_probability:.2f})")
+                msg = f"Detected language: {info.language} (probability: {info.language_probability:.2f})"
+                print(msg)
+                if log_callback:
+                    log_callback(msg)
                 detected_lang_info = {
                     "language": info.language,
                     "probability": info.language_probability
@@ -79,9 +95,14 @@ class TranscriptionServiceExt(TranscriptionService):
             total_duration_ms = info.duration * 1000
             
             for segment in segments_generator:
-                # Filter out potential hallucinations
+                # Filter out potential hallucinations if enabled
                 segment_text = segment.text.strip()
-                if not self._is_hallucination(segment_text):
+                if enable_filter and self._is_hallucination(segment_text, config):
+                    msg = f"Filtered hallucination at {segment.start:.1f}s: {segment_text[:50]}..."
+                    print(msg)
+                    if log_callback:
+                        log_callback(msg)
+                else:
                     # Create TranscriptSegment
                     ts = TranscriptSegment(
                         speaker=speaker_name,
@@ -92,8 +113,6 @@ class TranscriptionServiceExt(TranscriptionService):
                     )
                     transcript_segments.append(ts)
                     text_parts.append(segment.text)
-                else:
-                    print(f"Filtered hallucination at {segment.start:.1f}s: {segment_text[:50]}...")
                 
                 # Progress callback
                 if progress_callback and total_duration_ms > 0:
@@ -106,7 +125,10 @@ class TranscriptionServiceExt(TranscriptionService):
             if progress_callback:
                 progress_callback(100, full_text, detected_lang_info)
             
-            print(f"Transcription complete. {len(transcript_segments)} segments extracted.")
+            msg = f"Transcription complete. {len(transcript_segments)} segments extracted."
+            print(msg)
+            if log_callback:
+                log_callback(msg)
             
             return {
                 "segments": transcript_segments,
@@ -122,12 +144,13 @@ class TranscriptionServiceExt(TranscriptionService):
             traceback.print_exc()
             return None
     
-    def _is_hallucination(self, text: str) -> bool:
+    def _is_hallucination(self, text: str, config=None) -> bool:
         """
         Detect potential hallucinations in transcribed text.
         
         Args:
             text: The transcribed text segment
+            config: ConfigManager instance for getting settings
             
         Returns:
             True if the text appears to be a hallucination
@@ -136,6 +159,11 @@ class TranscriptionServiceExt(TranscriptionService):
             return True
             
         text = text.lower().strip()
+        
+        # Get min repetitions from config if available
+        min_repetitions = 3
+        if config:
+            min_repetitions = config.get("min_word_repetitions", 3)
         
         # Common hallucination patterns
         hallucination_patterns = [
@@ -160,10 +188,17 @@ class TranscriptionServiceExt(TranscriptionService):
         
         # Check for repetitive patterns (like "I mean I mean I mean...")
         words = text.split()
-        if len(words) >= 3:
-            # Check if the same word/phrase repeats 3+ times consecutively
-            for i in range(len(words) - 2):
-                if words[i] == words[i + 1] == words[i + 2]:
+        if len(words) >= min_repetitions:
+            # Check if the same word/phrase repeats min_repetitions times consecutively
+            for i in range(len(words) - min_repetitions + 1):
+                # Check if all words in the window are the same
+                all_same = True
+                first_word = words[i]
+                for j in range(1, min_repetitions):
+                    if words[i + j] != first_word:
+                        all_same = False
+                        break
+                if all_same:
                     return True
                     
             # Check for alternating patterns (like "a b a b a b")

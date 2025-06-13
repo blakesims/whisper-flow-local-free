@@ -17,6 +17,7 @@ class MeetingTranscriptionSignals(QObject):
     file_progress = Signal(str, int, str)  # file_name, progress, text
     finished = Signal(object)  # MeetingTranscript
     error = Signal(str)
+    log = Signal(str)  # Log messages for real-time feedback
 
 
 class MeetingTranscriptionWorker(QRunnable):
@@ -83,13 +84,18 @@ class MeetingTranscriptionWorker(QRunnable):
                         f"Processing {speaker_name}... (File {idx + 1} of {total_files})"
                     )
                 
+                # Create log callback to emit log messages
+                def log_callback(msg):
+                    self.signals.log.emit(f"[{speaker_name}] {msg}")
+                
                 # Transcribe with timestamps
                 result = self.transcription_service.transcribe_with_timestamps(
                     audio_file,
                     speaker_name=speaker_name,
                     language=self.language,
                     task=self.task,
-                    progress_callback=file_progress_callback
+                    progress_callback=file_progress_callback,
+                    log_callback=log_callback
                 )
                 
                 if not result:
