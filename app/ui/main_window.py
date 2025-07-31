@@ -130,7 +130,7 @@ class MainWindow(QMainWindow):
         self.cancel_button.setToolTip("Cancel Recording (C)")
         self.transcribe_button.setToolTip("Transcribe last recording, or current if active (T)")
         self.fabric_button.setToolTip("Process with Fabric last recording, or current if active (F)")
-        self.upload_button.setToolTip("Upload audio file for transcription (U)")
+        self.upload_button.setToolTip("Upload audio file for transcription (U) - checks clipboard first")
         self.meeting_button.setToolTip("Select Zoom meeting for summary (M)")
         self.enhance_button.setToolTip("Enhance meeting transcript with visual analysis (E)")
         self.reenhance_button.setToolTip("Re-enhance existing transcript with visual analysis (Shift+E)")
@@ -378,23 +378,44 @@ class MainWindow(QMainWindow):
         self._clear_status_message()
         self.close_after_transcription = False
         
-        # Show file dialog to select audio file
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select Audio File",
-            "",
-            "Audio Files (*.wav *.mp3 *.m4a *.flac *.ogg *.opus *.webm);;All Files (*.*)"
-        )
+        # First check clipboard for a potential file path
+        clipboard_path = None
+        try:
+            clipboard_text = pyperclip.paste().strip()
+            # Check if clipboard contains a valid audio file path
+            if clipboard_text and os.path.exists(clipboard_text):
+                # Check if it's an audio file by extension
+                supported_extensions = ('.wav', '.mp3', '.m4a', '.flac', '.ogg', '.opus', '.webm', '.mp4', '.m4v', '.mov')
+                if clipboard_text.lower().endswith(supported_extensions):
+                    clipboard_path = clipboard_text
+                    print(f"Found audio file path in clipboard: {clipboard_path}")
+        except Exception as e:
+            print(f"Error checking clipboard: {e}")
         
-        if file_path and os.path.exists(file_path):
-            self.last_saved_audio_path = file_path
-            self._set_status_message(f"File selected: {os.path.basename(file_path)}")
+        # If we found a valid audio file path in clipboard, use it directly
+        if clipboard_path:
+            self.last_saved_audio_path = clipboard_path
+            self._set_status_message(f"Using clipboard file: {os.path.basename(clipboard_path)}")
             # Automatically start transcription
             self._change_app_state(AppState.TRANSCRIBING)
-        elif file_path:
-            self._set_status_message(f"File not found: {file_path}", is_error=True)
         else:
-            self._set_status_message("No file selected.")
+            # Otherwise, show file dialog to select audio file
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Select Audio File",
+                "",
+                "Audio Files (*.wav *.mp3 *.m4a *.flac *.ogg *.opus *.webm *.mp4 *.m4v *.mov);;All Files (*.*)"
+            )
+            
+            if file_path and os.path.exists(file_path):
+                self.last_saved_audio_path = file_path
+                self._set_status_message(f"File selected: {os.path.basename(file_path)}")
+                # Automatically start transcription
+                self._change_app_state(AppState.TRANSCRIBING)
+            elif file_path:
+                self._set_status_message(f"File not found: {file_path}", is_error=True)
+            else:
+                self._set_status_message("No file selected.")
 
     def _on_meeting_clicked(self):
         print("DEBUG: Meeting button clicked")
