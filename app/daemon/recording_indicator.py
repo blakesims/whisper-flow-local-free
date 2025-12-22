@@ -1,22 +1,50 @@
 """
-Recording Indicator - Floating UI for quick transcribe feedback
+Recording Indicator - Always-present floating widget for quick transcribe
 
-A minimal, always-on-top indicator that shows:
-- Recording state (pulsing red dot)
-- Transcribing state (spinner)
-- Auto-hides when idle
+Features:
+- Always visible: collapsed dot when idle, expands when recording
+- Draggable: move anywhere on screen, position persists
+- Click to start/stop recording
+- Right-click menu for settings/model selection
+- Sleek rounded design with Tokyo Night theme
 """
 
 import subprocess
 import os
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QApplication, QGraphicsOpacityEffect
-from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, Property, QRect
-from PySide6.QtGui import QPainter, QColor, QBrush, QPen, QFont, QScreen
+import json
+from PySide6.QtWidgets import (
+    QWidget, QHBoxLayout, QLabel, QApplication,
+    QGraphicsOpacityEffect, QMenu, QGraphicsDropShadowEffect
+)
+from PySide6.QtCore import (
+    Qt, QTimer, QPropertyAnimation, QEasingCurve,
+    Property, QRect, Signal, QPoint, QSize, QParallelAnimationGroup
+)
+from PySide6.QtGui import (
+    QPainter, QColor, QBrush, QPen, QFont,
+    QCursor, QAction, QLinearGradient
+)
 
 
-# macOS system sounds - simple and minimal
-# Same sound for start and stop (consistent feedback)
+# macOS system sounds
 SOUND_TOGGLE = "/System/Library/Sounds/Pop.aiff"
+
+# Settings file for position persistence
+SETTINGS_DIR = os.path.expanduser("~/Library/Application Support/WhisperTranscribeUI")
+SETTINGS_FILE = os.path.join(SETTINGS_DIR, "settings.json")
+
+# Tokyo Night color palette
+COLORS = {
+    'bg_dark': QColor(26, 27, 38, 240),      # #1a1b26 with alpha
+    'bg_highlight': QColor(36, 40, 59, 250), # #24283b
+    'blue': QColor(122, 162, 247),           # #7aa2f7
+    'cyan': QColor(125, 207, 255),           # #7dcfff
+    'purple': QColor(187, 154, 247),         # #bb9af7
+    'green': QColor(158, 206, 106),          # #9ece6a
+    'text': QColor(192, 202, 245),           # #c0caf5
+    'text_dim': QColor(86, 95, 137),         # #565f89
+    'border': QColor(41, 46, 66, 180),       # subtle border
+}
 
 
 def play_sound(sound_path: str):
@@ -29,25 +57,47 @@ def play_sound(sound_path: str):
                 stderr=subprocess.DEVNULL
             )
         except Exception:
-            pass  # Silently fail if sound doesn't work
+            pass
+
+
+def load_settings():
+    """Load settings from file"""
+    try:
+        if os.path.exists(SETTINGS_FILE):
+            with open(SETTINGS_FILE, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"[Indicator] Error loading settings: {e}")
+    return {}
+
+
+def save_settings(settings):
+    """Save settings to file"""
+    try:
+        os.makedirs(SETTINGS_DIR, exist_ok=True)
+        # Load existing settings first to preserve other values
+        existing = load_settings()
+        existing.update(settings)
+        with open(SETTINGS_FILE, 'w') as f:
+            json.dump(existing, f, indent=2)
+    except Exception as e:
+        print(f"[Indicator] Error saving settings: {e}")
 
 
 class MiniWaveform(QWidget):
-    """A simple monochrome waveform visualization"""
+    """A sleek monochrome waveform visualization"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(120, 32)  # Larger size for better visibility
-        self._samples = [0.0] * 24  # Store 24 amplitude samples
-        self._max_samples = 24
+        self.setFixedSize(100, 28)
+        self._samples = [0.0] * 20
+        self._max_samples = 20
 
     def update_audio(self, audio_chunk):
         """Update with new audio data"""
         import numpy as np
         if audio_chunk is not None and len(audio_chunk) > 0:
-            # Calculate RMS amplitude of the chunk
             rms = float(np.sqrt(np.mean(audio_chunk.astype(np.float32) ** 2)))
-            # Normalize to 0-1 range - sensitivity 3x (multiplier = 15)
             normalized = min(1.0, rms * 15)
             self._samples.append(normalized)
             if len(self._samples) > self._max_samples:
@@ -60,49 +110,44 @@ class MiniWaveform(QWidget):
         self.update()
 
     def paintEvent(self, event):
-        """Paint the waveform bars"""
+        """Paint sleek waveform bars"""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        # Bar settings
         bar_width = 3
-        bar_spacing = 1
-        max_height = self.height() - 4
+        bar_spacing = 2
+        max_height = self.height() - 6
         center_y = self.height() // 2
 
-        # Tokyo Night color palette (monochromatic blue)
-        # Use opacity/brightness to indicate amplitude, not color
-        base_color = QColor(122, 162, 247)  # Tokyo Night blue (#7aa2f7)
-
-        # Draw bars
         for i, amplitude in enumerate(self._samples):
             x = i * (bar_width + bar_spacing)
-            bar_height = max(2, int(amplitude * max_height))
+            bar_height = max(3, int(amplitude * max_height))
 
-            # Monochromatic - just vary the opacity based on amplitude
-            color = QColor(base_color)
-            opacity = 0.3 + (amplitude * 0.7)  # Range from 0.3 to 1.0
+            # Gradient based on amplitude
+            color = QColor(COLORS['blue'])
+            opacity = 0.4 + (amplitude * 0.6)
             color.setAlphaF(opacity)
 
             painter.setBrush(QBrush(color))
             painter.setPen(Qt.NoPen)
 
-            # Draw bar centered vertically
             y = center_y - bar_height // 2
-            painter.drawRoundedRect(x, y, bar_width, bar_height, 1, 1)
+            painter.drawRoundedRect(x, y, bar_width, bar_height, 1.5, 1.5)
 
 
 class PulsingDot(QWidget):
-    """A pulsing red dot indicator"""
+    """A sleek pulsing dot indicator"""
 
-    def __init__(self, parent=None):
+    def __init__(self, size=12, parent=None):
         super().__init__(parent)
-        self.setFixedSize(16, 16)
+        self._size = size
+        self.setFixedSize(size + 4, size + 4)
         self._opacity = 1.0
         self._pulse_timer = QTimer(self)
         self._pulse_timer.timeout.connect(self._pulse)
-        self._pulse_direction = -1  # -1 = fading, 1 = brightening
+        self._pulse_direction = -1
         self._is_pulsing = False
+        self._glow_radius = 0.0
 
     def _get_opacity(self):
         return self._opacity
@@ -114,48 +159,54 @@ class PulsingDot(QWidget):
     opacity = Property(float, _get_opacity, _set_opacity)
 
     def start_pulsing(self):
-        """Start the pulsing animation"""
         if not self._is_pulsing:
             self._is_pulsing = True
-            self._pulse_timer.start(50)  # 50ms interval for smooth animation
+            self._pulse_timer.start(40)
 
     def stop_pulsing(self):
-        """Stop the pulsing animation"""
         self._is_pulsing = False
         self._pulse_timer.stop()
         self._opacity = 1.0
+        self._glow_radius = 0.0
         self.update()
 
     def _pulse(self):
-        """Animate the pulse"""
-        self._opacity += self._pulse_direction * 0.05
-        if self._opacity <= 0.3:
+        self._opacity += self._pulse_direction * 0.04
+        self._glow_radius += self._pulse_direction * 0.5
+        if self._opacity <= 0.4:
             self._pulse_direction = 1
-            self._opacity = 0.3
+            self._opacity = 0.4
         elif self._opacity >= 1.0:
             self._pulse_direction = -1
             self._opacity = 1.0
         self.update()
 
     def paintEvent(self, event):
-        """Paint the pulsing dot"""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        # Tokyo Night cyan/blue for recording dot
-        color = QColor(125, 207, 255)  # Tokyo Night cyan (#7dcfff)
-        color.setAlphaF(self._opacity)
+        center = self.rect().center()
+        radius = self._size // 2
 
+        # Outer glow when pulsing
+        if self._is_pulsing and self._glow_radius > 0:
+            glow_color = QColor(COLORS['cyan'])
+            glow_color.setAlphaF(0.2 * self._opacity)
+            painter.setBrush(QBrush(glow_color))
+            painter.setPen(Qt.NoPen)
+            glow_r = radius + self._glow_radius
+            painter.drawEllipse(center, glow_r, glow_r)
+
+        # Main dot
+        color = QColor(COLORS['cyan'])
+        color.setAlphaF(self._opacity)
         painter.setBrush(QBrush(color))
         painter.setPen(Qt.NoPen)
-
-        # Draw circle centered in widget
-        margin = 2
-        painter.drawEllipse(margin, margin, self.width() - 2 * margin, self.height() - 2 * margin)
+        painter.drawEllipse(center, radius, radius)
 
 
 class SpinnerWidget(QWidget):
-    """A simple spinning indicator"""
+    """A sleek spinning indicator"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -166,280 +217,483 @@ class SpinnerWidget(QWidget):
         self._is_spinning = False
 
     def start_spinning(self):
-        """Start the spinner"""
         if not self._is_spinning:
             self._is_spinning = True
-            self._timer.start(50)
+            self._timer.start(40)
 
     def stop_spinning(self):
-        """Stop the spinner"""
         self._is_spinning = False
         self._timer.stop()
         self._angle = 0
         self.update()
 
     def _rotate(self):
-        """Rotate the spinner"""
-        self._angle = (self._angle + 15) % 360
+        self._angle = (self._angle + 12) % 360
         self.update()
 
     def paintEvent(self, event):
-        """Paint the spinner"""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        # Translate to center and rotate
         painter.translate(self.width() / 2, self.height() / 2)
         painter.rotate(self._angle)
 
-        # Draw arc segments with varying opacity - Tokyo Night blue
-        color = QColor(122, 162, 247)  # Tokyo Night blue (#7aa2f7)
+        color = QColor(COLORS['blue'])
         pen = QPen(color)
         pen.setWidth(2)
         pen.setCapStyle(Qt.RoundCap)
 
         radius = 5
         for i in range(8):
-            alpha = 1.0 - (i * 0.12)
-            color.setAlphaF(max(0.1, alpha))
+            alpha = 1.0 - (i * 0.11)
+            color.setAlphaF(max(0.15, alpha))
             pen.setColor(color)
             painter.setPen(pen)
-
-            angle = i * 45
             painter.rotate(45)
             painter.drawLine(0, -radius, 0, -radius - 2)
 
 
 class RecordingIndicator(QWidget):
     """
-    Floating indicator window for recording/transcribing status.
+    Always-present floating indicator widget.
 
-    Features:
-    - Frameless, always-on-top window
-    - Positioned at top-center of screen
-    - Dark theme matching the main app
-    - Auto-hides when idle
+    States:
+    - IDLE: Small dot, subtle, draggable
+    - RECORDING: Expanded with waveform, pulsing dot
+    - TRANSCRIBING: Spinner with progress
+
+    Interactions:
+    - Click: Toggle recording
+    - Right-click: Settings menu
+    - Drag: Move anywhere
     """
+
+    # Signals for daemon communication
+    toggle_recording_requested = Signal()
+    model_change_requested = Signal(str)
+    quit_requested = Signal()
+
+    # State constants
+    STATE_IDLE = "idle"
+    STATE_RECORDING = "recording"
+    STATE_TRANSCRIBING = "transcribing"
 
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        # Window flags: frameless, always on top, never take focus
-        # Using SplashScreen type which is designed for non-interactive overlays
+        self._state = self.STATE_IDLE
+        self._current_model = "base"
+        self._available_models = ["tiny", "base", "small", "medium", "large-v2"]
+
+        # Window flags for always-on-top, frameless, no focus stealing
         self.setWindowFlags(
-            Qt.SplashScreen |
+            Qt.Tool |
             Qt.FramelessWindowHint |
             Qt.WindowStaysOnTopHint |
             Qt.WindowDoesNotAcceptFocus
         )
 
-        # Prevent window from activating the application
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
         self.setAttribute(Qt.WA_MacAlwaysShowToolWindow, True)
 
+        # Drag state
+        self._drag_position = None
+        self._is_dragging = False
+
         # Setup UI
         self._setup_ui()
 
-        # Position at top-center
-        self._position_window()
+        # Size animation for expand/collapse
+        self._size_animation = QPropertyAnimation(self, b"minimumWidth")
+        self._size_animation.setDuration(200)
+        self._size_animation.setEasingCurve(QEasingCurve.OutCubic)
 
-        # Fade animation
+        # Opacity for fade effects
         self._opacity_effect = QGraphicsOpacityEffect(self)
+        self._opacity_effect.setOpacity(1.0)
         self.setGraphicsEffect(self._opacity_effect)
-        self._fade_animation = QPropertyAnimation(self._opacity_effect, b"opacity")
-        self._fade_animation.setDuration(200)
-        self._fade_animation.setEasingCurve(QEasingCurve.InOutQuad)
 
-        # Timer to follow cursor between screens during recording
+        # Load saved position or use default
+        self._load_position()
+
+        # Cursor following timer (only during recording)
         self._follow_cursor_timer = QTimer(self)
-        self._follow_cursor_timer.timeout.connect(self._update_position_for_cursor)
-        self._is_recording = False
+        self._follow_cursor_timer.timeout.connect(self._check_screen_change)
+        self._last_screen = None
+
+        # Hover state for visual feedback
+        self._is_hovered = False
+        self.setMouseTracking(True)
+
+        # Start in idle state
+        self._set_idle_state()
 
     def _setup_ui(self):
         """Setup the UI components"""
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 8, 12, 8)
-        layout.setSpacing(8)
+        self._layout = QHBoxLayout(self)
+        self._layout.setContentsMargins(10, 8, 10, 8)
+        self._layout.setSpacing(8)
 
-        # Pulsing dot for recording
-        self.dot = PulsingDot()
-        self.dot.hide()
-        layout.addWidget(self.dot)
+        # Idle dot (always visible in some form)
+        self.idle_dot = PulsingDot(size=10)
+        self._layout.addWidget(self.idle_dot)
+
+        # Recording dot (larger, for recording state)
+        self.recording_dot = PulsingDot(size=12)
+        self.recording_dot.hide()
+        self._layout.addWidget(self.recording_dot)
 
         # Spinner for transcribing
         self.spinner = SpinnerWidget()
         self.spinner.hide()
-        layout.addWidget(self.spinner)
+        self._layout.addWidget(self.spinner)
 
-        # Mini waveform for audio visualization
+        # Waveform (recording state only)
         self.waveform = MiniWaveform()
         self.waveform.hide()
-        layout.addWidget(self.waveform)
+        self._layout.addWidget(self.waveform)
 
         # Status label
-        self.label = QLabel("Recording...")
-        self.label.setFont(QFont("SF Pro Text", 13, QFont.Medium))
-        self.label.setStyleSheet("color: white;")
-        layout.addWidget(self.label)
-
-        self.setLayout(layout)
-
-        # Fixed size for consistent appearance
-        self.setFixedHeight(36)
-
-    def _position_window(self):
-        """Position the window at bottom-center of the screen where cursor is"""
-        from PySide6.QtGui import QCursor
-
-        # Get the screen where the cursor currently is
-        cursor_pos = QCursor.pos()
-        screen = QApplication.screenAt(cursor_pos)
-
-        # Fallback to primary screen if cursor screen not found
-        if not screen:
-            screen = QApplication.primaryScreen()
-
-        if screen:
-            geometry = screen.availableGeometry()
-            # Center horizontally, 100px from bottom
-            x = geometry.x() + (geometry.width() - self.width()) // 2
-            y = geometry.y() + geometry.height() - self.height() - 100
-            self.move(x, y)
-            print(f"[Indicator] Screen: {screen.name()}, Position: ({x}, {y})")
-
-    def _update_position_for_cursor(self):
-        """Update position to follow cursor between screens (called by timer)"""
-        if self._is_recording and self.isVisible():
-            self._position_window()
-
-    def paintEvent(self, event):
-        """Paint the rounded background"""
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-
-        # Dark semi-transparent background
-        bg_color = QColor(30, 30, 32, 230)  # Tokyo Night-ish dark
-        painter.setBrush(QBrush(bg_color))
-        painter.setPen(Qt.NoPen)
-
-        # Rounded rectangle
-        painter.drawRoundedRect(self.rect(), 10, 10)
-
-    def show_recording(self):
-        """Show the recording indicator"""
-        # Play toggle sound (same for start/stop)
-        play_sound(SOUND_TOGGLE)
-
-        # Hide label during recording - just show dot + waveform
+        self.label = QLabel("")
+        self.label.setFont(QFont(".AppleSystemUIFont", 12, QFont.Medium))
+        self.label.setStyleSheet(f"color: {COLORS['text'].name()};")
         self.label.hide()
+        self._layout.addWidget(self.label)
 
+        self.setLayout(self._layout)
+
+    def _load_position(self):
+        """Load saved position from settings"""
+        settings = load_settings()
+        x = settings.get('indicator_x')
+        y = settings.get('indicator_y')
+
+        if x is not None and y is not None:
+            # Validate position is on a screen
+            point = QPoint(x, y)
+            screen = QApplication.screenAt(point)
+            if screen:
+                self.move(x, y)
+                print(f"[Indicator] Restored position: ({x}, {y})")
+                return
+
+        # Default position: bottom center of primary screen
+        self._position_default()
+
+    def _position_default(self):
+        """Position at bottom center of primary screen"""
+        screen = QApplication.primaryScreen()
+        if screen:
+            geo = screen.availableGeometry()
+            x = geo.x() + (geo.width() - self.width()) // 2
+            y = geo.y() + geo.height() - self.height() - 80
+            self.move(x, y)
+
+    def _save_position(self):
+        """Save current position to settings"""
+        save_settings({
+            'indicator_x': self.x(),
+            'indicator_y': self.y()
+        })
+
+    def _set_idle_state(self):
+        """Set to collapsed idle state"""
+        self._state = self.STATE_IDLE
+
+        # Hide expanded elements
+        self.recording_dot.hide()
+        self.recording_dot.stop_pulsing()
         self.spinner.hide()
         self.spinner.stop_spinning()
+        self.waveform.hide()
+        self.label.hide()
 
-        self.dot.show()
-        self.dot.start_pulsing()
+        # Show idle dot (not pulsing)
+        self.idle_dot.show()
+        self.idle_dot.stop_pulsing()
 
-        # Show waveform for audio feedback
+        # Collapse to small size
+        self.setFixedHeight(32)
+        self.setMinimumWidth(32)
+        self.setMaximumWidth(32)
+        self.adjustSize()
+
+        self._follow_cursor_timer.stop()
+        self.update()
+
+    def _set_recording_state(self):
+        """Set to expanded recording state"""
+        self._state = self.STATE_RECORDING
+        play_sound(SOUND_TOGGLE)
+
+        # Hide idle dot, show recording elements
+        self.idle_dot.hide()
+        self.spinner.hide()
+        self.spinner.stop_spinning()
+        self.label.hide()
+
+        self.recording_dot.show()
+        self.recording_dot.start_pulsing()
         self.waveform.clear()
         self.waveform.show()
 
+        # Expand
+        self.setFixedHeight(36)
+        self.setMinimumWidth(140)
+        self.setMaximumWidth(300)
         self.adjustSize()
-        self._position_window()
-        self._fade_in()
 
-        # Start following cursor between screens
-        self._is_recording = True
-        self._follow_cursor_timer.start(500)  # Check every 500ms
+        # Start checking for screen changes
+        self._follow_cursor_timer.start(500)
 
-    def show_transcribing(self, progress: int = 0):
-        """Show the transcribing indicator with progress"""
-        # Stop following cursor
-        self._is_recording = False
-        self._follow_cursor_timer.stop()
+        self.update()
 
-        # Play toggle sound (same for start/stop)
+    def _set_transcribing_state(self):
+        """Set to transcribing state"""
+        self._state = self.STATE_TRANSCRIBING
         play_sound(SOUND_TOGGLE)
 
-        # Show label for progress percentage
-        self.label.show()
-        self.update_progress(progress)
-
-        self.dot.hide()
-        self.dot.stop_pulsing()
-
+        # Hide other elements
+        self.idle_dot.hide()
+        self.recording_dot.hide()
+        self.recording_dot.stop_pulsing()
         self.waveform.hide()
 
+        # Show spinner and label
         self.spinner.show()
         self.spinner.start_spinning()
+        self.label.setText("Transcribing... 0%")
+        self.label.setStyleSheet(f"color: {COLORS['blue'].name()};")
+        self.label.show()
 
+        # Expand for label
+        self.setFixedHeight(36)
+        self.setMinimumWidth(160)
+        self.setMaximumWidth(300)
         self.adjustSize()
-        self._position_window()
-        self._fade_in()
 
-    def update_progress(self, progress: int):
-        """Update transcription progress percentage"""
-        self.label.setText(f"Transcribing... {progress}%")
-        self.label.setStyleSheet("color: #7aa2f7;")  # Tokyo Night blue
+        self._follow_cursor_timer.stop()
+        self.update()
+
+    def _check_screen_change(self):
+        """Check if we should move to a different screen during recording"""
+        if self._state != self.STATE_RECORDING:
+            return
+
+        cursor_pos = QCursor.pos()
+        current_screen = QApplication.screenAt(cursor_pos)
+
+        if current_screen and current_screen != self._last_screen:
+            self._last_screen = current_screen
+            # Move to bottom center of new screen
+            geo = current_screen.availableGeometry()
+            x = geo.x() + (geo.width() - self.width()) // 2
+            y = geo.y() + geo.height() - self.height() - 80
+            self.move(x, y)
+            print(f"[Indicator] Moved to screen: {current_screen.name()}")
+
+    # === Public API for daemon ===
+
+    def show_recording(self):
+        """Called by daemon to show recording state"""
+        self._set_recording_state()
+        self._ensure_visible()
+
+    def show_transcribing(self, progress: int = 0):
+        """Called by daemon to show transcribing state"""
+        self._set_transcribing_state()
+        self.update_progress(progress)
+        self._ensure_visible()
+
+    def show_idle(self):
+        """Called by daemon to return to idle state"""
+        self._set_idle_state()
+        self._ensure_visible()
 
     def hide_indicator(self):
-        """Hide the indicator with fade animation"""
-        # Stop following cursor
-        self._is_recording = False
-        self._follow_cursor_timer.stop()
-        self._fade_out()
+        """Legacy method - now just returns to idle"""
+        self.show_idle()
+
+    def update_progress(self, progress: int):
+        """Update transcription progress"""
+        self.label.setText(f"Transcribing... {progress}%")
+        QApplication.processEvents()
 
     def update_waveform(self, audio_chunk):
-        """Update waveform with new audio data"""
-        if self.waveform.isVisible():
+        """Update waveform with audio data"""
+        if self._state == self.STATE_RECORDING and self.waveform.isVisible():
             self.waveform.update_audio(audio_chunk)
 
-    def _fade_in(self):
-        """Fade in animation"""
-        self._fade_animation.stop()
-        self._fade_animation.setStartValue(0.0)
-        self._fade_animation.setEndValue(1.0)
+    def set_current_model(self, model: str):
+        """Set the current model name"""
+        self._current_model = model
 
-        # Save the currently focused app and restore focus after showing
+    def set_available_models(self, models: list):
+        """Set the list of available models"""
+        self._available_models = models
+
+    # === Event handlers ===
+
+    def _ensure_visible(self):
+        """Ensure the widget is visible without stealing focus"""
         try:
-            from AppKit import NSWorkspace, NSApp, NSRunningApplication
-            # Get the frontmost app before we show anything
+            from AppKit import NSWorkspace, NSApp
             frontmost = NSWorkspace.sharedWorkspace().frontmostApplication()
+            NSApp.setActivationPolicy_(2)  # Accessory app
 
-            # Ensure our app stays hidden from dock/switcher
-            NSApp.setActivationPolicy_(2)
-
-            # Show our window
             self.show()
             self.raise_()
 
-            # Immediately restore focus to the previous app
             if frontmost:
-                frontmost.activateWithOptions_(0)  # 0 = activate normally
-
-        except Exception as e:
-            print(f"[Indicator] AppKit focus handling failed: {e}")
+                frontmost.activateWithOptions_(0)
+        except Exception:
             self.show()
             self.raise_()
 
-        self._fade_animation.start()
-        print(f"[Indicator] Showing at position: {self.pos().x()}, {self.pos().y()}")
+    def paintEvent(self, event):
+        """Paint sleek rounded background"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
 
-    def _fade_out(self):
-        """Fade out animation"""
-        self._fade_animation.stop()
-        self._fade_animation.setStartValue(1.0)
-        self._fade_animation.setEndValue(0.0)
-        self._fade_animation.finished.connect(self._on_fade_out_finished)
-        self._fade_animation.start()
+        rect = self.rect()
 
-    def _on_fade_out_finished(self):
-        """Handle fade out completion"""
-        self._fade_animation.finished.disconnect(self._on_fade_out_finished)
-        if self._opacity_effect.opacity() < 0.1:
-            self.hide()
-            self.dot.stop_pulsing()
-            self.spinner.stop_spinning()
+        # Subtle outer glow on hover
+        if self._is_hovered:
+            glow = QColor(COLORS['blue'])
+            glow.setAlphaF(0.15)
+            painter.setBrush(Qt.NoBrush)
+            pen = QPen(glow)
+            pen.setWidth(3)
+            painter.setPen(pen)
+            painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 14, 14)
+
+        # Background with subtle gradient
+        gradient = QLinearGradient(0, 0, 0, rect.height())
+        gradient.setColorAt(0, COLORS['bg_highlight'])
+        gradient.setColorAt(1, COLORS['bg_dark'])
+
+        painter.setBrush(QBrush(gradient))
+
+        # Subtle border
+        border_pen = QPen(COLORS['border'])
+        border_pen.setWidth(1)
+        painter.setPen(border_pen)
+
+        # More rounded corners
+        radius = 16 if self._state == self.STATE_IDLE else 14
+        painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), radius, radius)
+
+    def enterEvent(self, event):
+        """Mouse entered widget"""
+        self._is_hovered = True
+        self.setCursor(Qt.PointingHandCursor)
+        self.update()
+
+    def leaveEvent(self, event):
+        """Mouse left widget"""
+        self._is_hovered = False
+        self.setCursor(Qt.ArrowCursor)
+        self.update()
+
+    def mousePressEvent(self, event):
+        """Handle mouse press for dragging"""
+        if event.button() == Qt.LeftButton:
+            self._drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            self._is_dragging = False
+            event.accept()
+        elif event.button() == Qt.RightButton:
+            self._show_context_menu(event.globalPosition().toPoint())
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        """Handle mouse move for dragging"""
+        if event.buttons() & Qt.LeftButton and self._drag_position:
+            # Mark as dragging if moved more than a few pixels
+            if not self._is_dragging:
+                delta = event.globalPosition().toPoint() - self.frameGeometry().topLeft() - self._drag_position
+                if delta.manhattanLength() > 5:
+                    self._is_dragging = True
+
+            if self._is_dragging:
+                new_pos = event.globalPosition().toPoint() - self._drag_position
+                self.move(new_pos)
+                event.accept()
+
+    def mouseReleaseEvent(self, event):
+        """Handle mouse release"""
+        if event.button() == Qt.LeftButton:
+            if self._is_dragging:
+                # Save position after drag
+                self._save_position()
+                print(f"[Indicator] Position saved: ({self.x()}, {self.y()})")
+            else:
+                # Click to toggle recording
+                self.toggle_recording_requested.emit()
+
+            self._drag_position = None
+            self._is_dragging = False
+            event.accept()
+
+    def _show_context_menu(self, pos):
+        """Show right-click context menu"""
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #1a1b26;
+                border: 1px solid #3b4261;
+                border-radius: 8px;
+                padding: 4px;
+            }
+            QMenu::item {
+                color: #c0caf5;
+                padding: 8px 16px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background-color: #3b4261;
+            }
+            QMenu::separator {
+                height: 1px;
+                background: #3b4261;
+                margin: 4px 8px;
+            }
+        """)
+
+        # Recording toggle
+        if self._state == self.STATE_RECORDING:
+            action_record = menu.addAction("Stop Recording")
+        else:
+            action_record = menu.addAction("Start Recording")
+        action_record.triggered.connect(self.toggle_recording_requested.emit)
+
+        menu.addSeparator()
+
+        # Model submenu
+        model_menu = menu.addMenu("Model")
+        model_menu.setStyleSheet(menu.styleSheet())
+
+        for model in self._available_models:
+            action = model_menu.addAction(model)
+            action.setCheckable(True)
+            if model == self._current_model:
+                action.setChecked(True)
+            action.triggered.connect(lambda checked, m=model: self.model_change_requested.emit(m))
+
+        menu.addSeparator()
+
+        # Status info
+        status_action = menu.addAction(f"Status: {self._state.capitalize()}")
+        status_action.setEnabled(False)
+
+        menu.addSeparator()
+
+        # Quit
+        quit_action = menu.addAction("Quit Daemon")
+        quit_action.triggered.connect(self.quit_requested.emit)
+
+        # Show menu at cursor position
+        menu.exec(pos)
 
 
 # Test the indicator
@@ -450,14 +704,35 @@ if __name__ == "__main__":
 
     indicator = RecordingIndicator()
 
-    # Test cycle: recording -> transcribing -> hide
-    def cycle():
-        print("Showing recording...")
-        indicator.show_recording()
-        QTimer.singleShot(3000, lambda: (print("Showing transcribing..."), indicator.show_transcribing()))
-        QTimer.singleShot(5000, lambda: (print("Hiding..."), indicator.hide_indicator()))
-        QTimer.singleShot(7000, cycle)  # Repeat
+    def on_toggle():
+        if indicator._state == RecordingIndicator.STATE_IDLE:
+            print(">>> Starting recording...")
+            indicator.show_recording()
+        elif indicator._state == RecordingIndicator.STATE_RECORDING:
+            print(">>> Stopping, transcribing...")
+            indicator.show_transcribing()
+            # Simulate progress
+            for i in range(0, 101, 20):
+                QTimer.singleShot(i * 50, lambda p=i: indicator.update_progress(p))
+            QTimer.singleShot(3000, indicator.show_idle)
+        else:
+            indicator.show_idle()
 
-    cycle()
+    def on_model_change(model):
+        print(f">>> Model change requested: {model}")
+        indicator.set_current_model(model)
+
+    def on_quit():
+        print(">>> Quit requested")
+        app.quit()
+
+    indicator.toggle_recording_requested.connect(on_toggle)
+    indicator.model_change_requested.connect(on_model_change)
+    indicator.quit_requested.connect(on_quit)
+
+    indicator.show_idle()
+    indicator.show()
+
+    print("Click to toggle recording, right-click for menu, drag to move")
 
     sys.exit(app.exec())

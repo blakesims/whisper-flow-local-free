@@ -79,8 +79,9 @@ class WhisperDaemon(QObject):
         self.audio_recorder = AudioRecorder()
         self._connect_recorder_signals()
 
-        # Initialize UI indicator
+        # Initialize UI indicator (always visible)
         self.indicator = RecordingIndicator()
+        self._connect_indicator_signals()
 
         # Initialize hotkey listener
         self.hotkey_listener = HotkeyListener()
@@ -106,6 +107,35 @@ class WhisperDaemon(QObject):
         # Connect audio chunks to waveform visualization
         self.audio_recorder.new_audio_chunk_signal.connect(self._on_audio_chunk)
 
+    def _connect_indicator_signals(self):
+        """Connect indicator UI signals"""
+        self.indicator.toggle_recording_requested.connect(self._on_hotkey_triggered)
+        self.indicator.model_change_requested.connect(self._on_model_change_requested)
+        self.indicator.quit_requested.connect(self._on_quit_requested)
+
+    @Slot(str)
+    def _on_model_change_requested(self, model_name: str):
+        """Handle model change from indicator menu"""
+        print(f"[Daemon] Model change requested: {model_name}")
+
+        # Save to config
+        self.config_manager.set("transcription_model_name", model_name)
+
+        # Update indicator display
+        self.indicator.set_current_model(model_name)
+
+        # Reload model
+        self._model_loaded = False
+        print(f"[Daemon] Reloading model to '{model_name}'...")
+        self._load_model()
+
+    @Slot()
+    def _on_quit_requested(self):
+        """Handle quit request from indicator menu"""
+        print("[Daemon] Quit requested from indicator")
+        self.stop()
+        QApplication.instance().quit()
+
     @Slot(object)
     def _on_audio_chunk(self, chunk):
         """Handle new audio chunk for waveform visualization"""
@@ -129,14 +159,19 @@ class WhisperDaemon(QObject):
         # Write PID file
         self._write_pid_file()
 
+        # Show indicator in idle state immediately
+        self.indicator.show_idle()
+        print("[Daemon] Indicator shown in idle state")
+
         # Load model synchronously on startup
         self._load_model()
 
         # Start hotkey listener
         self.hotkey_listener.start()
         print("[Daemon] Hotkey listener started (Ctrl+F to toggle recording)")
+        print("[Daemon] Click indicator dot to toggle, right-click for menu")
 
-        print("[Daemon] Daemon ready and waiting for hotkey...")
+        print("[Daemon] Daemon ready and waiting...")
 
     def stop(self):
         """Stop the daemon gracefully"""
@@ -187,6 +222,9 @@ class WhisperDaemon(QObject):
             model_name = self.config_manager.get("transcription_model_name", "base")
             device = self.config_manager.get("transcription_device", "cpu")
             compute_type = self.config_manager.get("transcription_compute_type", "int8")
+
+            # Update indicator with current model
+            self.indicator.set_current_model(model_name)
 
             # Set config and load
             self.transcription_service.set_target_model_config(model_name, device, compute_type)
@@ -436,7 +474,8 @@ class WhisperDaemon(QObject):
         elif state == DaemonState.TRANSCRIBING:
             self.indicator.show_transcribing()
         else:
-            self.indicator.hide_indicator()
+            # Return to idle (always visible, collapsed)
+            self.indicator.show_idle()
 
     @classmethod
     def is_running(cls) -> bool:
