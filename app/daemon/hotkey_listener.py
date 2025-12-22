@@ -12,13 +12,18 @@ import platform
 
 class HotkeyListener(QObject):
     """
-    Listens for global hotkey (Ctrl+F by default) and emits signal when triggered.
+    Listens for global hotkeys and emits signals when triggered.
+
+    Hotkeys:
+    - Ctrl+F: Toggle recording
+    - Escape: Cancel recording (save but don't transcribe)
 
     Note: On macOS, the app needs Accessibility permissions for global hotkeys.
     The user will be prompted to grant access in System Preferences > Privacy & Security > Accessibility.
     """
 
     hotkey_triggered = Signal()
+    escape_pressed = Signal()  # For cancelling recording
 
     def __init__(self, hotkey: str = "<ctrl>+f", parent=None):
         """
@@ -75,6 +80,12 @@ class HotkeyListener(QObject):
     def _on_key_press(self, key):
         """Handle key press events"""
         try:
+            # Check for Escape key
+            if key == keyboard.Key.esc:
+                print("[Hotkey] Escape detected!")
+                self.escape_pressed.emit()
+                return
+
             # Check for Ctrl key
             if key == keyboard.Key.ctrl or key == keyboard.Key.ctrl_l or key == keyboard.Key.ctrl_r:
                 self._ctrl_pressed = True

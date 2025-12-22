@@ -85,6 +85,11 @@ class WhisperDaemon(QObject):
         # Initialize hotkey listener
         self.hotkey_listener = HotkeyListener()
         self.hotkey_listener.hotkey_triggered.connect(self._on_hotkey_triggered)
+        self.hotkey_listener.escape_pressed.connect(self._on_escape_pressed)
+
+        # Directory for cancelled recordings
+        self._cancelled_recordings_dir = os.path.expanduser("~/Documents/WhisperRecordings")
+        os.makedirs(self._cancelled_recordings_dir, exist_ok=True)
 
         # Connect state changes to indicator
         self.state_changed.connect(self._update_indicator)
@@ -225,8 +230,19 @@ class WhisperDaemon(QObject):
             self.state = DaemonState.IDLE
             self._start_recording()
 
+    @Slot()
+    def _on_escape_pressed(self):
+        """Handle Escape key - cancel recording but save the audio"""
+        if self.state != DaemonState.RECORDING:
+            return  # Only cancel if recording
+
+        print("[Daemon] Escape pressed - cancelling recording (saving audio)")
+        self._cancel_recording = True
+        self.audio_recorder.stop_recording()
+
     def _start_recording(self):
         """Start audio recording"""
+        self._cancel_recording = False  # Reset cancel flag
         if not self._model_loaded:
             print("[Daemon] Model not loaded, cannot record")
             self.error_occurred.emit("Model not loaded")
@@ -259,11 +275,38 @@ class WhisperDaemon(QObject):
 
         # Check if we got a valid audio path
         if audio_path_or_message and os.path.exists(audio_path_or_message):
-            self._current_audio_path = audio_path_or_message
-            self._transcribe_audio()
+            # Check if recording was cancelled
+            if getattr(self, '_cancel_recording', False):
+                self._save_cancelled_recording(audio_path_or_message)
+                self._cancel_recording = False
+                self.state = DaemonState.IDLE
+            else:
+                self._current_audio_path = audio_path_or_message
+                self._transcribe_audio()
         else:
             print(f"[Daemon] No valid audio file: {audio_path_or_message}")
             self.state = DaemonState.IDLE
+
+    def _save_cancelled_recording(self, audio_path: str):
+        """Save a cancelled recording to the recordings folder"""
+        try:
+            import shutil
+            from datetime import datetime
+
+            # Create filename with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"recording_{timestamp}.wav"
+            dest_path = os.path.join(self._cancelled_recordings_dir, filename)
+
+            # Copy the file
+            shutil.copy2(audio_path, dest_path)
+            print(f"[Daemon] Cancelled recording saved to: {dest_path}")
+
+            # Clean up temp file
+            os.remove(audio_path)
+
+        except Exception as e:
+            print(f"[Daemon] Error saving cancelled recording: {e}")
 
     @Slot(str)
     def _on_recorder_error(self, error_msg: str):
@@ -298,6 +341,8 @@ class WhisperDaemon(QObject):
             # Progress callback to update indicator
             def progress_callback(percentage, text, lang_info):
                 self.indicator.update_progress(percentage)
+                # Force UI update during long transcriptions
+                QApplication.processEvents()
 
             # Transcribe with progress
             result = self.transcription_service.transcribe(

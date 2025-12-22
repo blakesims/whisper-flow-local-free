@@ -70,18 +70,19 @@ class MiniWaveform(QWidget):
         max_height = self.height() - 4
         center_y = self.height() // 2
 
+        # Tokyo Night color palette (monochromatic blue)
+        # Use opacity/brightness to indicate amplitude, not color
+        base_color = QColor(122, 162, 247)  # Tokyo Night blue (#7aa2f7)
+
         # Draw bars
         for i, amplitude in enumerate(self._samples):
             x = i * (bar_width + bar_spacing)
             bar_height = max(2, int(amplitude * max_height))
 
-            # Gradient from gray to red based on amplitude
-            if amplitude > 0.6:
-                color = QColor(255, 59, 48)  # Red for loud
-            elif amplitude > 0.3:
-                color = QColor(255, 149, 0)  # Orange for medium
-            else:
-                color = QColor(142, 142, 147)  # Gray for quiet
+            # Monochromatic - just vary the opacity based on amplitude
+            color = QColor(base_color)
+            opacity = 0.3 + (amplitude * 0.7)  # Range from 0.3 to 1.0
+            color.setAlphaF(opacity)
 
             painter.setBrush(QBrush(color))
             painter.setPen(Qt.NoPen)
@@ -141,8 +142,8 @@ class PulsingDot(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        # Red color with current opacity
-        color = QColor(255, 59, 48)  # iOS-style red
+        # Tokyo Night cyan/blue for recording dot
+        color = QColor(125, 207, 255)  # Tokyo Night cyan (#7dcfff)
         color.setAlphaF(self._opacity)
 
         painter.setBrush(QBrush(color))
@@ -191,8 +192,8 @@ class SpinnerWidget(QWidget):
         painter.translate(self.width() / 2, self.height() / 2)
         painter.rotate(self._angle)
 
-        # Draw arc segments with varying opacity
-        color = QColor(0, 122, 255)  # iOS-style blue
+        # Draw arc segments with varying opacity - Tokyo Night blue
+        color = QColor(122, 162, 247)  # Tokyo Night blue (#7aa2f7)
         pen = QPen(color)
         pen.setWidth(2)
         pen.setCapStyle(Qt.RoundCap)
@@ -250,6 +251,11 @@ class RecordingIndicator(QWidget):
         self._fade_animation.setDuration(200)
         self._fade_animation.setEasingCurve(QEasingCurve.InOutQuad)
 
+        # Timer to follow cursor between screens during recording
+        self._follow_cursor_timer = QTimer(self)
+        self._follow_cursor_timer.timeout.connect(self._update_position_for_cursor)
+        self._is_recording = False
+
     def _setup_ui(self):
         """Setup the UI components"""
         layout = QHBoxLayout(self)
@@ -302,6 +308,11 @@ class RecordingIndicator(QWidget):
             self.move(x, y)
             print(f"[Indicator] Screen: {screen.name()}, Position: ({x}, {y})")
 
+    def _update_position_for_cursor(self):
+        """Update position to follow cursor between screens (called by timer)"""
+        if self._is_recording and self.isVisible():
+            self._position_window()
+
     def paintEvent(self, event):
         """Paint the rounded background"""
         painter = QPainter(self)
@@ -337,8 +348,16 @@ class RecordingIndicator(QWidget):
         self._position_window()
         self._fade_in()
 
+        # Start following cursor between screens
+        self._is_recording = True
+        self._follow_cursor_timer.start(500)  # Check every 500ms
+
     def show_transcribing(self, progress: int = 0):
         """Show the transcribing indicator with progress"""
+        # Stop following cursor
+        self._is_recording = False
+        self._follow_cursor_timer.stop()
+
         # Play toggle sound (same for start/stop)
         play_sound(SOUND_TOGGLE)
 
@@ -361,10 +380,13 @@ class RecordingIndicator(QWidget):
     def update_progress(self, progress: int):
         """Update transcription progress percentage"""
         self.label.setText(f"Transcribing... {progress}%")
-        self.label.setStyleSheet("color: #007AFF;")  # Blue
+        self.label.setStyleSheet("color: #7aa2f7;")  # Tokyo Night blue
 
     def hide_indicator(self):
         """Hide the indicator with fade animation"""
+        # Stop following cursor
+        self._is_recording = False
+        self._follow_cursor_timer.stop()
         self._fade_out()
 
     def update_waveform(self, audio_chunk):
