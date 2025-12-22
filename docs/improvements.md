@@ -5,7 +5,7 @@
 | # | Feature | Priority | Status | Effort | Impact | Notes |
 |---|---------|----------|--------|--------|--------|-------|
 | 1 | [whisper.cpp Migration](#1-whispercpp-migration) | High | ✅ Done | Medium | 5-6x faster | Metal GPU enabled |
-| 2 | [LLM Post-Processing](#2-llm-post-processing) | High | ⏳ Planned | Medium | Cleaner output | MLX + Phi-3.2 |
+| 2 | [LLM Post-Processing](#2-llm-post-processing) | High | ✅ Done | Medium | Cleaner output | MLX + Phi-3.5 |
 | 3 | [Speech Clarity Metrics](#3-speech-clarity-metrics) | Medium | ⏳ Planned | Low | User feedback | Filler word tracking |
 | 4 | [Clarity Tracking Over Time](#4-clarity-tracking-over-time) | Medium | ⏳ Planned | Medium | Gamification | Historical trends |
 | 5 | [Model Selection in UI](#5-model-selection-in-ui) | Low | ⏳ Planned | Low | Flexibility | Settings dialog |
