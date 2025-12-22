@@ -7,9 +7,12 @@ Drop-in replacement for TranscriptionService with compatible API.
 
 import os
 import time
+import tempfile
 from pathlib import Path
 from typing import Optional, Callable
 
+import numpy as np
+from scipy.io import wavfile
 from pywhispercpp.model import Model
 
 from app.utils.config_manager import ConfigManager
@@ -104,11 +107,15 @@ class WhisperCppService:
         if progress_callback:
             progress_callback(0, "", None)
 
+        # Convert audio to int16 format (required by whisper.cpp)
+        converted_path = self._convert_to_int16(audio_path)
+        temp_file_created = converted_path != audio_path
+
         try:
             # Transcribe with whisper.cpp
             # Note: pywhispercpp returns a list of Segment objects
             segments = self.model.transcribe(
-                audio_path,
+                converted_path,
                 language=language if language else None,
                 n_threads=self._get_thread_count(),
             )
@@ -142,13 +149,50 @@ class WhisperCppService:
         except Exception as e:
             print(f"[WhisperCpp] Transcription error: {e}")
             raise
+        finally:
+            # Clean up temp converted file
+            if temp_file_created and os.path.exists(converted_path):
+                try:
+                    os.remove(converted_path)
+                except Exception:
+                    pass
 
     def _get_thread_count(self) -> int:
         """Get optimal thread count for Apple Silicon."""
-        import os
         cpu_count = os.cpu_count() or 4
         # Use all cores minus 1 for Apple Silicon
         return max(1, cpu_count - 1)
+
+    def _convert_to_int16(self, audio_path: str) -> str:
+        """
+        Convert audio file to 16-bit PCM WAV format.
+        whisper.cpp requires this format.
+        """
+        try:
+            sample_rate, data = wavfile.read(audio_path)
+
+            # If already int16, return as-is
+            if data.dtype == np.int16:
+                return audio_path
+
+            # Convert float32 [-1, 1] to int16 [-32768, 32767]
+            if data.dtype == np.float32 or data.dtype == np.float64:
+                # Clip to valid range and convert
+                data = np.clip(data, -1.0, 1.0)
+                data = (data * 32767).astype(np.int16)
+            elif data.dtype == np.int32:
+                # Convert int32 to int16 by scaling
+                data = (data / 65536).astype(np.int16)
+
+            # Save to temp file
+            temp_path = tempfile.mktemp(suffix='.wav')
+            wavfile.write(temp_path, sample_rate, data)
+            print(f"[WhisperCpp] Converted audio to int16: {temp_path}")
+            return temp_path
+
+        except Exception as e:
+            print(f"[WhisperCpp] Audio conversion error: {e}")
+            return audio_path  # Return original, hope for the best
 
     def unload_model(self):
         """Unload model to free memory."""
