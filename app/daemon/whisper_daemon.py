@@ -419,11 +419,14 @@ class WhisperDaemon(QObject):
         # Emit signal
         self.transcription_complete.emit(text)
 
+        # Return to idle FIRST (before pasting to avoid indicator focus issues)
+        self.state = DaemonState.IDLE
+
+        # Small delay to let indicator settle
+        time.sleep(0.05)
+
         # Auto-paste using Cmd+V simulation
         self._auto_paste()
-
-        # Return to idle
-        self.state = DaemonState.IDLE
 
     def _auto_paste(self):
         """Simulate Cmd+V to paste at cursor"""
@@ -520,9 +523,9 @@ def run_daemon():
     # MUST be set AFTER QApplication is created
     try:
         from AppKit import NSApplication, NSApp
-        # NSApplicationActivationPolicyProhibited = 2 (completely hidden from dock/switcher)
-        NSApp.setActivationPolicy_(2)
-        print("[Daemon] Set activation policy to Prohibited (hidden from Alt+Tab)")
+        # NSApplicationActivationPolicyAccessory = 1 (hidden from dock, but windows still visible)
+        NSApp.setActivationPolicy_(1)
+        print("[Daemon] Set activation policy to Accessory (hidden from dock, windows visible)")
     except Exception as e:
         print(f"[Daemon] Warning: Could not set activation policy: {e}")
 

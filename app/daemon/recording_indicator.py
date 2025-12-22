@@ -286,8 +286,9 @@ class RecordingIndicator(QWidget):
         self._available_models = ["tiny", "base", "small", "medium", "large-v2"]
 
         # Window flags for always-on-top, frameless, no focus stealing
+        # Using SplashScreen type for overlay-style behavior on macOS
         self.setWindowFlags(
-            Qt.Tool |
+            Qt.SplashScreen |
             Qt.FramelessWindowHint |
             Qt.WindowStaysOnTopHint |
             Qt.WindowDoesNotAcceptFocus
@@ -332,15 +333,11 @@ class RecordingIndicator(QWidget):
     def _setup_ui(self):
         """Setup the UI components"""
         self._layout = QHBoxLayout(self)
-        self._layout.setContentsMargins(10, 8, 10, 8)
-        self._layout.setSpacing(8)
+        self._layout.setContentsMargins(8, 4, 8, 4)
+        self._layout.setSpacing(6)
 
-        # Idle dot (always visible in some form)
-        self.idle_dot = PulsingDot(size=10)
-        self._layout.addWidget(self.idle_dot)
-
-        # Recording dot (larger, for recording state)
-        self.recording_dot = PulsingDot(size=12)
+        # Recording dot (for recording state only)
+        self.recording_dot = PulsingDot(size=10)
         self.recording_dot.hide()
         self._layout.addWidget(self.recording_dot)
 
@@ -356,7 +353,7 @@ class RecordingIndicator(QWidget):
 
         # Status label
         self.label = QLabel("")
-        self.label.setFont(QFont(".AppleSystemUIFont", 12, QFont.Medium))
+        self.label.setFont(QFont(".AppleSystemUIFont", 11, QFont.Medium))
         self.label.setStyleSheet(f"color: {COLORS['text'].name()};")
         self.label.hide()
         self._layout.addWidget(self.label)
@@ -382,13 +379,19 @@ class RecordingIndicator(QWidget):
         self._position_default()
 
     def _position_default(self):
-        """Position at bottom center of primary screen"""
-        screen = QApplication.primaryScreen()
+        """Position at bottom center of current screen (near cursor)"""
+        cursor_pos = QCursor.pos()
+        screen = QApplication.screenAt(cursor_pos)
+        if not screen:
+            screen = QApplication.primaryScreen()
+
         if screen:
             geo = screen.availableGeometry()
             x = geo.x() + (geo.width() - self.width()) // 2
-            y = geo.y() + geo.height() - self.height() - 80
+            # Very bottom with minimal padding (12px from bottom)
+            y = geo.y() + geo.height() - self.height() - 12
             self.move(x, y)
+            print(f"[Indicator] Position: ({x}, {y}) on {screen.name()}")
 
     def _save_position(self):
         """Save current position to settings"""
@@ -398,10 +401,10 @@ class RecordingIndicator(QWidget):
         })
 
     def _set_idle_state(self):
-        """Set to collapsed idle state"""
+        """Set to collapsed idle state - small pill, no animation"""
         self._state = self.STATE_IDLE
 
-        # Hide expanded elements
+        # Hide all elements - idle is just the pill background
         self.recording_dot.hide()
         self.recording_dot.stop_pulsing()
         self.spinner.hide()
@@ -409,17 +412,14 @@ class RecordingIndicator(QWidget):
         self.waveform.hide()
         self.label.hide()
 
-        # Show idle dot (not pulsing)
-        self.idle_dot.show()
-        self.idle_dot.stop_pulsing()
-
-        # Collapse to small size
-        self.setFixedHeight(32)
-        self.setMinimumWidth(32)
-        self.setMaximumWidth(32)
+        # Small pill size (no inner elements shown)
+        self.setFixedHeight(20)
+        self.setMinimumWidth(36)
+        self.setMaximumWidth(36)
         self.adjustSize()
 
-        self._follow_cursor_timer.stop()
+        # Follow cursor to active screen even in idle
+        self._follow_cursor_timer.start(1000)  # Check every 1s
         self.update()
 
     def _set_recording_state(self):
@@ -427,8 +427,7 @@ class RecordingIndicator(QWidget):
         self._state = self.STATE_RECORDING
         play_sound(SOUND_TOGGLE)
 
-        # Hide idle dot, show recording elements
-        self.idle_dot.hide()
+        # Show recording elements
         self.spinner.hide()
         self.spinner.stop_spinning()
         self.label.hide()
@@ -439,12 +438,15 @@ class RecordingIndicator(QWidget):
         self.waveform.show()
 
         # Expand
-        self.setFixedHeight(36)
-        self.setMinimumWidth(140)
-        self.setMaximumWidth(300)
+        self.setFixedHeight(28)
+        self.setMinimumWidth(130)
+        self.setMaximumWidth(250)
         self.adjustSize()
 
-        # Start checking for screen changes
+        # Reposition for new size
+        self._position_default()
+
+        # Keep checking for screen changes
         self._follow_cursor_timer.start(500)
 
         self.update()
@@ -455,7 +457,6 @@ class RecordingIndicator(QWidget):
         play_sound(SOUND_TOGGLE)
 
         # Hide other elements
-        self.idle_dot.hide()
         self.recording_dot.hide()
         self.recording_dot.stop_pulsing()
         self.waveform.hide()
@@ -463,24 +464,24 @@ class RecordingIndicator(QWidget):
         # Show spinner and label
         self.spinner.show()
         self.spinner.start_spinning()
-        self.label.setText("Transcribing... 0%")
+        self.label.setText("0%")
         self.label.setStyleSheet(f"color: {COLORS['blue'].name()};")
         self.label.show()
 
-        # Expand for label
-        self.setFixedHeight(36)
-        self.setMinimumWidth(160)
-        self.setMaximumWidth(300)
+        # Compact size for transcribing
+        self.setFixedHeight(24)
+        self.setMinimumWidth(60)
+        self.setMaximumWidth(100)
         self.adjustSize()
+
+        # Reposition for new size
+        self._position_default()
 
         self._follow_cursor_timer.stop()
         self.update()
 
     def _check_screen_change(self):
-        """Check if we should move to a different screen during recording"""
-        if self._state != self.STATE_RECORDING:
-            return
-
+        """Check if we should move to a different screen (follows cursor)"""
         cursor_pos = QCursor.pos()
         current_screen = QApplication.screenAt(cursor_pos)
 
@@ -489,7 +490,7 @@ class RecordingIndicator(QWidget):
             # Move to bottom center of new screen
             geo = current_screen.availableGeometry()
             x = geo.x() + (geo.width() - self.width()) // 2
-            y = geo.y() + geo.height() - self.height() - 80
+            y = geo.y() + geo.height() - self.height() - 12
             self.move(x, y)
             print(f"[Indicator] Moved to screen: {current_screen.name()}")
 
@@ -517,7 +518,7 @@ class RecordingIndicator(QWidget):
 
     def update_progress(self, progress: int):
         """Update transcription progress"""
-        self.label.setText(f"Transcribing... {progress}%")
+        self.label.setText(f"{progress}%")
         QApplication.processEvents()
 
     def update_waveform(self, audio_chunk):
@@ -540,7 +541,8 @@ class RecordingIndicator(QWidget):
         try:
             from AppKit import NSWorkspace, NSApp
             frontmost = NSWorkspace.sharedWorkspace().frontmostApplication()
-            NSApp.setActivationPolicy_(2)  # Accessory app
+            # Accessory policy (1) - hidden from dock but windows visible
+            NSApp.setActivationPolicy_(1)
 
             self.show()
             self.raise_()
@@ -560,29 +562,44 @@ class RecordingIndicator(QWidget):
 
         # Subtle outer glow on hover
         if self._is_hovered:
-            glow = QColor(COLORS['blue'])
-            glow.setAlphaF(0.15)
+            glow = QColor(COLORS['cyan'])
+            glow.setAlphaF(0.25)
             painter.setBrush(Qt.NoBrush)
             pen = QPen(glow)
-            pen.setWidth(3)
+            pen.setWidth(2)
             painter.setPen(pen)
-            painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 14, 14)
+            radius = rect.height() // 2  # Pill shape
+            painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), radius, radius)
 
-        # Background with subtle gradient
-        gradient = QLinearGradient(0, 0, 0, rect.height())
-        gradient.setColorAt(0, COLORS['bg_highlight'])
-        gradient.setColorAt(1, COLORS['bg_dark'])
-
-        painter.setBrush(QBrush(gradient))
+        # Background - solid dark for idle, gradient for active states
+        if self._state == self.STATE_IDLE:
+            bg_color = QColor(COLORS['bg_dark'])
+            bg_color.setAlphaF(0.9)
+            painter.setBrush(QBrush(bg_color))
+        else:
+            gradient = QLinearGradient(0, 0, 0, rect.height())
+            gradient.setColorAt(0, COLORS['bg_highlight'])
+            gradient.setColorAt(1, COLORS['bg_dark'])
+            painter.setBrush(QBrush(gradient))
 
         # Subtle border
-        border_pen = QPen(COLORS['border'])
+        border_color = QColor(COLORS['border'])
+        border_pen = QPen(border_color)
         border_pen.setWidth(1)
         painter.setPen(border_pen)
 
-        # More rounded corners
-        radius = 16 if self._state == self.STATE_IDLE else 14
+        # Pill shape (full radius for height)
+        radius = rect.height() // 2
         painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), radius, radius)
+
+        # For idle state, draw a small centered dot
+        if self._state == self.STATE_IDLE:
+            dot_color = QColor(COLORS['cyan'])
+            dot_color.setAlphaF(0.7)
+            painter.setBrush(QBrush(dot_color))
+            painter.setPen(Qt.NoPen)
+            center = rect.center()
+            painter.drawEllipse(center, 4, 4)
 
     def enterEvent(self, event):
         """Mouse entered widget"""
