@@ -271,6 +271,7 @@ class RecordingIndicator(QWidget):
     # Signals for daemon communication
     toggle_recording_requested = Signal()
     model_change_requested = Signal(str)
+    post_processing_toggled = Signal(bool)  # True = enabled
     quit_requested = Signal()
 
     # State constants
@@ -284,6 +285,7 @@ class RecordingIndicator(QWidget):
         self._state = self.STATE_IDLE
         self._current_model = "base"
         self._available_models = ["tiny", "base", "small", "medium", "large-v2"]
+        self._post_processing_enabled = False
 
         # Window flags for always-on-top, frameless, no focus stealing
         # Using SplashScreen type for overlay-style behavior on macOS
@@ -534,6 +536,10 @@ class RecordingIndicator(QWidget):
         """Set the list of available models"""
         self._available_models = models
 
+    def set_post_processing_enabled(self, enabled: bool):
+        """Set post-processing state"""
+        self._post_processing_enabled = enabled
+
     # === Event handlers ===
 
     def _ensure_visible(self):
@@ -699,6 +705,14 @@ class RecordingIndicator(QWidget):
 
         menu.addSeparator()
 
+        # Post-processing toggle
+        pp_action = menu.addAction("Clean Up Text (LLM)")
+        pp_action.setCheckable(True)
+        pp_action.setChecked(self._post_processing_enabled)
+        pp_action.triggered.connect(self._toggle_post_processing)
+
+        menu.addSeparator()
+
         # Status info
         status_action = menu.addAction(f"Status: {self._state.capitalize()}")
         status_action.setEnabled(False)
@@ -711,6 +725,11 @@ class RecordingIndicator(QWidget):
 
         # Show menu at cursor position
         menu.exec(pos)
+
+    def _toggle_post_processing(self, checked: bool):
+        """Handle post-processing toggle"""
+        self._post_processing_enabled = checked
+        self.post_processing_toggled.emit(checked)
 
 
 # Test the indicator

@@ -30,6 +30,7 @@ from PySide6.QtCore import QObject, Signal, Slot, QTimer
 
 from app.core.transcription_service_cpp import WhisperCppService, get_transcription_service
 from app.core.audio_recorder import AudioRecorder
+from app.core.post_processor import get_post_processor
 from app.utils.config_manager import ConfigManager
 from app.daemon.recording_indicator import RecordingIndicator
 from app.daemon.hotkey_listener import HotkeyListener
@@ -75,6 +76,9 @@ class WhisperDaemon(QObject):
         # Initialize transcription service (whisper.cpp for speed)
         self.transcription_service = get_transcription_service(self.config_manager)
 
+        # Initialize post-processor (lazy loading)
+        self.post_processor = get_post_processor(self.config_manager)
+
         # Initialize audio recorder
         self.audio_recorder = AudioRecorder()
         self._connect_recorder_signals()
@@ -111,6 +115,7 @@ class WhisperDaemon(QObject):
         """Connect indicator UI signals"""
         self.indicator.toggle_recording_requested.connect(self._on_hotkey_triggered)
         self.indicator.model_change_requested.connect(self._on_model_change_requested)
+        self.indicator.post_processing_toggled.connect(self._on_post_processing_toggled)
         self.indicator.quit_requested.connect(self._on_quit_requested)
 
     @Slot(str)
@@ -128,6 +133,13 @@ class WhisperDaemon(QObject):
         self._model_loaded = False
         print(f"[Daemon] Reloading model to '{model_name}'...")
         self._load_model()
+
+    @Slot(bool)
+    def _on_post_processing_toggled(self, enabled: bool):
+        """Handle post-processing toggle from indicator menu"""
+        self.post_processor.enabled = enabled
+        self.indicator.set_post_processing_enabled(enabled)
+        print(f"[Daemon] Post-processing {'enabled' if enabled else 'disabled'}")
 
     @Slot()
     def _on_quit_requested(self):
@@ -161,6 +173,7 @@ class WhisperDaemon(QObject):
 
         # Show indicator in idle state immediately
         self.indicator.show_idle()
+        self.indicator.set_post_processing_enabled(self.post_processor.enabled)
         print("[Daemon] Indicator shown in idle state")
 
         # Load model synchronously on startup
@@ -290,6 +303,10 @@ class WhisperDaemon(QObject):
         self.state = DaemonState.RECORDING
         self.audio_recorder.start_recording()
 
+        # Preload LLM in background while recording (if enabled)
+        if self.post_processor.enabled:
+            self.post_processor.preload_async()
+
     def _stop_recording(self):
         """Stop audio recording - will trigger transcription"""
         print("[Daemon] Stopping recording...")
@@ -409,6 +426,12 @@ class WhisperDaemon(QObject):
 
     def _handle_transcription_result(self, text: str):
         """Handle successful transcription - copy to clipboard and paste"""
+        # Apply post-processing if enabled
+        if self.post_processor.enabled:
+            print("[Daemon] Applying post-processing...")
+            text = self.post_processor.process(text)
+            print(f"[Daemon] Post-processed: '{text[:50]}...'")
+
         # Copy to clipboard
         try:
             pyperclip.copy(text)
