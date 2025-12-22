@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QObject, Signal, Slot, QTimer
 
-from app.core.transcription_service import TranscriptionService
+from app.core.transcription_service_cpp import WhisperCppService, get_transcription_service
 from app.core.audio_recorder import AudioRecorder
 from app.utils.config_manager import ConfigManager
 from app.daemon.recording_indicator import RecordingIndicator
@@ -72,8 +72,8 @@ class WhisperDaemon(QObject):
         # Initialize config manager
         self.config_manager = ConfigManager()
 
-        # Initialize transcription service
-        self.transcription_service = TranscriptionService(self.config_manager)
+        # Initialize transcription service (whisper.cpp for speed)
+        self.transcription_service = get_transcription_service(self.config_manager)
 
         # Initialize audio recorder
         self.audio_recorder = AudioRecorder()
