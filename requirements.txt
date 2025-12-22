@@ -20,3 +20,6 @@ rapidfuzz>=3.0.0
 
 # AI/LLM Integration
 google-genai>=0.1.0
+
+# Daemon/Background Service
+pynput>=1.7.6
