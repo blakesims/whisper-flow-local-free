@@ -98,6 +98,13 @@ class WhisperDaemon(QObject):
         self.audio_recorder.recording_started_signal.connect(self._on_recording_started)
         self.audio_recorder.recording_stopped_signal.connect(self._on_recording_stopped)
         self.audio_recorder.error_signal.connect(self._on_recorder_error)
+        # Connect audio chunks to waveform visualization
+        self.audio_recorder.new_audio_chunk_signal.connect(self._on_audio_chunk)
+
+    @Slot(object)
+    def _on_audio_chunk(self, chunk):
+        """Handle new audio chunk for waveform visualization"""
+        self.indicator.update_waveform(chunk)
 
     @property
     def state(self) -> DaemonState:
@@ -198,6 +205,14 @@ class WhisperDaemon(QObject):
         """Handle hotkey press - toggle recording"""
         print(f"[Daemon] Hotkey triggered! Current state: {self.state.value}")
 
+        # Save the frontmost app BEFORE we do anything
+        # This ensures we can restore focus after showing indicator
+        try:
+            from AppKit import NSWorkspace
+            self._frontmost_app = NSWorkspace.sharedWorkspace().frontmostApplication()
+        except:
+            self._frontmost_app = None
+
         if self.state == DaemonState.IDLE:
             self._start_recording()
         elif self.state == DaemonState.RECORDING:
@@ -280,11 +295,16 @@ class WhisperDaemon(QObject):
             if language == "auto":
                 language = None
 
-            # Transcribe
+            # Progress callback to update indicator
+            def progress_callback(percentage, text, lang_info):
+                self.indicator.update_progress(percentage)
+
+            # Transcribe with progress
             result = self.transcription_service.transcribe(
                 self._current_audio_path,
                 language=language,
-                beam_size=1  # Fast mode
+                beam_size=1,  # Fast mode
+                progress_callback=progress_callback
             )
 
             if result and result.get("text"):
@@ -313,9 +333,6 @@ class WhisperDaemon(QObject):
         except Exception as e:
             print(f"[Daemon] Clipboard error: {e}")
 
-        # Play success sound
-        self.indicator.play_done_sound()
-
         # Emit signal
         self.transcription_complete.emit(text)
 
@@ -328,7 +345,16 @@ class WhisperDaemon(QObject):
     def _auto_paste(self):
         """Simulate Cmd+V to paste at cursor"""
         try:
-            # Small delay to ensure clipboard is ready
+            # First, restore focus to the original app
+            if hasattr(self, '_frontmost_app') and self._frontmost_app:
+                try:
+                    self._frontmost_app.activateWithOptions_(0)
+                    time.sleep(0.15)  # Give time for app to become active
+                    print(f"[Daemon] Restored focus to: {self._frontmost_app.localizedName()}")
+                except Exception as e:
+                    print(f"[Daemon] Could not restore focus: {e}")
+
+            # Small delay to ensure focus is settled
             time.sleep(0.1)
 
             # Use pynput to simulate Cmd+V
@@ -405,6 +431,16 @@ def run_daemon():
     # Create Qt application (needed for signals/slots and UI)
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)  # Keep running even when indicator hides
+
+    # Prevent app from appearing in Dock and App Switcher (Alt+Tab) on macOS
+    # MUST be set AFTER QApplication is created
+    try:
+        from AppKit import NSApplication, NSApp
+        # NSApplicationActivationPolicyProhibited = 2 (completely hidden from dock/switcher)
+        NSApp.setActivationPolicy_(2)
+        print("[Daemon] Set activation policy to Prohibited (hidden from Alt+Tab)")
+    except Exception as e:
+        print(f"[Daemon] Warning: Could not set activation policy: {e}")
 
     # Create daemon
     daemon = WhisperDaemon()

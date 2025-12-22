@@ -118,8 +118,23 @@ show_status() {
         # Show memory usage
         MEM=$(ps -o rss= -p "$PID" 2>/dev/null | awk '{printf "%.1f MB", $1/1024}')
         echo "  Memory: $MEM"
+
+        # Show uptime
+        STARTED=$(ps -o lstart= -p "$PID" 2>/dev/null | xargs)
+        echo "  Started: $STARTED"
+
+        # Show model from log
+        MODEL=$(grep "Model.*loaded successfully" /tmp/whisper-daemon.log 2>/dev/null | tail -1 | sed 's/.*Model \([^ ]*\).*/\1/')
+        if [ -n "$MODEL" ]; then
+            echo "  Model: $MODEL"
+        fi
+
+        echo ""
+        echo -e "${YELLOW}Hotkey: Ctrl+F${NC} to toggle recording"
     else
         echo -e "${RED}Whisper daemon is NOT running${NC}"
+        echo ""
+        echo "Start with: $0 start"
     fi
 }
 
@@ -133,6 +148,20 @@ show_logs() {
     else
         echo -e "${YELLOW}No log file found${NC}"
     fi
+}
+
+# Show available models
+show_models() {
+    echo -e "${BLUE}Available Whisper Models:${NC}"
+    echo ""
+    echo "  tiny    - Fastest, lowest quality (~75MB)"
+    echo "  base    - Fast, good quality (~140MB) [DEFAULT]"
+    echo "  small   - Balanced (~500MB)"
+    echo "  medium  - High quality (~1.5GB)"
+    echo "  large-v2 - Best quality (~3GB)"
+    echo ""
+    echo "To change model, edit: ~/Library/Application Support/WhisperTranscribeUI/settings.json"
+    echo "Set \"transcription_model_name\" to your preferred model, then restart daemon."
 }
 
 # Main script logic
@@ -154,17 +183,21 @@ case "${1:-status}" in
     logs)
         show_logs
         ;;
+    models)
+        show_models
+        ;;
     *)
         echo "Whisper Daemon Control"
         echo ""
-        echo "Usage: $0 {start|stop|restart|status|logs}"
+        echo "Usage: $0 {start|stop|restart|status|logs|models}"
         echo ""
         echo "Commands:"
         echo "  start   - Start the daemon in background"
         echo "  stop    - Stop the running daemon"
         echo "  restart - Restart the daemon"
-        echo "  status  - Show daemon status"
+        echo "  status  - Show daemon status and metrics"
         echo "  logs    - Show recent daemon logs"
+        echo "  models  - Show available Whisper models"
         echo ""
         echo "Hotkey: Ctrl+F to toggle recording"
         ;;

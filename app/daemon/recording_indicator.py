@@ -14,9 +14,9 @@ from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, Propert
 from PySide6.QtGui import QPainter, QColor, QBrush, QPen, QFont, QScreen
 
 
-# macOS system sounds - use same sound for start/stop, different for success
-SOUND_TOGGLE = "/System/Library/Sounds/Pop.aiff"   # Used for start AND stop
-SOUND_DONE = "/System/Library/Sounds/Glass.aiff"   # Success sound
+# macOS system sounds - simple and minimal
+# Same sound for start and stop (consistent feedback)
+SOUND_TOGGLE = "/System/Library/Sounds/Pop.aiff"
 
 
 def play_sound(sound_path: str):
@@ -30,6 +30,65 @@ def play_sound(sound_path: str):
             )
         except Exception:
             pass  # Silently fail if sound doesn't work
+
+
+class MiniWaveform(QWidget):
+    """A simple monochrome waveform visualization"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(120, 32)  # Larger size for better visibility
+        self._samples = [0.0] * 24  # Store 24 amplitude samples
+        self._max_samples = 24
+
+    def update_audio(self, audio_chunk):
+        """Update with new audio data"""
+        import numpy as np
+        if audio_chunk is not None and len(audio_chunk) > 0:
+            # Calculate RMS amplitude of the chunk
+            rms = float(np.sqrt(np.mean(audio_chunk.astype(np.float32) ** 2)))
+            # Normalize to 0-1 range - sensitivity 3x (multiplier = 15)
+            normalized = min(1.0, rms * 15)
+            self._samples.append(normalized)
+            if len(self._samples) > self._max_samples:
+                self._samples.pop(0)
+            self.update()
+
+    def clear(self):
+        """Clear the waveform"""
+        self._samples = [0.0] * self._max_samples
+        self.update()
+
+    def paintEvent(self, event):
+        """Paint the waveform bars"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Bar settings
+        bar_width = 3
+        bar_spacing = 1
+        max_height = self.height() - 4
+        center_y = self.height() // 2
+
+        # Draw bars
+        for i, amplitude in enumerate(self._samples):
+            x = i * (bar_width + bar_spacing)
+            bar_height = max(2, int(amplitude * max_height))
+
+            # Gradient from gray to red based on amplitude
+            if amplitude > 0.6:
+                color = QColor(255, 59, 48)  # Red for loud
+            elif amplitude > 0.3:
+                color = QColor(255, 149, 0)  # Orange for medium
+            else:
+                color = QColor(142, 142, 147)  # Gray for quiet
+
+            painter.setBrush(QBrush(color))
+            painter.setPen(Qt.NoPen)
+
+            # Draw bar centered vertically
+            y = center_y - bar_height // 2
+            painter.drawRoundedRect(x, y, bar_width, bar_height, 1, 1)
 
 
 class PulsingDot(QWidget):
@@ -164,16 +223,19 @@ class RecordingIndicator(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        # Window flags: frameless, always on top, tool window (no dock icon)
+        # Window flags: frameless, always on top, never take focus
+        # Using SplashScreen type which is designed for non-interactive overlays
         self.setWindowFlags(
+            Qt.SplashScreen |
             Qt.FramelessWindowHint |
             Qt.WindowStaysOnTopHint |
-            Qt.Tool |
             Qt.WindowDoesNotAcceptFocus
         )
 
-        # Transparent background for rounded corners
+        # Prevent window from activating the application
         self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_ShowWithoutActivating, True)
+        self.setAttribute(Qt.WA_MacAlwaysShowToolWindow, True)
 
         # Setup UI
         self._setup_ui()
@@ -204,6 +266,11 @@ class RecordingIndicator(QWidget):
         self.spinner.hide()
         layout.addWidget(self.spinner)
 
+        # Mini waveform for audio visualization
+        self.waveform = MiniWaveform()
+        self.waveform.hide()
+        layout.addWidget(self.waveform)
+
         # Status label
         self.label = QLabel("Recording...")
         self.label.setFont(QFont("SF Pro Text", 13, QFont.Medium))
@@ -229,11 +296,11 @@ class RecordingIndicator(QWidget):
 
         if screen:
             geometry = screen.availableGeometry()
-            # Center horizontally, 80px from bottom
+            # Center horizontally, 100px from bottom
             x = geometry.x() + (geometry.width() - self.width()) // 2
-            y = geometry.y() + geometry.height() - self.height() - 80
+            y = geometry.y() + geometry.height() - self.height() - 100
             self.move(x, y)
-            print(f"[Indicator] Screen: {screen.name()}, Geometry: {geometry}")
+            print(f"[Indicator] Screen: {screen.name()}, Position: ({x}, {y})")
 
     def paintEvent(self, event):
         """Paint the rounded background"""
@@ -253,8 +320,8 @@ class RecordingIndicator(QWidget):
         # Play toggle sound (same for start/stop)
         play_sound(SOUND_TOGGLE)
 
-        self.label.setText("Recording...")
-        self.label.setStyleSheet("color: #FF3B30;")  # Red
+        # Hide label during recording - just show dot + waveform
+        self.label.hide()
 
         self.spinner.hide()
         self.spinner.stop_spinning()
@@ -262,20 +329,27 @@ class RecordingIndicator(QWidget):
         self.dot.show()
         self.dot.start_pulsing()
 
+        # Show waveform for audio feedback
+        self.waveform.clear()
+        self.waveform.show()
+
         self.adjustSize()
         self._position_window()
         self._fade_in()
 
-    def show_transcribing(self):
-        """Show the transcribing indicator"""
+    def show_transcribing(self, progress: int = 0):
+        """Show the transcribing indicator with progress"""
         # Play toggle sound (same for start/stop)
         play_sound(SOUND_TOGGLE)
 
-        self.label.setText("Transcribing...")
-        self.label.setStyleSheet("color: #007AFF;")  # Blue
+        # Show label for progress percentage
+        self.label.show()
+        self.update_progress(progress)
 
         self.dot.hide()
         self.dot.stop_pulsing()
+
+        self.waveform.hide()
 
         self.spinner.show()
         self.spinner.start_spinning()
@@ -284,22 +358,48 @@ class RecordingIndicator(QWidget):
         self._position_window()
         self._fade_in()
 
+    def update_progress(self, progress: int):
+        """Update transcription progress percentage"""
+        self.label.setText(f"Transcribing... {progress}%")
+        self.label.setStyleSheet("color: #007AFF;")  # Blue
+
     def hide_indicator(self):
         """Hide the indicator with fade animation"""
         self._fade_out()
 
-    def play_done_sound(self):
-        """Play the success/done sound"""
-        play_sound(SOUND_DONE)
+    def update_waveform(self, audio_chunk):
+        """Update waveform with new audio data"""
+        if self.waveform.isVisible():
+            self.waveform.update_audio(audio_chunk)
 
     def _fade_in(self):
         """Fade in animation"""
         self._fade_animation.stop()
         self._fade_animation.setStartValue(0.0)
         self._fade_animation.setEndValue(1.0)
-        self.show()
-        self.raise_()  # Bring to front
-        self.activateWindow()  # Make sure it's active
+
+        # Save the currently focused app and restore focus after showing
+        try:
+            from AppKit import NSWorkspace, NSApp, NSRunningApplication
+            # Get the frontmost app before we show anything
+            frontmost = NSWorkspace.sharedWorkspace().frontmostApplication()
+
+            # Ensure our app stays hidden from dock/switcher
+            NSApp.setActivationPolicy_(2)
+
+            # Show our window
+            self.show()
+            self.raise_()
+
+            # Immediately restore focus to the previous app
+            if frontmost:
+                frontmost.activateWithOptions_(0)  # 0 = activate normally
+
+        except Exception as e:
+            print(f"[Indicator] AppKit focus handling failed: {e}")
+            self.show()
+            self.raise_()
+
         self._fade_animation.start()
         print(f"[Indicator] Showing at position: {self.pos().x()}, {self.pos().y()}")
 
