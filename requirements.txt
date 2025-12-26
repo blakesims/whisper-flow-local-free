@@ -10,8 +10,7 @@ scipy>=1.10.0
 pyperclip>=1.8.2
 
 # Transcription
-faster-whisper>=0.10.0  # Fallback
-pywhispercpp>=1.4.0     # Primary - 5-6x faster on Apple Silicon
+pywhispercpp>=1.4.0     # whisper.cpp - 5-6x faster on Apple Silicon
 
 # Packaging
 py2app>=0.28.0

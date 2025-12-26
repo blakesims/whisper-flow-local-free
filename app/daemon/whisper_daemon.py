@@ -79,9 +79,11 @@ class WhisperDaemon(QObject):
         # Initialize post-processor (lazy loading)
         self.post_processor = get_post_processor(self.config_manager)
 
-        # Initialize audio recorder
-        self.audio_recorder = AudioRecorder()
+        # Initialize audio recorder with configured device
+        input_device = self.config_manager.get("input_device", None)
+        self.audio_recorder = AudioRecorder(device=input_device)
         self._connect_recorder_signals()
+        self._log_audio_device()
 
         # Initialize UI indicator (always visible)
         self.indicator = RecordingIndicator()
@@ -116,6 +118,7 @@ class WhisperDaemon(QObject):
         self.indicator.toggle_recording_requested.connect(self._on_hotkey_triggered)
         self.indicator.model_change_requested.connect(self._on_model_change_requested)
         self.indicator.post_processing_toggled.connect(self._on_post_processing_toggled)
+        self.indicator.input_device_changed.connect(self._on_input_device_changed)
         self.indicator.quit_requested.connect(self._on_quit_requested)
 
     @Slot(str)
@@ -140,6 +143,35 @@ class WhisperDaemon(QObject):
         self.post_processor.enabled = enabled
         self.indicator.set_post_processing_enabled(enabled)
         print(f"[Daemon] Post-processing {'enabled' if enabled else 'disabled'}")
+
+    def _log_audio_device(self):
+        """Log the current audio input device"""
+        if self.audio_recorder.device is not None:
+            print(f"[Daemon] Using audio input device: {self.audio_recorder.device}")
+        else:
+            _, name = AudioRecorder.get_default_input_device()
+            print(f"[Daemon] Using default audio input: {name}")
+
+    @Slot(object)
+    def _on_input_device_changed(self, device):
+        """Handle input device change from indicator menu"""
+        print(f"[Daemon] Input device change requested: {device}")
+
+        # Save to config (None for default, otherwise device index)
+        self.config_manager.set("input_device", device)
+
+        # Update recorder
+        self.audio_recorder.set_device(device)
+        self._log_audio_device()
+
+        # Update indicator with available devices
+        self._update_indicator_devices()
+
+    def _update_indicator_devices(self):
+        """Update indicator with available input devices"""
+        devices = AudioRecorder.get_input_devices()
+        current = self.audio_recorder.device
+        self.indicator.set_input_devices(devices, current)
 
     @Slot()
     def _on_quit_requested(self):
@@ -174,6 +206,8 @@ class WhisperDaemon(QObject):
         # Show indicator in idle state immediately
         self.indicator.show_idle()
         self.indicator.set_post_processing_enabled(self.post_processor.enabled)
+        self.indicator.set_llm_model(self.post_processor._get_model_name())
+        self._update_indicator_devices()
         print("[Daemon] Indicator shown in idle state")
 
         # Load model synchronously on startup

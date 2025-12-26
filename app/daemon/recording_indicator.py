@@ -97,8 +97,18 @@ class MiniWaveform(QWidget):
         """Update with new audio data"""
         import numpy as np
         if audio_chunk is not None and len(audio_chunk) > 0:
-            rms = float(np.sqrt(np.mean(audio_chunk.astype(np.float32) ** 2)))
-            normalized = min(1.0, rms * 15)
+            # Flatten in case of multi-channel audio
+            data = audio_chunk.flatten().astype(np.float32)
+            # Calculate RMS (root mean square) for amplitude
+            rms = float(np.sqrt(np.mean(data ** 2)))
+            # MacBook mic is quiet (RMS ~0.005 for speech), external mics louder (~0.05-0.2)
+            # Use logarithmic scaling for better dynamic range across different mics
+            if rms > 0.0001:
+                # Log scale: -80dB to -20dB maps to 0-1
+                db = 20 * np.log10(rms + 1e-10)
+                normalized = max(0.0, min(1.0, (db + 60) / 40))
+            else:
+                normalized = 0.0
             self._samples.append(normalized)
             if len(self._samples) > self._max_samples:
                 self._samples.pop(0)
@@ -272,6 +282,7 @@ class RecordingIndicator(QWidget):
     toggle_recording_requested = Signal()
     model_change_requested = Signal(str)
     post_processing_toggled = Signal(bool)  # True = enabled
+    input_device_changed = Signal(object)  # device index or None for default
     quit_requested = Signal()
 
     # State constants
@@ -286,6 +297,9 @@ class RecordingIndicator(QWidget):
         self._current_model = "base"
         self._available_models = ["tiny", "base", "small", "medium", "large-v2"]
         self._post_processing_enabled = False
+        self._llm_model = ""  # LLM model name for post-processing
+        self._input_devices = []  # List of (index, name) tuples
+        self._current_input_device = None  # None = system default
 
         # Window flags for always-on-top, frameless, no focus stealing
         # Using SplashScreen type for overlay-style behavior on macOS
@@ -540,6 +554,18 @@ class RecordingIndicator(QWidget):
         """Set post-processing state"""
         self._post_processing_enabled = enabled
 
+    def set_llm_model(self, model_name: str):
+        """Set the LLM model name for display"""
+        # Extract just the model name from full path (e.g., "mlx-community/Llama-3.2-3B-Instruct-4bit" -> "Llama-3.2-3B-Instruct-4bit")
+        if "/" in model_name:
+            model_name = model_name.split("/")[-1]
+        self._llm_model = model_name
+
+    def set_input_devices(self, devices: list, current: object):
+        """Set available input devices and current selection"""
+        self._input_devices = devices
+        self._current_input_device = current
+
     # === Event handlers ===
 
     def _ensure_visible(self):
@@ -703,6 +729,27 @@ class RecordingIndicator(QWidget):
                 action.setChecked(True)
             action.triggered.connect(lambda checked, m=model: self.model_change_requested.emit(m))
 
+        # Input device submenu
+        if self._input_devices:
+            input_menu = menu.addMenu("Input Device")
+            input_menu.setStyleSheet(menu.styleSheet())
+
+            # Default option
+            default_action = input_menu.addAction("System Default")
+            default_action.setCheckable(True)
+            default_action.setChecked(self._current_input_device is None)
+            default_action.triggered.connect(lambda checked: self.input_device_changed.emit(None))
+
+            input_menu.addSeparator()
+
+            for idx, name in self._input_devices:
+                # Truncate long names
+                display_name = name[:30] + "..." if len(name) > 30 else name
+                action = input_menu.addAction(display_name)
+                action.setCheckable(True)
+                action.setChecked(self._current_input_device == idx)
+                action.triggered.connect(lambda checked, d=idx: self.input_device_changed.emit(d))
+
         menu.addSeparator()
 
         # Post-processing toggle
@@ -710,6 +757,11 @@ class RecordingIndicator(QWidget):
         pp_action.setCheckable(True)
         pp_action.setChecked(self._post_processing_enabled)
         pp_action.triggered.connect(self._toggle_post_processing)
+
+        # Show LLM model info if post-processing is enabled
+        if self._llm_model:
+            llm_info = menu.addAction(f"  └ {self._llm_model}")
+            llm_info.setEnabled(False)
 
         menu.addSeparator()
 

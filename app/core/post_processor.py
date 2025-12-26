@@ -1,20 +1,29 @@
 """
 LLM Post-Processor Service
 
-Uses MLX with Phi-3.2 mini for cleaning up transcriptions:
+Uses MLX for cleaning up transcriptions:
 - Remove filler words (um, uh, like, you know)
 - Format lists
 - Light grammar cleanup
 
 Lazy loading: Model loads on first use or can be preloaded.
+
+Config files (in ~/Library/Application Support/WhisperTranscribeUI/):
+- cleanup_prompt.txt: The prompt template (use {text} as placeholder)
+- settings.json: Set "post_processing_model" to change model
 """
 
 import os
 import time
 import threading
+from pathlib import Path
 from typing import Optional, Callable
 
 from app.utils.config_manager import ConfigManager
+
+# Config directory
+CONFIG_DIR = Path.home() / "Library" / "Application Support" / "WhisperTranscribeUI"
+PROMPT_FILE = CONFIG_DIR / "cleanup_prompt.txt"
 
 
 class PostProcessor:
@@ -26,25 +35,24 @@ class PostProcessor:
     - Async preloading (start loading while recording)
     - Auto-unload after idle timeout
     - Toggle on/off via settings
+    - External prompt file for easy editing
     """
 
-    # Default model - good balance of speed and quality
-    DEFAULT_MODEL = "mlx-community/Phi-3.5-mini-instruct-4bit"
+    # Default model - Llama 3.2 3B is the mlx-lm default, reliable and fast
+    DEFAULT_MODEL = "mlx-community/Llama-3.2-3B-Instruct-4bit"
 
-    # Cleanup prompt template
-    CLEANUP_PROMPT = """Clean up this transcribed speech. Rules:
-- Remove filler words: um, uh, like, you know, kind of, sort of, I mean, basically, actually, literally, right, so, well
-- Remove repeated words/phrases
-- Format numbered items as a bullet list (use - for bullets)
-- Fix obvious grammar issues
-- Keep the original meaning and tone
-- Do NOT add any commentary or explanations
-- Return ONLY the cleaned text
+    # Default cleanup prompt (used if external file not found)
+    DEFAULT_PROMPT = """You are a text editor. Clean up this transcribed speech by:
+1. Remove filler words (um, uh, like, you know, kind of, sort of, I mean, basically, actually, literally)
+2. Remove repeated words or phrases
+3. Format any numbered items as bullet points using "-"
+4. Fix grammar errors
 
-Text to clean:
-{text}
+Important: Output ONLY the cleaned text. No explanations, no markdown headers, no commentary.
 
-Cleaned text:"""
+Input: {text}
+
+Output:"""
 
     def __init__(self, config_manager: Optional[ConfigManager] = None):
         self.config_manager = config_manager or ConfigManager()
@@ -58,6 +66,71 @@ Cleaned text:"""
 
         # Check if enabled in settings
         self._enabled = self.config_manager.get("post_processing_enabled", False)
+
+    def _get_model_name(self) -> str:
+        """Get model name from settings or use default."""
+        return self.config_manager.get("post_processing_model", self.DEFAULT_MODEL)
+
+    def _get_prompt_template(self) -> str:
+        """Load prompt from external file or use default."""
+        if PROMPT_FILE.exists():
+            try:
+                prompt = PROMPT_FILE.read_text().strip()
+                # Support multiple placeholder formats
+                if "{text}" in prompt or "{{user_transcription_input}}" in prompt or "{user_transcription_input}" in prompt:
+                    return prompt
+                else:
+                    print(f"[PostProcessor] Warning: {PROMPT_FILE} missing placeholder, using default")
+                    print(f"[PostProcessor] Use {{text}} or {{{{user_transcription_input}}}} as placeholder")
+            except Exception as e:
+                print(f"[PostProcessor] Error reading prompt file: {e}")
+        return self.DEFAULT_PROMPT
+
+    def _format_prompt(self, template: str, text: str) -> str:
+        """Format prompt template with the input text."""
+        # Handle different placeholder formats
+        if "{{user_transcription_input}}" in template:
+            return template.replace("{{user_transcription_input}}", text)
+        elif "{user_transcription_input}" in template:
+            return template.replace("{user_transcription_input}", text)
+        else:
+            return template.format(text=text)
+
+    def _strip_preamble(self, text: str) -> str:
+        """Strip common LLM preambles/commentary from output."""
+        import re
+
+        # Common preamble patterns to remove
+        preambles = [
+            r"^I'd be happy to[^.]*\.\s*",
+            r"^I can help[^.]*\.\s*",
+            r"^Here's the cleaned[^:]*:\s*",
+            r"^Here is the cleaned[^:]*:\s*",
+            r"^The cleaned text[^:]*:\s*",
+            r"^Sure[,!]?\s*",
+            r"^Of course[,!]?\s*",
+            r"^Certainly[,!]?\s*",
+        ]
+
+        result = text.strip()
+        for pattern in preambles:
+            result = re.sub(pattern, "", result, flags=re.IGNORECASE)
+
+        # Also strip trailing commentary
+        trailing = [
+            r"\s*Let me know if[^.]*\.?\s*$",
+            r"\s*I hope this helps[^.]*\.?\s*$",
+            r"\s*Feel free to[^.]*\.?\s*$",
+        ]
+        for pattern in trailing:
+            result = re.sub(pattern, "", result, flags=re.IGNORECASE)
+
+        # Remove quotes if the entire output is quoted
+        result = result.strip()
+        if result.startswith('"') and result.endswith('"'):
+            result = result[1:-1]
+
+        return result.strip()
 
     @property
     def enabled(self) -> bool:
@@ -101,13 +174,14 @@ Cleaned text:"""
                 return
 
             self._loading = True
-            print(f"[PostProcessor] Loading model: {self.DEFAULT_MODEL}")
+            model_name = self._get_model_name()
+            print(f"[PostProcessor] Loading model: {model_name}")
             start = time.time()
 
             try:
                 from mlx_lm import load
 
-                self.model, self.tokenizer = load(self.DEFAULT_MODEL)
+                self.model, self.tokenizer = load(model_name)
                 self._loaded = True
                 self._last_used = time.time()
                 elapsed = time.time() - start
@@ -167,11 +241,17 @@ Cleaned text:"""
 
         try:
             from mlx_lm import generate
+            from mlx_lm.sample_utils import make_sampler
 
-            prompt = self.CLEANUP_PROMPT.format(text=text)
+            # Load prompt from external file (re-read each time for hot-reload)
+            prompt_template = self._get_prompt_template()
+            prompt = self._format_prompt(prompt_template, text)
 
             print(f"[PostProcessor] Processing {len(text.split())} words...")
             start = time.time()
+
+            # Create sampler with low temperature for consistent output
+            sampler = make_sampler(temp=0.1)
 
             # Generate with conservative settings
             result = generate(
@@ -179,7 +259,7 @@ Cleaned text:"""
                 self.tokenizer,
                 prompt=prompt,
                 max_tokens=min(len(text.split()) * 2, 500),  # Reasonable limit
-                temp=0.1,  # Low temperature for consistent output
+                sampler=sampler,
             )
 
             elapsed = time.time() - start
@@ -187,6 +267,9 @@ Cleaned text:"""
 
             # Extract just the cleaned text (remove any extra commentary)
             cleaned = result.strip()
+
+            # Strip any preambles the model might have added
+            cleaned = self._strip_preamble(cleaned)
 
             # Basic validation - if result is empty or way too different, return original
             if not cleaned or len(cleaned) < len(text) * 0.3:

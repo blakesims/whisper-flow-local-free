@@ -18,20 +18,42 @@ class AudioRecorder(QThread):
     error_signal = Signal(str)
     new_audio_chunk_signal = Signal(np.ndarray)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, device=None):
         super().__init__(parent)
-        
+
         self.sample_rate = 16000
         self.channels = 1
-        self.device = None 
+        self.device = device  # None = system default, or device index/name
         self.dtype = 'float32' # Corresponds to np.float32 for wavfile.write
         self.chunk_size = 1024
-        
+
         self._is_recording = False
         self._is_paused = False
         self._audio_stream = None
         self._recording_actually_started = False
         self._audio_buffer = [] # For accumulating recorded audio data
+
+    def set_device(self, device):
+        """Set the input device (index or name). None = system default."""
+        self.device = device
+
+    @staticmethod
+    def get_input_devices():
+        """Get list of available input devices as (index, name) tuples."""
+        devices = []
+        for i, dev in enumerate(sd.query_devices()):
+            if dev['max_input_channels'] > 0:
+                devices.append((i, dev['name']))
+        return devices
+
+    @staticmethod
+    def get_default_input_device():
+        """Get the default input device index and name."""
+        try:
+            dev = sd.query_devices(kind='input')
+            return (dev['index'] if 'index' in dev else None, dev['name'])
+        except Exception:
+            return (None, "Unknown")
 
     def _audio_callback(self, indata, frames, time_info, status):
         if status:
