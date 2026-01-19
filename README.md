@@ -1,155 +1,156 @@
 # Whisper Transcription UI
 
-A macOS desktop application for audio recording and transcription using OpenAI's Whisper AI model locally. Features a modern floating UI with real-time audio visualization, keyboard shortcuts, and optional AI-powered text processing through Fabric patterns.
+A lightweight macOS background service for instant audio transcription using whisper.cpp. Features a minimal floating indicator, global hotkeys, and automatic clipboard integration.
 
 ## Features
 
-- 🎙️ **Audio Recording**: High-quality audio recording with real-time waveform visualization
-- 🤖 **Local AI Transcription**: Uses Whisper AI models locally (no internet required for transcription)
-- 📁 **File Upload**: Upload existing audio files for transcription
-- ⌨️ **Keyboard-Driven**: Efficient keyboard shortcuts (R, S, P, T, F, U, Q)
-- 🎨 **Modern UI**: Floating window with Tokyo Night theme
-- 🧵 **Fabric Integration**: Optional AI-powered text processing (requires Fabric CLI)
-- 🚀 **Optimized for Apple Silicon**: Specially tuned for M1/M2/M3 processors
+- 🎙️ **Instant Recording**: Press `Ctrl+F` anywhere to start/stop recording
+- 🤖 **Local AI Transcription**: Uses whisper.cpp for fast, private transcription (no internet required)
+- 📋 **Auto Clipboard**: Transcriptions automatically copied and pasted to active app
+- 🎯 **Minimal UI**: Unobtrusive floating indicator that stays out of your way
+- 📁 **File Transcription**: Transcribe existing audio/video files via Raycast or CLI
+- 🚀 **Apple Silicon Optimized**: Metal GPU acceleration on M1/M2/M3
 
 ## Requirements
 
 - macOS 11.0 or later
 - Python 3.9 or later
 - Microphone permissions
-- ~2-6GB disk space for Whisper models
+- Accessibility permissions (for global hotkeys)
+- ~500MB-3GB disk space for Whisper models
 
 ## Installation
 
-### 1. Clone the repository
+### 1. Clone and setup
 ```bash
 git clone https://github.com/yourusername/whisper-transcribe-ui.git
 cd whisper-transcribe-ui
-```
-
-### 2. Create virtual environment
-```bash
 python -m venv .venv
 source .venv/bin/activate
-```
-
-### 3. Install dependencies
-```bash
 pip install -r requirements.txt
 ```
 
-### 4. Run the application
+### 2. Grant permissions
+The app needs two macOS permissions:
+- **Microphone**: Granted on first recording attempt
+- **Accessibility**: System Settings → Privacy & Security → Accessibility → Add Terminal/Python
+
+### 3. Start the daemon
 ```bash
-./run_whisper_ui.sh
+./whisper-daemon.sh start
 ```
 
 ## Usage
 
-### Keyboard Shortcuts
-- **R** - Start/Resume recording
-- **S** - Stop recording
-- **P** - Pause recording
-- **C** - Cancel recording
-- **T** - Transcribe (with auto-paste)
-- **F** - Process with Fabric
-- **U** - Upload audio file
-- **Q** - Quit application
-- **M** - Minimize window
+### Global Hotkeys
+| Hotkey | Action |
+|--------|--------|
+| `Ctrl+F` | Toggle recording |
+| `Escape` | Cancel recording (saves audio file) |
+| `Ctrl+Option+F` | Transcribe file path from clipboard |
 
 ### Recording Workflow
-1. Press **R** to start recording
-2. Press **S** to stop or **T** to stop and transcribe immediately
-3. Transcription is automatically copied to clipboard and pasted
+1. Press `Ctrl+F` to start recording (indicator turns into waveform)
+2. Press `Ctrl+F` again to stop and transcribe
+3. Transcription is automatically copied and pasted
 
-### File Upload Workflow
-1. Press **U** to open file dialog
-2. Select an audio file (WAV, MP3, M4A, FLAC, OGG, OPUS, WEBM)
-3. Transcription starts automatically
+### Floating Indicator
+- **Idle**: Small cyan dot at bottom of screen
+- **Recording**: Expanded with live waveform
+- **Transcribing**: Spinner with percentage progress
+- **Click**: Toggle recording
+- **Right-click**: Settings menu (model selection, input device, quit)
+- **Drag**: Reposition anywhere on screen
 
-### Fabric Workflow (Optional)
-1. Record audio or upload file
-2. Press **F** to open Fabric pattern selection
-3. Search and select a pattern
-4. Processed text is copied and pasted automatically
+### File Transcription (Raycast)
+```bash
+# Via CLI (results cached for 24 hours)
+python transcribe_file.py /path/to/audio.mp3
+python transcribe_file.py --force /path/to/audio.mp3  # Bypass cache
+
+# Or copy file path to clipboard and press Ctrl+Option+F
+```
+
+Supported formats: WAV, MP3, M4A, FLAC, OGG, OPUS, WEBM, MP4, M4V, MOV
+
+### Daemon Management
+```bash
+./whisper-daemon.sh start    # Start in background
+./whisper-daemon.sh stop     # Stop daemon
+./whisper-daemon.sh restart  # Restart daemon
+./whisper-daemon.sh status   # Check status and memory usage
+./whisper-daemon.sh logs     # View recent logs
+```
 
 ## Models
 
-Available Whisper models (automatically downloaded on first use):
-- **tiny** (~39 MB) - Fastest, lowest accuracy
-- **base** (~74 MB) - Good balance (default)
-- **small** (~244 MB) - Better accuracy
-- **medium** (~769 MB) - High accuracy
-- **large** (~1550 MB) - Best accuracy
+Available Whisper models (select via right-click menu):
+| Model | Size | Speed | Quality |
+|-------|------|-------|---------|
+| tiny | ~75 MB | Fastest | Basic |
+| base | ~140 MB | Fast | Good (default) |
+| small | ~500 MB | Medium | Better |
+| medium | ~1.5 GB | Slower | High |
+| large-v2 | ~3 GB | Slowest | Best |
 
-## Performance
-
-### Apple Silicon Optimization
-The app is specially optimized for M1/M2/M3 processors:
-- Uses all available cores efficiently
-- Voice Activity Detection for faster processing
-- Optimized beam search parameters
-- Typically 4x faster than standard Whisper
-
-### CPU Usage
-- **faster-whisper**: 50-70% CPU (efficient)
-- **openai-whisper**: 90-100% CPU (less efficient)
-- Lower CPU usage = more efficient processing
-
-## Building
-
-To create a macOS app bundle:
-```bash
-./build_app.sh
-```
-
-The app will be in `dist/Whisper Transcription UI.app`
+Models are automatically downloaded to `~/.cache/whisper/` on first use.
 
 ## Configuration
 
-Settings can be configured via `config.json` (when implemented):
+Settings are stored in `~/Library/Application Support/WhisperTranscribeUI/settings.json`:
 - Model selection
-- CPU thread count
-- Fabric settings
-- Audio quality
+- Input device
+- Post-processing (LLM cleanup) toggle
+- Indicator position
 
-## Troubleshooting
+Most settings can be changed via the right-click menu.
 
-### High CPU Usage
-This is normal during transcription. The app uses optimized settings for your hardware.
-
-### Model Download Issues
-Models are cached in `~/.cache/whisper/`. Delete this folder to re-download.
-
-### Audio Recording Issues
-Ensure microphone permissions are granted in System Preferences > Security & Privacy.
-
-## Development
-
-### Project Structure
+## Project Structure
 ```
 whisper-transcribe-ui/
 ├── app/
-│   ├── core/           # Core services
-│   ├── ui/             # UI components
+│   ├── core/           # Shared services (audio, transcription)
+│   ├── daemon/         # Daemon mode (primary)
 │   └── utils/          # Utilities
-├── resources/          # Icons and assets
-├── tasks/              # Development tasks
-└── requirements.txt    # Dependencies
+├── _legacy/            # Deprecated Full UI mode
+├── whisper-daemon.sh   # Main entry point
+├── transcribe_file.py  # CLI file transcription
+└── tasks/              # Development task tracking
 ```
 
-### Running Tests
+## Troubleshooting
+
+### Hotkeys not working
+Ensure Accessibility permission is granted for Terminal or your Python installation.
+
+### Model download issues
+Models are cached in `~/.cache/whisper/`. Delete this folder to re-download.
+
+### Audio recording issues
+Check microphone permissions in System Settings → Privacy & Security → Microphone.
+
+### View logs
 ```bash
-python test_cpu_optimization.py
-python compare_whisper_implementations.py audio_file.wav
+./whisper-daemon.sh logs
+# Or: cat /tmp/whisper-daemon.log
 ```
+
+## Legacy Full UI Mode
+
+A more feature-rich UI with Fabric integration and meeting transcription exists in `_legacy/`. It uses faster-whisper instead of whisper.cpp. To run it:
+```bash
+./_legacy/run_whisper_ui.sh
+```
+This mode is not actively maintained.
 
 ## License
 
-[Your license here]
+MIT
 
 ## Acknowledgments
 
-- OpenAI Whisper
-- faster-whisper by guillaumekln
-- Fabric by danielmiessler
-- PySide6 (Qt for Python)
+- [whisper.cpp](https://github.com/ggerganov/whisper.cpp) - Fast C++ Whisper implementation
+- [pywhispercpp](https://github.com/aarnphm/pywhispercpp) - Python bindings for whisper.cpp
+- [OpenAI Whisper](https://github.com/openai/whisper) - Original Whisper model
+- [PySide6](https://www.qt.io/qt-for-python) - Qt for Python
+- [pynput](https://github.com/moses-palmer/pynput) - Global hotkey support
