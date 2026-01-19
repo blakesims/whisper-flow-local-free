@@ -16,6 +16,7 @@ class HotkeyListener(QObject):
 
     Hotkeys:
     - Ctrl+F: Toggle recording
+    - Ctrl+Option+F: Transcribe file from clipboard
     - Escape: Cancel recording (save but don't transcribe)
 
     Note: On macOS, the app needs Accessibility permissions for global hotkeys.
@@ -23,6 +24,7 @@ class HotkeyListener(QObject):
     """
 
     hotkey_triggered = Signal()
+    file_transcribe_requested = Signal()  # Ctrl+Option+F for file transcription
     escape_pressed = Signal()  # For cancelling recording
 
     def __init__(self, hotkey: str = "<ctrl>+f", parent=None):
@@ -41,6 +43,7 @@ class HotkeyListener(QObject):
 
         # Track key states for combination detection
         self._ctrl_pressed = False
+        self._option_pressed = False  # Option/Alt key
         self._hotkey_active = False
 
     def start(self):
@@ -74,6 +77,7 @@ class HotkeyListener(QObject):
             self._listener = None
         self._is_listening = False
         self._ctrl_pressed = False
+        self._option_pressed = False
         self._hotkey_active = False
         print("[Hotkey] Stopped listening")
 
@@ -91,13 +95,24 @@ class HotkeyListener(QObject):
                 self._ctrl_pressed = True
                 return
 
+            # Check for Option/Alt key (used for file transcription: Ctrl+Option+F)
+            if key == keyboard.Key.alt or key == keyboard.Key.alt_l or key == keyboard.Key.alt_r:
+                self._option_pressed = True
+                return
+
             # Check for 'f' key while Ctrl is held
             if self._ctrl_pressed and not self._hotkey_active:
                 # Check if it's the 'f' key
                 if hasattr(key, 'char') and key.char and key.char.lower() == 'f':
                     self._hotkey_active = True
-                    print("[Hotkey] Ctrl+F detected!")
-                    self.hotkey_triggered.emit()
+                    if self._option_pressed:
+                        # Ctrl+Option+F: File transcription
+                        print("[Hotkey] Ctrl+Option+F detected! (file transcribe)")
+                        self.file_transcribe_requested.emit()
+                    else:
+                        # Ctrl+F: Toggle recording
+                        print("[Hotkey] Ctrl+F detected! (toggle recording)")
+                        self.hotkey_triggered.emit()
 
         except AttributeError:
             # Some keys don't have the 'char' attribute
@@ -110,6 +125,10 @@ class HotkeyListener(QObject):
             if key == keyboard.Key.ctrl or key == keyboard.Key.ctrl_l or key == keyboard.Key.ctrl_r:
                 self._ctrl_pressed = False
                 self._hotkey_active = False
+
+            # Reset Option/Alt state on release
+            if key == keyboard.Key.alt or key == keyboard.Key.alt_l or key == keyboard.Key.alt_r:
+                self._option_pressed = False
 
             # Reset hotkey active state when 'f' is released
             if hasattr(key, 'char') and key.char and key.char.lower() == 'f':

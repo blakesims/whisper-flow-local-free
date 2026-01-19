@@ -46,6 +46,13 @@ class DaemonState(Enum):
     ERROR = "error"
 
 
+# Supported audio/video formats for file transcription
+SUPPORTED_AUDIO_FORMATS = (
+    '.wav', '.mp3', '.m4a', '.flac', '.ogg', '.opus', '.webm',
+    '.mp4', '.m4v', '.mov', '.aac', '.wma'
+)
+
+
 class WhisperDaemon(QObject):
     """
     Main daemon class that orchestrates:
@@ -69,6 +76,7 @@ class WhisperDaemon(QObject):
 
         self._state = DaemonState.IDLE
         self._current_audio_path = None
+        self._is_temp_file = True  # Whether current audio is temp (should be deleted after)
 
         # Initialize config manager
         self.config_manager = ConfigManager()
@@ -92,6 +100,7 @@ class WhisperDaemon(QObject):
         # Initialize hotkey listener
         self.hotkey_listener = HotkeyListener()
         self.hotkey_listener.hotkey_triggered.connect(self._on_hotkey_triggered)
+        self.hotkey_listener.file_transcribe_requested.connect(self._on_file_transcribe_requested)
         self.hotkey_listener.escape_pressed.connect(self._on_escape_pressed)
 
         # Directory for cancelled recordings
@@ -215,7 +224,9 @@ class WhisperDaemon(QObject):
 
         # Start hotkey listener
         self.hotkey_listener.start()
-        print("[Daemon] Hotkey listener started (Ctrl+F to toggle recording)")
+        print("[Daemon] Hotkey listener started:")
+        print("[Daemon]   Ctrl+F: Toggle recording")
+        print("[Daemon]   Ctrl+Option+F: Transcribe file from clipboard")
         print("[Daemon] Click indicator dot to toggle, right-click for menu")
 
         print("[Daemon] Daemon ready and waiting...")
@@ -316,6 +327,54 @@ class WhisperDaemon(QObject):
             self._start_recording()
 
     @Slot()
+    def _on_file_transcribe_requested(self):
+        """Handle double-tap Ctrl+F - transcribe audio file from clipboard"""
+        print("[Daemon] File transcribe requested (double-tap Ctrl+F)")
+
+        # Don't interrupt if already busy
+        if self.state != DaemonState.IDLE:
+            print(f"[Daemon] Cannot transcribe file - busy ({self.state.value})")
+            return
+
+        # Read clipboard
+        try:
+            clipboard_text = pyperclip.paste()
+            if clipboard_text:
+                clipboard_text = clipboard_text.strip()
+        except Exception as e:
+            print(f"[Daemon] Error reading clipboard: {e}")
+            return
+
+        if not clipboard_text:
+            print("[Daemon] Clipboard is empty")
+            return
+
+        # Validate it's a file path that exists
+        if not os.path.isfile(clipboard_text):
+            print(f"[Daemon] Clipboard is not a valid file path: {clipboard_text[:80]}")
+            return
+
+        # Check file extension
+        ext = os.path.splitext(clipboard_text)[1].lower()
+        if ext not in SUPPORTED_AUDIO_FORMATS:
+            print(f"[Daemon] Unsupported audio format: {ext}")
+            print(f"[Daemon] Supported formats: {', '.join(SUPPORTED_AUDIO_FORMATS)}")
+            return
+
+        # Save frontmost app for auto-paste later
+        try:
+            from AppKit import NSWorkspace
+            self._frontmost_app = NSWorkspace.sharedWorkspace().frontmostApplication()
+        except:
+            self._frontmost_app = None
+
+        # Set up for transcription
+        print(f"[Daemon] Transcribing file: {clipboard_text}")
+        self._current_audio_path = clipboard_text
+        self._is_temp_file = False  # Don't delete user's file!
+        self._transcribe_audio()
+
+    @Slot()
     def _on_escape_pressed(self):
         """Handle Escape key - cancel recording but save the audio"""
         if self.state != DaemonState.RECORDING:
@@ -328,6 +387,7 @@ class WhisperDaemon(QObject):
     def _start_recording(self):
         """Start audio recording"""
         self._cancel_recording = False  # Reset cancel flag
+        self._is_temp_file = True  # Recording creates temp file
         if not self._model_loaded:
             print("[Daemon] Model not loaded, cannot record")
             self.error_occurred.emit("Model not loaded")
@@ -517,14 +577,18 @@ class WhisperDaemon(QObject):
             print("[Daemon] Text is in clipboard - use Cmd+V to paste manually")
 
     def _cleanup_audio_file(self):
-        """Clean up temporary audio file"""
+        """Clean up temporary audio file (only if it's a temp file, not user's file)"""
         if self._current_audio_path and os.path.exists(self._current_audio_path):
-            try:
-                os.remove(self._current_audio_path)
-                print(f"[Daemon] Cleaned up temp file: {self._current_audio_path}")
-            except Exception as e:
-                print(f"[Daemon] Could not clean up temp file: {e}")
+            if self._is_temp_file:
+                try:
+                    os.remove(self._current_audio_path)
+                    print(f"[Daemon] Cleaned up temp file: {self._current_audio_path}")
+                except Exception as e:
+                    print(f"[Daemon] Could not clean up temp file: {e}")
+            else:
+                print(f"[Daemon] Keeping user file: {self._current_audio_path}")
         self._current_audio_path = None
+        self._is_temp_file = True  # Reset for next operation
 
     @Slot(DaemonState)
     def _update_indicator(self, state: DaemonState):

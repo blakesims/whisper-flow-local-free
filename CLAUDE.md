@@ -4,18 +4,43 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a macOS desktop application for audio recording and transcription using OpenAI's Whisper AI model locally. The app provides a floating UI window triggered via Raycast, featuring real-time audio visualization, keyboard shortcuts, and optional AI-powered text processing through Fabric patterns.
+This is a macOS desktop application for audio recording and transcription using Whisper AI locally. The app has **two distinct modes**:
+
+### Daemon Mode (Primary - Recommended)
+A lightweight background service with a minimal floating indicator. Uses **whisper.cpp** for faster transcription.
+- **Entry point**: `./whisper-daemon.sh start`
+- **UI**: Small floating pill/dot that expands during recording
+- **Hotkeys**: `Ctrl+F` (toggle recording), `Escape` (cancel)
+- **Features**: Always-on, instant recording, right-click menu for settings
+- **Location**: `app/daemon/` (whisper_daemon.py, recording_indicator.py, hotkey_listener.py)
+
+### Full UI Mode (Legacy)
+A larger floating window with more controls. Uses **faster-whisper** library.
+- **Entry point**: `./run_whisper_ui.sh`
+- **UI**: Full window with buttons, waveform, text display
+- **Hotkeys**: Single-letter shortcuts (R, S, P, T, F, U, Q)
+- **Features**: Meeting transcription, Fabric patterns, file upload dialog
+- **Location**: `app/ui/` (main_window.py, waveform_widget.py)
+
+**Note**: The daemon mode is the actively used and developed mode. The full UI mode is maintained but secondary.
 
 ## Common Development Commands
 
 ### Running the Application
 ```bash
-# Main way to run the app (activates venv automatically)
+# DAEMON MODE (recommended) - lightweight floating indicator
+./whisper-daemon.sh start    # Start daemon in background
+./whisper-daemon.sh stop     # Stop daemon
+./whisper-daemon.sh status   # Check status
+./whisper-daemon.sh logs     # View logs
+
+# FULL UI MODE - larger window with all features
 ./run_whisper_ui.sh
 
-# Alternative: manual venv activation and run
+# Alternative: manual venv activation
 source .venv/bin/activate
-python -m app.main
+python -m app.daemon.whisper_daemon start  # Daemon mode
+python -m app.main                          # Full UI mode
 ```
 
 ### Package Management
@@ -28,6 +53,15 @@ source .venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
+```
+
+### Raycast Scripts
+```bash
+# File transcription (with 24h cache)
+python transcribe_file.py /path/to/audio.mp3
+python transcribe_file.py --force /path/to/audio.mp3  # Bypass cache
+
+# Raycast integration at: ~/raycast-scripts/whisper-file-transcribe.sh
 ```
 
 ### Building macOS App Bundle
@@ -43,12 +77,19 @@ python setup.py py2app
 
 ## Architecture Overview
 
+### Daemon Components (`app/daemon/`) - Primary
+- **whisper_daemon.py**: Background service orchestrating recording, transcription, and clipboard
+- **recording_indicator.py**: Minimal floating UI (pill/dot) with right-click menu
+- **hotkey_listener.py**: Global hotkey detection via pynput (Ctrl+F, Escape)
+
 ### Core Services (`app/core/`)
 - **audio_recorder.py**: Thread-based audio recording with real-time chunk streaming for waveform visualization
-- **transcription_service.py**: Whisper AI integration using faster-whisper library, handles model loading and transcription
-- **fabric_service.py**: Integration with Fabric CLI for AI pattern processing (currently experiencing external API issues)
+- **transcription_service_cpp.py**: Whisper.cpp integration via pywhispercpp (used by daemon, faster)
+- **transcription_service.py**: faster-whisper integration (used by full UI)
+- **post_processor.py**: LLM-based transcription cleanup (optional)
+- **fabric_service.py**: Integration with Fabric CLI for AI pattern processing
 
-### UI Components (`app/ui/`)
+### Full UI Components (`app/ui/`) - Secondary
 - **main_window.py**: Frameless, always-on-top floating window with Tokyo Night theme
 - **waveform_widget.py**: Real-time audio visualization widget
 - **pattern_selection_dialog.py**: Fuzzy search dialog for Fabric pattern selection
