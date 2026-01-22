@@ -26,13 +26,15 @@ Build a systematic, machine-readable knowledge base for capturing all spoken/vid
 
 ## Scripts Created
 
+All scripts located in `kb/` directory (reorganized from root):
+
 | Script | Purpose |
 |--------|---------|
-| `kb_transcribe.py` | Core transcription to JSON with CLI args or interactive mode |
-| `kb_cli.py` | Rich interactive CLI components (questionary checkboxes) |
-| `kb_cap_capture.py` | Multi-select Cap recordings for batch transcription |
-| `kb_volume_sync.py` | Auto-transcribe new videos from mounted volume |
-| `kb_analyze.py` | LLM analysis with interactive transcript selector |
+| `kb/transcribe.py` | Core transcription to JSON with CLI args or interactive mode |
+| `kb/cli.py` | Rich interactive CLI components (questionary checkboxes) |
+| `kb/capture.py` | Multi-select Cap recordings for batch transcription |
+| `kb/volume_sync.py` | Auto-transcribe new videos from mounted volume |
+| `kb/analyze.py` | LLM analysis with interactive transcript selector |
 
 ## Phases Breakdown
 
@@ -65,9 +67,9 @@ Build a systematic, machine-readable knowledge base for capturing all spoken/vid
 
 **Usage**:
 ```bash
-python kb_transcribe.py -d 50.01.01 -t "Title" /path/to/video.mp4
-python kb_transcribe.py -i /path/to/video.mp4  # Interactive mode
-python kb_transcribe.py --list-decimals
+python kb/transcribe.py -d 50.01.01 -t "Title" /path/to/video.mp4
+python kb/transcribe.py -i /path/to/video.mp4  # Interactive mode
+python kb/transcribe.py --list-decimals
 ```
 
 ---
@@ -99,8 +101,8 @@ python kb_transcribe.py --list-decimals
 
 **Usage**:
 ```bash
-python kb_cap_capture.py --list   # List recordings
-python kb_cap_capture.py          # Interactive selection and transcription
+python kb/capture.py --list   # List recordings
+python kb/capture.py          # Interactive selection and transcription
 ```
 
 ---
@@ -117,10 +119,10 @@ python kb_cap_capture.py          # Interactive selection and transcription
 
 **Usage**:
 ```bash
-python kb_volume_sync.py --list       # Show status
-python kb_volume_sync.py --dry-run    # Preview what would be transcribed
-python kb_volume_sync.py              # Transcribe all new files
-python kb_volume_sync.py -d 50.02.01  # Override decimal
+python kb/volume_sync.py --list       # Show status
+python kb/volume_sync.py --dry-run    # Preview what would be transcribed
+python kb/volume_sync.py              # Transcribe all new files
+python kb/volume_sync.py -d 50.02.01  # Override decimal
 ```
 
 ---
@@ -138,8 +140,8 @@ python kb_volume_sync.py -d 50.02.01  # Override decimal
 
 **Technical Decisions**:
 - **LLM Provider**: Google Gemini (`google-genai` SDK, NOT deprecated `google-generativeai`)
-- **Model**: `gemini-2.5-flash` (best price-performance, 1M context, 65K output)
-- **Structured Output**: Pydantic models with `response_schema` parameter
+- **Model**: `gemini-2.0-flash` (stable, fast)
+- **Structured Output**: Schema included in prompt with `response_mime_type='application/json'`
 - **Auth**: Environment variable `GEMINI_API_KEY`
 
 **Implementation Plan**:
@@ -217,3 +219,4 @@ After LLM analysis (Phase 6), add options to:
 - 2026-01-22: Default model changed to "medium" for quality transcriptions.
 - 2026-01-22: Phase 6 research complete. Chose Google Gemini (`google-genai` SDK) over Claude Code for simpler integration. Research doc created at `google-genai-research.md`.
 - 2026-01-22: Phase 6 complete. `kb_analyze.py` with interactive transcript selector, skip-existing logic, batch mode, and structured JSON output via Gemini.
+- 2026-01-22: Project reorganization. All KB scripts moved to `kb/` directory as a proper Python package. Shell scripts moved to `scripts/`. CLAUDE.md updated with KB workflow section and key rules.
