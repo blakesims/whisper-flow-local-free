@@ -109,17 +109,26 @@ Most settings can be changed via the right-click menu.
 
 A separate system for archiving video content to a structured JSON knowledge base with LLM analysis.
 
+### Installation (for global CLI access)
 ```bash
-# Transcribe a video to KB
+pip install -e .  # From project root, installs kb-* commands
+```
+
+### CLI Commands (after installation)
+```bash
+kb-transcribe -i /path/to/video.mp4   # Transcribe to KB (interactive)
+kb-analyze -p                          # Analyze pending transcripts
+kb-analyze --list                      # Show all transcripts and status
+kb-capture                             # Batch capture Cap recordings
+kb-sync                                # Auto-sync from mounted volume
+```
+
+### Direct Script Usage (without installation)
+```bash
 python kb/transcribe.py -i /path/to/video.mp4
-
-# Analyze transcripts with Gemini
-python kb/analyze.py -p        # Interactive, pending only
-python kb/analyze.py --list    # Show all transcripts and status
-
-# Batch capture from sources
-python kb/capture.py           # Cap recordings
-python kb/volume_sync.py       # Mounted volume
+python kb/analyze.py --list
+python kb/capture.py --list
+python kb/volume_sync.py --dry-run
 ```
 
 **Output:** `~/Obsidian/zen-ai/knowledge-base/transcripts/`

@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "whisper-kb"
+version = "0.1.0"
+description = "Knowledge Base transcription and analysis tools using Whisper"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Blake Sims"}
+]
+keywords = ["whisper", "transcription", "knowledge-base", "llm"]
+
+dependencies = [
+    "rich>=13.0.0",
+    "questionary>=2.0.0",
+    "pywhispercpp>=1.0.0",
+    "google-genai>=1.0.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+]
+
+[project.scripts]
+# KB workflow commands - usable from anywhere after `pip install -e .`
+kb-transcribe = "kb.transcribe:main"
+kb-analyze = "kb.analyze:main"
+kb-capture = "kb.capture:main"
+kb-sync = "kb.volume_sync:main"
+
+[project.urls]
+"Homepage" = "https://github.com/blakesims/whisper-transcribe-ui"
+
+[tool.setuptools]
+packages = ["kb", "app", "app.core", "app.daemon", "app.utils"]
+py-modules = ["transcribe_file"]
+
+[tool.setuptools.package-data]
+"*" = ["*.json", "*.txt"]

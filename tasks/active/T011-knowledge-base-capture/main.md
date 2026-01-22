@@ -184,14 +184,15 @@ python kb/volume_sync.py -d 50.02.01  # Override decimal
 ## Future Enhancements
 
 ### CLI Package for Global Access
-Create a proper Python package with entry points so the CLI can be run from anywhere:
+**Status**: Complete
+
+Created `pyproject.toml` with entry points. Install with `pip install -e .`:
 ```bash
-kb-transcribe -i /path/to/file.mp4   # Instead of navigating to project dir
-kb-cap                                # Cap recordings capture
+kb-transcribe -i /path/to/file.mp4   # Core transcription
+kb-analyze -p                         # LLM analysis
+kb-capture                            # Cap recordings
 kb-sync                               # Volume sync
 ```
-
-**Approach**: Add entry points to pyproject.toml, then `pip install -e .` for development mode.
 
 ### Email/Clipboard for Student-Facing Content
 After LLM analysis (Phase 6), add options to:
@@ -222,3 +223,4 @@ After LLM analysis (Phase 6), add options to:
 - 2026-01-22: Phase 6 research complete. Chose Google Gemini (`google-genai` SDK) over Claude Code for simpler integration. Research doc created at `google-genai-research.md`.
 - 2026-01-22: Phase 6 complete. `kb_analyze.py` with interactive transcript selector, skip-existing logic, batch mode, and structured JSON output via Gemini.
 - 2026-01-22: Project reorganization. All KB scripts moved to `kb/` directory as a proper Python package. Shell scripts moved to `scripts/`. CLAUDE.md updated with KB workflow section and key rules.
+- 2026-01-22: Created pyproject.toml with CLI entry points. `pip install -e .` enables `kb-transcribe`, `kb-analyze`, `kb-capture`, `kb-sync` commands globally.
