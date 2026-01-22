@@ -9,8 +9,10 @@
 #
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Project root is one level up from scripts/
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PLIST_NAME="com.user.whisper-daemon.plist"
-PLIST_SRC="$SCRIPT_DIR/$PLIST_NAME"
+PLIST_SRC="$PROJECT_ROOT/$PLIST_NAME"
 PLIST_DEST="$HOME/Library/LaunchAgents/$PLIST_NAME"
 
 # Colors
@@ -31,13 +33,13 @@ if [ ! -f "$PLIST_SRC" ]; then
 fi
 
 # Check virtual environment
-if [ ! -d "$SCRIPT_DIR/.venv" ]; then
+if [ ! -d "$PROJECT_ROOT/.venv" ]; then
     echo -e "${YELLOW}Warning: Virtual environment not found${NC}"
     echo "Creating virtual environment..."
-    python3 -m venv "$SCRIPT_DIR/.venv"
-    source "$SCRIPT_DIR/.venv/bin/activate"
+    python3 -m venv "$PROJECT_ROOT/.venv"
+    source "$PROJECT_ROOT/.venv/bin/activate"
     echo "Installing dependencies..."
-    pip install -r "$SCRIPT_DIR/requirements.txt"
+    pip install -r "$PROJECT_ROOT/requirements.txt"
     echo ""
 fi
 
@@ -54,7 +56,7 @@ fi
 echo -e "${GREEN}Updating plist with your paths...${NC}"
 
 # Create a temporary plist with updated paths
-PYTHON_PATH="$SCRIPT_DIR/.venv/bin/python"
+PYTHON_PATH="$PROJECT_ROOT/.venv/bin/python"
 cat > "$PLIST_DEST" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -72,14 +74,14 @@ cat > "$PLIST_DEST" << EOF
     </array>
 
     <key>WorkingDirectory</key>
-    <string>$SCRIPT_DIR</string>
+    <string>$PROJECT_ROOT</string>
 
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>$SCRIPT_DIR/.venv/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <string>$PROJECT_ROOT/.venv/bin:/usr/local/bin:/usr/bin:/bin</string>
         <key>PYTHONPATH</key>
-        <string>$SCRIPT_DIR</string>
+        <string>$PROJECT_ROOT</string>
     </dict>
 
     <key>RunAtLoad</key>
@@ -132,10 +134,10 @@ if launchctl list | grep -q "com.user.whisper-daemon"; then
     echo "  - Press Ctrl+F again to stop and auto-paste"
     echo ""
     echo "Management commands:"
-    echo "  ./whisper-daemon.sh status  - Check status"
-    echo "  ./whisper-daemon.sh stop    - Stop daemon"
-    echo "  ./whisper-daemon.sh start   - Start daemon"
-    echo "  ./whisper-daemon.sh logs    - View logs"
+    echo "  ./scripts/whisper-daemon.sh status  - Check status"
+    echo "  ./scripts/whisper-daemon.sh stop    - Stop daemon"
+    echo "  ./scripts/whisper-daemon.sh start   - Start daemon"
+    echo "  ./scripts/whisper-daemon.sh logs    - View logs"
     echo ""
     echo -e "${YELLOW}Note: Grant Accessibility permissions when prompted${NC}"
     echo "System Preferences > Privacy & Security > Accessibility"

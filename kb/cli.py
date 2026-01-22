@@ -10,8 +10,12 @@ Provides interactive prompts for selecting metadata:
 """
 
 import sys
+import os
 from pathlib import Path
 from datetime import datetime
+
+# Add project root to path for app.* imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rich.console import Console
 from rich.panel import Panel
@@ -61,7 +65,7 @@ def select_decimal(registry: dict) -> str:
     decimals = registry.get("decimals", {})
 
     console.print("\n[bold cyan]Select decimal category:[/bold cyan]")
-    console.print("[dim]↑↓/jk to move, Enter to select[/dim]\n")
+    console.print("[dim]up/down/jk to move, Enter to select[/dim]\n")
 
     # Build choices for questionary
     choices = []
@@ -73,7 +77,7 @@ def select_decimal(registry: dict) -> str:
         "Category:",
         choices=choices,
         style=custom_style,
-        instruction="(↑↓ to move, Enter to select)"
+        instruction="(up/down to move, Enter to select)"
     ).ask()
 
     if selected is None:
@@ -89,7 +93,7 @@ def select_tags(registry: dict) -> list[str]:
     available_tags = sorted(registry.get("tags", []))
 
     console.print("\n[bold cyan]Select tags:[/bold cyan]")
-    console.print("[dim]↑↓/jk to move, Space to select, 'a' to add new, Enter when done[/dim]\n")
+    console.print("[dim]up/down/jk to move, Space to select, 'a' to add new, Enter when done[/dim]\n")
 
     while True:
         # Use questionary checkbox for selection
@@ -179,7 +183,7 @@ def select_analysis_types(registry: dict, decimal: str) -> list[str]:
         return []
 
     console.print("\n[bold cyan]Select analysis types:[/bold cyan]")
-    console.print("[dim]↑↓/jk to move, Space to toggle, Enter when done[/dim]")
+    console.print("[dim]up/down/jk to move, Space to toggle, Enter when done[/dim]")
     console.print("[dim]Defaults pre-selected based on category[/dim]\n")
 
     # Build choices with defaults pre-selected
@@ -294,7 +298,8 @@ def run_interactive_cli(file_path: str) -> dict | None:
 def main():
     """Test the CLI."""
     if len(sys.argv) < 2:
-        print("Usage: python kb_cli.py <file_path>")
+        print("Usage: python -m kb.cli <file_path>")
+        print("       python kb/cli.py <file_path>")
         sys.exit(1)
 
     result = run_interactive_cli(sys.argv[1])

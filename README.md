@@ -37,7 +37,7 @@ The app needs two macOS permissions:
 
 ### 3. Start the daemon
 ```bash
-./whisper-daemon.sh start
+./scripts/whisper-daemon.sh start
 ```
 
 ## Usage
@@ -75,11 +75,11 @@ Supported formats: WAV, MP3, M4A, FLAC, OGG, OPUS, WEBM, MP4, M4V, MOV
 
 ### Daemon Management
 ```bash
-./whisper-daemon.sh start    # Start in background
-./whisper-daemon.sh stop     # Stop daemon
-./whisper-daemon.sh restart  # Restart daemon
-./whisper-daemon.sh status   # Check status and memory usage
-./whisper-daemon.sh logs     # View recent logs
+./scripts/whisper-daemon.sh start    # Start in background
+./scripts/whisper-daemon.sh stop     # Stop daemon
+./scripts/whisper-daemon.sh restart  # Restart daemon
+./scripts/whisper-daemon.sh status   # Check status and memory usage
+./scripts/whisper-daemon.sh logs     # View recent logs
 ```
 
 ## Models
@@ -113,7 +113,7 @@ whisper-transcribe-ui/
 │   ├── daemon/         # Daemon mode (primary)
 │   └── utils/          # Utilities
 ├── _legacy/            # Deprecated Full UI mode
-├── whisper-daemon.sh   # Main entry point
+├── scripts/            # Shell scripts (whisper-daemon.sh, etc.)
 ├── transcribe_file.py  # CLI file transcription
 └── tasks/              # Development task tracking
 ```
@@ -131,7 +131,7 @@ Check microphone permissions in System Settings → Privacy & Security → Micro
 
 ### View logs
 ```bash
-./whisper-daemon.sh logs
+./scripts/whisper-daemon.sh logs
 # Or: cat /tmp/whisper-daemon.log
 ```
 

@@ -5,8 +5,10 @@
 echo "🔨 Building Whisper Transcription UI..."
 
 # Get the directory of the current script
-APP_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-cd "$APP_DIR"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+# Project root is one level up from scripts/
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$PROJECT_ROOT"
 
 # Clean previous builds
 echo "🧹 Cleaning previous builds..."
@@ -30,7 +32,7 @@ python setup.py py2app
 
 if [ $? -eq 0 ]; then
     echo "✅ Build successful!"
-    echo "📂 App location: $APP_DIR/dist/Whisper Transcription UI.app"
+    echo "📂 App location: $PROJECT_ROOT/dist/Whisper Transcription UI.app"
     
     # Optional: Open the dist folder
     open dist/

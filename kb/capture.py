@@ -5,8 +5,8 @@ Cap Recordings Capture Script
 Lists Cap recordings and allows multi-select transcription to knowledge base.
 
 Usage:
-    python kb_cap_capture.py           # Interactive selection
-    python kb_cap_capture.py --list    # Just list recordings
+    python kb/capture.py           # Interactive selection
+    python kb/capture.py --list    # Just list recordings
 """
 
 import sys
@@ -17,7 +17,8 @@ import tempfile
 from pathlib import Path
 from datetime import datetime
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add project root to path for app.* imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rich.console import Console
 from rich.table import Table
@@ -26,8 +27,8 @@ from rich.prompt import Confirm
 import questionary
 from questionary import Style
 
-from kb_transcribe import transcribe_to_kb, load_registry
-from kb_cli import run_interactive_cli, custom_style
+from kb.transcribe import transcribe_to_kb, load_registry
+from kb.cli import run_interactive_cli, custom_style
 
 console = Console()
 
@@ -161,7 +162,7 @@ def list_recordings():
 def select_recordings(recordings: list[dict]) -> list[dict]:
     """Interactive multi-select for recordings."""
     console.print("\n[bold cyan]Select recordings to transcribe:[/bold cyan]")
-    console.print("[dim]↑↓/jk to move, Space to select, Enter when done[/dim]\n")
+    console.print("[dim]up/down/jk to move, Space to select, Enter when done[/dim]\n")
 
     choices = []
     for rec in recordings:
@@ -209,7 +210,7 @@ def transcribe_cap_recording(recording: dict, metadata: dict) -> bool:
             model_name=metadata.get("model", "medium")
         )
 
-        console.print(f"[green]✓ Transcribed: {result['id']}[/green]")
+        console.print(f"[green]done Transcribed: {result['id']}[/green]")
         return True
 
     except Exception as e:
@@ -259,7 +260,7 @@ def main():
     registry = load_registry()
 
     # Simplified metadata collection for batch
-    from kb_cli import select_decimal, select_tags
+    from kb.cli import select_decimal, select_tags
 
     decimal = select_decimal(registry)
     tags = select_tags(registry)

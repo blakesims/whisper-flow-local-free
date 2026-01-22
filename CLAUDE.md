@@ -8,7 +8,7 @@ This is a macOS desktop application for audio recording and transcription using 
 
 ### Daemon Mode (Primary - Recommended)
 A lightweight background service with a minimal floating indicator. Uses **whisper.cpp** for faster transcription.
-- **Entry point**: `./whisper-daemon.sh start`
+- **Entry point**: `./scripts/whisper-daemon.sh start`
 - **UI**: Small floating pill/dot that expands during recording
 - **Hotkeys**: `Ctrl+F` (toggle recording), `Escape` (cancel)
 - **Features**: Always-on, instant recording, right-click menu for settings
@@ -29,10 +29,10 @@ A larger floating window with more controls. Uses **faster-whisper** library.
 ### Running the Application
 ```bash
 # DAEMON MODE (recommended) - lightweight floating indicator
-./whisper-daemon.sh start    # Start daemon in background
-./whisper-daemon.sh stop     # Stop daemon
-./whisper-daemon.sh status   # Check status
-./whisper-daemon.sh logs     # View logs
+./scripts/whisper-daemon.sh start    # Start daemon in background
+./scripts/whisper-daemon.sh stop     # Stop daemon
+./scripts/whisper-daemon.sh status   # Check status
+./scripts/whisper-daemon.sh logs     # View logs
 
 # FULL UI MODE - larger window with all features
 ./run_whisper_ui.sh
@@ -67,7 +67,7 @@ python transcribe_file.py --force /path/to/audio.mp3  # Bypass cache
 ### Building macOS App Bundle
 ```bash
 # Quick build using the build script
-./build_app.sh
+./scripts/build_app.sh
 
 # Or manually:
 python setup.py py2app

@@ -30,6 +30,6 @@ The daemon mode in `app/daemon/` is now the primary and actively maintained inte
 ## Migration
 
 If you were using the Full UI mode, consider switching to the daemon mode:
-1. Install the daemon: `./install-daemon.sh`
+1. Install the daemon: `./scripts/install-daemon.sh`
 2. Use Raycast scripts or the toggle script to control recording
 3. See `docs/` for daemon documentation

@@ -6,7 +6,9 @@
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_PATH="$SCRIPT_DIR/.venv"
+# Project root is one level up from scripts/
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+VENV_PATH="$PROJECT_ROOT/.venv"
 DAEMON_MODULE="app.daemon.whisper_daemon"
 PID_FILE="/tmp/whisper-daemon.pid"
 
@@ -55,7 +57,7 @@ start_daemon() {
     check_venv
     activate_venv
 
-    cd "$SCRIPT_DIR"
+    cd "$PROJECT_ROOT"
 
     # Run daemon in background, redirect output to log file
     LOG_FILE="/tmp/whisper-daemon.log"

@@ -5,8 +5,8 @@ Knowledge Base Transcription Script
 Transcribes audio/video files and saves structured JSON to the knowledge base.
 
 Usage:
-    python kb_transcribe.py /path/to/file.mp4
-    python kb_transcribe.py --decimal 50.01.01 --title "My Video" /path/to/file.mp4
+    python kb/transcribe.py /path/to/file.mp4
+    python kb/transcribe.py --decimal 50.01.01 --title "My Video" /path/to/file.mp4
 
 The script will prompt for metadata using a rich CLI interface.
 """
@@ -21,8 +21,8 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-# Add project root to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add project root to path for app.* imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.core.transcription_service_cpp import get_transcription_service
 from app.utils.config_manager import ConfigManager
@@ -339,7 +339,7 @@ def main():
     # Interactive mode
     if args.interactive:
         try:
-            from kb_cli import run_interactive_cli
+            from kb.cli import run_interactive_cli
             result = run_interactive_cli(args.file_path)
             if result is None:
                 sys.exit(0)  # User cancelled
@@ -404,7 +404,7 @@ def main():
             print_status(f"Running analysis: {', '.join(analysis_types)}")
 
             try:
-                from kb_analyze import analyze_transcript_file
+                from kb.analyze import analyze_transcript_file
                 analyze_transcript_file(
                     transcript_path=str(transcript_path),
                     analysis_types=analysis_types,

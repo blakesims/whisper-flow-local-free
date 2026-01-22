@@ -5,11 +5,11 @@ Knowledge Base LLM Analysis Module
 Analyzes transcripts using Google Gemini API with structured output.
 
 Usage:
-    python kb_analyze.py                    # Interactive: select transcripts + types
-    python kb_analyze.py -p                 # Only show transcripts with pending analysis
-    python kb_analyze.py --all-pending      # Batch: analyze all pending with defaults
-    python kb_analyze.py /path/to/file.json # Direct: analyze specific file
-    python kb_analyze.py --list-types       # Show available analysis types
+    python kb/analyze.py                    # Interactive: select transcripts + types
+    python kb/analyze.py -p                 # Only show transcripts with pending analysis
+    python kb/analyze.py --all-pending      # Batch: analyze all pending with defaults
+    python kb/analyze.py /path/to/file.json # Direct: analyze specific file
+    python kb/analyze.py --list-types       # Show available analysis types
 """
 
 import sys
@@ -20,8 +20,8 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional
 
-# Add project root to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add project root to path for app.* imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rich.console import Console
 from rich.panel import Panel
@@ -40,7 +40,7 @@ ANALYSIS_TYPES_DIR = CONFIG_DIR / "analysis_types"
 # Default model
 DEFAULT_MODEL = "gemini-2.0-flash"
 
-# Questionary style (matching kb_cli.py)
+# Questionary style (matching kb.cli)
 custom_style = Style([
     ('qmark', 'fg:cyan bold'),
     ('question', 'fg:white bold'),
@@ -147,12 +147,12 @@ def format_analysis_status(done: list[str], pending: list[str]) -> str:
 
     parts = []
     for t in done:
-        parts.append(f"[green]✓{t}[/green]")
+        parts.append(f"[green]{t}[/green]")
 
     if not done and pending:
-        return "[yellow]○ no analysis[/yellow]"
+        return "[yellow]o no analysis[/yellow]"
 
-    return " ".join(parts) if parts else "[yellow]○ pending[/yellow]"
+    return " ".join(parts) if parts else "[yellow]o pending[/yellow]"
 
 
 def select_transcripts(
@@ -168,7 +168,7 @@ def select_transcripts(
         return []
 
     console.print("\n[bold cyan]Select transcripts to analyze:[/bold cyan]")
-    console.print("[dim]↑↓/jk to move, Space to select, Enter when done[/dim]\n")
+    console.print("[dim]up/down/jk to move, Space to select, Enter when done[/dim]\n")
 
     choices = []
     for t in transcripts:
@@ -179,7 +179,7 @@ def select_transcripts(
         status_plain = status_plain.replace("[yellow]", "").replace("[/yellow]", "")
         status_plain = status_plain.replace("[dim]", "").replace("[/dim]", "")
 
-        label = f"{date_str} │ {t['title'][:30]:<30} │ {t['decimal']} │ {status_plain}"
+        label = f"{date_str} | {t['title'][:30]:<30} | {t['decimal']} | {status_plain}"
         choices.append(questionary.Choice(title=label, value=t))
 
     selected = questionary.checkbox(
@@ -200,7 +200,7 @@ def select_analysis_types_interactive(
     already_done = already_done or set()
 
     console.print("\n[bold cyan]Select analysis types:[/bold cyan]")
-    console.print("[dim]↑↓/jk to move, Space to select, Enter when done[/dim]\n")
+    console.print("[dim]up/down/jk to move, Space to select, Enter when done[/dim]\n")
 
     choices = []
     for t in available:
@@ -385,10 +385,10 @@ def analyze_transcript_file(
                     model=model
                 )
                 results[analysis_type] = result
-                progress.update(task, description=f"[green]✓[/green] {analysis_type}")
+                progress.update(task, description=f"[green]done[/green] {analysis_type}")
 
             except Exception as e:
-                progress.update(task, description=f"[red]✗[/red] {analysis_type}: {e}")
+                progress.update(task, description=f"[red]x[/red] {analysis_type}: {e}")
                 results[analysis_type] = {"error": str(e)}
 
     # Save results back to transcript file
@@ -548,11 +548,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python kb_analyze.py                    # Interactive mode
-  python kb_analyze.py -p                 # Only show pending transcripts
-  python kb_analyze.py --all-pending      # Batch analyze all pending
-  python kb_analyze.py /path/to/file.json # Analyze specific file
-  python kb_analyze.py --list-types       # Show analysis types
+  python kb/analyze.py                    # Interactive mode
+  python kb/analyze.py -p                 # Only show pending transcripts
+  python kb/analyze.py --all-pending      # Batch analyze all pending
+  python kb/analyze.py /path/to/file.json # Analyze specific file
+  python kb/analyze.py --list-types       # Show analysis types
         """
     )
     parser.add_argument("transcript", nargs="?", help="Path to transcript JSON file (optional)")
@@ -651,9 +651,9 @@ Examples:
             console.print("\n[bold]Results:[/bold]")
             for name, result in results.items():
                 if "error" in result:
-                    console.print(f"  [red]✗ {name}[/red]: {result['error']}")
+                    console.print(f"  [red]x {name}[/red]: {result['error']}")
                 else:
-                    console.print(f"  [green]✓ {name}[/green]")
+                    console.print(f"  [green]done {name}[/green]")
 
         except Exception as e:
             console.print(f"[red]Error: {e}[/red]")

@@ -6,10 +6,10 @@ Scans a mounted volume for videos and transcribes any not already in the ledger.
 Runs without manual input - uses filename as title and configured defaults.
 
 Usage:
-    python kb_volume_sync.py                    # Scan and transcribe new files
-    python kb_volume_sync.py --list             # List files and their status
-    python kb_volume_sync.py --dry-run          # Show what would be transcribed
-    python kb_volume_sync.py --decimal 50.01.01 # Override default decimal
+    python kb/volume_sync.py                    # Scan and transcribe new files
+    python kb/volume_sync.py --list             # List files and their status
+    python kb/volume_sync.py --dry-run          # Show what would be transcribed
+    python kb/volume_sync.py --decimal 50.01.01 # Override default decimal
 """
 
 import sys
@@ -19,14 +19,15 @@ import re
 from pathlib import Path
 from datetime import datetime
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add project root to path for app.* imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich.prompt import Confirm
 
-from kb_transcribe import transcribe_to_kb, load_registry, save_registry
+from kb.transcribe import transcribe_to_kb, load_registry, save_registry
 
 console = Console()
 
@@ -108,7 +109,7 @@ def list_videos(volume_path: str):
     pending = 0
     for video in videos:
         is_transcribed = video["path"] in transcribed
-        status = "[green]✓[/green]" if is_transcribed else "[yellow]○[/yellow]"
+        status = "[green]done[/green]" if is_transcribed else "[yellow]o[/yellow]"
         if not is_transcribed:
             pending += 1
 
@@ -148,7 +149,7 @@ def sync_volume(
 
     console.print(f"\n[bold]Found {len(pending)} new video(s) to transcribe:[/bold]")
     for video in pending:
-        console.print(f"  • {video['name']} ({video['size_mb']:.1f} MB)")
+        console.print(f"  * {video['name']} ({video['size_mb']:.1f} MB)")
 
     if dry_run:
         console.print("\n[yellow]Dry run - no transcriptions performed.[/yellow]")
@@ -175,11 +176,11 @@ def sync_volume(
                 model_name=model
             )
 
-            console.print(f"[green]✓ Saved: {result['id']}[/green]")
+            console.print(f"[green]done Saved: {result['id']}[/green]")
             success += 1
 
         except Exception as e:
-            console.print(f"[red]✗ Error: {e}[/red]")
+            console.print(f"[red]x Error: {e}[/red]")
             # Continue with next file
 
     return success
