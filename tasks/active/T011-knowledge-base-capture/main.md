@@ -19,9 +19,11 @@ Build a systematic, machine-readable knowledge base for capturing all spoken/vid
 - None
 
 ## Resources & References
+- **Architecture doc**: [architecture.md](./architecture.md) - System design, data flow, tracking mechanisms
 - Destination: `~/Obsidian/zen-ai/knowledge-base/transcripts/`
 - Cap recordings: `/Users/blake/Library/Application Support/so.cap.desktop.dev/recordings/`
 - Volume videos: `/Volumes/BackupArchive/skool-videos/`
+- Zoom recordings: `~/Documents/Zoom/` (future integration)
 - Config: `~/Obsidian/zen-ai/knowledge-base/transcripts/config/`
 
 ## Scripts Created

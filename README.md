@@ -105,6 +105,33 @@ Settings are stored in `~/Library/Application Support/WhisperTranscribeUI/settin
 
 Most settings can be changed via the right-click menu.
 
+## Knowledge Base Workflow (`kb/`)
+
+A separate system for archiving video content to a structured JSON knowledge base with LLM analysis.
+
+```bash
+# Transcribe a video to KB
+python kb/transcribe.py -i /path/to/video.mp4
+
+# Analyze transcripts with Gemini
+python kb/analyze.py -p        # Interactive, pending only
+python kb/analyze.py --list    # Show all transcripts and status
+
+# Batch capture from sources
+python kb/capture.py           # Cap recordings
+python kb/volume_sync.py       # Mounted volume
+```
+
+**Output:** `~/Obsidian/zen-ai/knowledge-base/transcripts/`
+
+**Features:**
+- Decimal category system (50.01.01 = Skool classroom, etc.)
+- Tracks already-transcribed files (no re-processing)
+- LLM analysis: summary, key_points, guide, resources
+- Skips already-analyzed types
+
+See [architecture doc](tasks/active/T011-knowledge-base-capture/architecture.md) for full system design.
+
 ## Project Structure
 ```
 whisper-transcribe-ui/
@@ -112,6 +139,11 @@ whisper-transcribe-ui/
 │   ├── core/           # Shared services (audio, transcription)
 │   ├── daemon/         # Daemon mode (primary)
 │   └── utils/          # Utilities
+├── kb/                 # Knowledge Base workflow
+│   ├── transcribe.py   # Core KB transcription
+│   ├── analyze.py      # LLM analysis (Gemini)
+│   ├── capture.py      # Cap recordings
+│   └── volume_sync.py  # Volume auto-sync
 ├── _legacy/            # Deprecated Full UI mode
 ├── scripts/            # Shell scripts (whisper-daemon.sh, etc.)
 ├── transcribe_file.py  # CLI file transcription
