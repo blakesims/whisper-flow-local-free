@@ -1,0 +1,673 @@
+#!/usr/bin/env python3
+"""
+Knowledge Base LLM Analysis Module
+
+Analyzes transcripts using Google Gemini API with structured output.
+
+Usage:
+    python kb_analyze.py                    # Interactive: select transcripts + types
+    python kb_analyze.py -p                 # Only show transcripts with pending analysis
+    python kb_analyze.py --all-pending      # Batch: analyze all pending with defaults
+    python kb_analyze.py /path/to/file.json # Direct: analyze specific file
+    python kb_analyze.py --list-types       # Show available analysis types
+"""
+
+import sys
+import os
+import json
+import time
+from pathlib import Path
+from datetime import datetime
+from typing import Optional
+
+# Add project root to path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich.progress import Progress, SpinnerColumn, TextColumn
+import questionary
+from questionary import Style
+
+console = Console()
+
+# Knowledge base paths
+KB_ROOT = Path.home() / "Obsidian" / "zen-ai" / "knowledge-base" / "transcripts"
+CONFIG_DIR = KB_ROOT / "config"
+ANALYSIS_TYPES_DIR = CONFIG_DIR / "analysis_types"
+
+# Default model
+DEFAULT_MODEL = "gemini-2.0-flash"
+
+# Questionary style (matching kb_cli.py)
+custom_style = Style([
+    ('qmark', 'fg:cyan bold'),
+    ('question', 'fg:white bold'),
+    ('answer', 'fg:cyan'),
+    ('pointer', 'fg:cyan bold'),
+    ('highlighted', 'fg:cyan bold'),
+    ('selected', 'fg:green'),
+    ('separator', 'fg:gray'),
+    ('instruction', 'fg:gray'),
+])
+
+
+def load_analysis_type(name: str) -> dict:
+    """Load an analysis type definition from config."""
+    path = ANALYSIS_TYPES_DIR / f"{name}.json"
+    if not path.exists():
+        raise ValueError(f"Unknown analysis type: {name}")
+
+    with open(path) as f:
+        return json.load(f)
+
+
+def list_analysis_types() -> list[dict]:
+    """Get all available analysis types."""
+    types = []
+    for path in sorted(ANALYSIS_TYPES_DIR.glob("*.json")):
+        with open(path) as f:
+            data = json.load(f)
+            types.append({
+                "name": data["name"],
+                "description": data["description"]
+            })
+    return types
+
+
+def get_all_transcripts(
+    decimal_filter: str | None = None,
+    limit: int | None = None
+) -> list[dict]:
+    """
+    Scan knowledge base for all transcript files.
+
+    Returns list of transcript info dicts sorted by date (newest first).
+    """
+    transcripts = []
+    all_analysis_types = [t["name"] for t in list_analysis_types()]
+
+    # Scan all decimal directories
+    for decimal_dir in KB_ROOT.iterdir():
+        if not decimal_dir.is_dir():
+            continue
+        if decimal_dir.name == "config" or decimal_dir.name == "examples":
+            continue
+        if decimal_filter and decimal_dir.name != decimal_filter:
+            continue
+
+        # Find all JSON files in this decimal
+        for json_file in decimal_dir.glob("*.json"):
+            try:
+                with open(json_file) as f:
+                    data = json.load(f)
+
+                # Get analysis status
+                existing_analysis = data.get("analysis", {})
+                done_types = [t for t in all_analysis_types if t in existing_analysis]
+                pending_types = [t for t in all_analysis_types if t not in existing_analysis]
+
+                # Parse date from filename or data
+                recorded_at = data.get("recorded_at", "")
+                if recorded_at:
+                    try:
+                        date = datetime.strptime(recorded_at, "%Y-%m-%d")
+                    except ValueError:
+                        date = datetime.fromtimestamp(json_file.stat().st_mtime)
+                else:
+                    date = datetime.fromtimestamp(json_file.stat().st_mtime)
+
+                transcripts.append({
+                    "path": str(json_file),
+                    "title": data.get("title", json_file.stem),
+                    "decimal": decimal_dir.name,
+                    "date": date,
+                    "done_types": done_types,
+                    "pending_types": pending_types,
+                    "has_pending": len(pending_types) > 0,
+                    "word_count": len(data.get("transcript", "").split()),
+                })
+            except (json.JSONDecodeError, KeyError) as e:
+                console.print(f"[yellow]Warning: Could not read {json_file}: {e}[/yellow]")
+
+    # Sort by date (newest first)
+    transcripts.sort(key=lambda x: x["date"], reverse=True)
+
+    if limit:
+        transcripts = transcripts[:limit]
+
+    return transcripts
+
+
+def format_analysis_status(done: list[str], pending: list[str]) -> str:
+    """Format analysis status for display."""
+    if not done and not pending:
+        return "[dim]no types configured[/dim]"
+
+    parts = []
+    for t in done:
+        parts.append(f"[green]✓{t}[/green]")
+
+    if not done and pending:
+        return "[yellow]○ no analysis[/yellow]"
+
+    return " ".join(parts) if parts else "[yellow]○ pending[/yellow]"
+
+
+def select_transcripts(
+    transcripts: list[dict],
+    pending_only: bool = False
+) -> list[dict]:
+    """Interactive multi-select for transcripts."""
+    if pending_only:
+        transcripts = [t for t in transcripts if t["has_pending"]]
+
+    if not transcripts:
+        console.print("[yellow]No transcripts found matching criteria.[/yellow]")
+        return []
+
+    console.print("\n[bold cyan]Select transcripts to analyze:[/bold cyan]")
+    console.print("[dim]↑↓/jk to move, Space to select, Enter when done[/dim]\n")
+
+    choices = []
+    for t in transcripts:
+        date_str = t["date"].strftime("%Y-%m-%d")
+        status = format_analysis_status(t["done_types"], t["pending_types"])
+        # Strip rich markup for questionary (it doesn't support it)
+        status_plain = status.replace("[green]", "").replace("[/green]", "")
+        status_plain = status_plain.replace("[yellow]", "").replace("[/yellow]", "")
+        status_plain = status_plain.replace("[dim]", "").replace("[/dim]", "")
+
+        label = f"{date_str} │ {t['title'][:30]:<30} │ {t['decimal']} │ {status_plain}"
+        choices.append(questionary.Choice(title=label, value=t))
+
+    selected = questionary.checkbox(
+        "Transcripts:",
+        choices=choices,
+        style=custom_style,
+        instruction="(Space to select, Enter to confirm)"
+    ).ask()
+
+    return selected or []
+
+
+def select_analysis_types_interactive(
+    available: list[dict],
+    already_done: set[str] | None = None
+) -> list[str]:
+    """Interactive multi-select for analysis types, excluding already done."""
+    already_done = already_done or set()
+
+    console.print("\n[bold cyan]Select analysis types:[/bold cyan]")
+    console.print("[dim]↑↓/jk to move, Space to select, Enter when done[/dim]\n")
+
+    choices = []
+    for t in available:
+        if t["name"] in already_done:
+            # Show as disabled/done
+            label = f"{t['name']}: {t['description']} [already done]"
+            choices.append(questionary.Choice(title=label, value=t["name"], disabled="already done"))
+        else:
+            label = f"{t['name']}: {t['description']}"
+            # Pre-select summary by default
+            choices.append(questionary.Choice(
+                title=label,
+                value=t["name"],
+                checked=(t["name"] == "summary")
+            ))
+
+    selected = questionary.checkbox(
+        "Analysis types:",
+        choices=choices,
+        style=custom_style,
+        instruction="(Space to select, Enter to confirm)"
+    ).ask()
+
+    return selected or []
+
+
+def analyze_transcript(
+    transcript_text: str,
+    analysis_type: str,
+    title: str = "",
+    model: str = DEFAULT_MODEL,
+    max_retries: int = 3
+) -> dict:
+    """
+    Run a single analysis type on a transcript.
+
+    Returns the structured analysis result.
+    """
+    # Import here to avoid import errors if google-genai not installed
+    try:
+        from google import genai
+        from google.genai import types, errors
+    except ImportError:
+        raise ImportError(
+            "google-genai package not installed. "
+            "Install with: pip install google-genai"
+        )
+
+    # Check for API key
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
+        raise ValueError(
+            "GEMINI_API_KEY environment variable not set. "
+            "Get an API key from https://aistudio.google.com/app/apikey"
+        )
+
+    # Load analysis type config
+    config = load_analysis_type(analysis_type)
+
+    # Build the prompt with schema instruction
+    context = f"Title: {title}\n\n" if title else ""
+    schema_json = json.dumps(config['output_schema'], indent=2)
+
+    full_prompt = f"""{config['prompt']}
+
+{context}TRANSCRIPT:
+{transcript_text}
+
+---
+
+Respond with valid JSON matching this schema:
+{schema_json}
+
+Output ONLY the JSON, no markdown code blocks or explanation."""
+
+    # Initialize client
+    client = genai.Client(api_key=api_key)
+
+    # Retry loop with exponential backoff
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=full_prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type='application/json',
+                    temperature=0.3,  # Lower for more consistent structured output
+                ),
+            )
+
+            # Parse and return the result
+            result = json.loads(response.text)
+            return result
+
+        except errors.ClientError as e:
+            if e.code == 429:  # Rate limited
+                wait_time = 2 ** attempt
+                console.print(f"[yellow]Rate limited, waiting {wait_time}s...[/yellow]")
+                time.sleep(wait_time)
+                continue
+            elif e.code == 400:
+                raise ValueError(f"Invalid request: {e.message}")
+            elif e.code == 401:
+                raise PermissionError(f"API key invalid: {e.message}")
+            else:
+                raise
+
+        except errors.ServerError as e:
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+                continue
+            raise
+
+        except json.JSONDecodeError as e:
+            console.print(f"[yellow]Warning: Failed to parse response as JSON[/yellow]")
+            if attempt < max_retries - 1:
+                continue
+            raise ValueError(f"Failed to get valid JSON response: {e}")
+
+    raise RuntimeError("Max retries exceeded")
+
+
+def analyze_transcript_file(
+    transcript_path: str,
+    analysis_types: list[str],
+    model: str = DEFAULT_MODEL,
+    save: bool = True,
+    skip_existing: bool = True
+) -> dict:
+    """
+    Run multiple analysis types on a transcript file.
+
+    Args:
+        transcript_path: Path to the transcript JSON file
+        analysis_types: List of analysis type names to run
+        model: Gemini model to use
+        save: Whether to save results back to the transcript file
+        skip_existing: Skip analysis types that already exist
+
+    Returns:
+        Dict of analysis results keyed by type name
+    """
+    # Load transcript
+    with open(transcript_path) as f:
+        transcript_data = json.load(f)
+
+    transcript_text = transcript_data.get("transcript", "")
+    title = transcript_data.get("title", "")
+    existing_analysis = transcript_data.get("analysis", {})
+
+    if not transcript_text:
+        raise ValueError("Transcript file has no transcript text")
+
+    # Filter out already-done types if requested
+    if skip_existing:
+        types_to_run = [t for t in analysis_types if t not in existing_analysis]
+        skipped = [t for t in analysis_types if t in existing_analysis]
+        if skipped:
+            console.print(f"[dim]Skipping already done: {', '.join(skipped)}[/dim]")
+    else:
+        types_to_run = analysis_types
+
+    if not types_to_run:
+        console.print("[green]All requested analyses already complete.[/green]")
+        return {}
+
+    results = {}
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        for analysis_type in types_to_run:
+            task = progress.add_task(f"Analyzing: {analysis_type}...", total=None)
+
+            try:
+                result = analyze_transcript(
+                    transcript_text=transcript_text,
+                    analysis_type=analysis_type,
+                    title=title,
+                    model=model
+                )
+                results[analysis_type] = result
+                progress.update(task, description=f"[green]✓[/green] {analysis_type}")
+
+            except Exception as e:
+                progress.update(task, description=f"[red]✗[/red] {analysis_type}: {e}")
+                results[analysis_type] = {"error": str(e)}
+
+    # Save results back to transcript file
+    if save and results:
+        if "analysis" not in transcript_data:
+            transcript_data["analysis"] = {}
+
+        for name, result in results.items():
+            if "error" not in result:
+                transcript_data["analysis"][name] = result
+
+        with open(transcript_path, 'w') as f:
+            json.dump(transcript_data, f, indent=2, ensure_ascii=False)
+
+        console.print(f"[green]Analysis saved to {transcript_path}[/green]")
+
+    return results
+
+
+def run_interactive_mode(
+    pending_only: bool = False,
+    decimal_filter: str | None = None,
+    recent_limit: int | None = None,
+    model: str = DEFAULT_MODEL
+):
+    """Run the interactive transcript selector and analyzer."""
+    console.print(Panel("[bold]Transcript Analyzer[/bold]", border_style="cyan"))
+
+    # Get all transcripts
+    transcripts = get_all_transcripts(
+        decimal_filter=decimal_filter,
+        limit=recent_limit
+    )
+
+    if not transcripts:
+        console.print("[yellow]No transcripts found in knowledge base.[/yellow]")
+        return
+
+    # Show summary
+    total = len(transcripts)
+    pending = sum(1 for t in transcripts if t["has_pending"])
+    console.print(f"[dim]Found {total} transcripts, {pending} with pending analysis[/dim]")
+
+    # Select transcripts
+    selected_transcripts = select_transcripts(transcripts, pending_only=pending_only)
+
+    if not selected_transcripts:
+        console.print("[yellow]No transcripts selected.[/yellow]")
+        return
+
+    console.print(f"\n[bold]Selected {len(selected_transcripts)} transcript(s)[/bold]")
+
+    # If single transcript, show which types are already done
+    if len(selected_transcripts) == 1:
+        t = selected_transcripts[0]
+        already_done = set(t["done_types"])
+    else:
+        # For multiple, find common already-done (conservative)
+        already_done = set()
+
+    # Select analysis types
+    available_types = list_analysis_types()
+    selected_types = select_analysis_types_interactive(available_types, already_done)
+
+    if not selected_types:
+        console.print("[yellow]No analysis types selected.[/yellow]")
+        return
+
+    # Confirm
+    console.print(f"\n[bold]Will analyze {len(selected_transcripts)} transcript(s) with:[/bold]")
+    console.print(f"  Types: {', '.join(selected_types)}")
+    console.print(f"  Model: {model}")
+
+    if not questionary.confirm("Proceed?", default=True, style=custom_style).ask():
+        console.print("[yellow]Cancelled.[/yellow]")
+        return
+
+    # Run analysis
+    success_count = 0
+    for i, transcript in enumerate(selected_transcripts, 1):
+        console.print(f"\n[bold cyan]({i}/{len(selected_transcripts)}) {transcript['title']}[/bold cyan]")
+
+        try:
+            results = analyze_transcript_file(
+                transcript_path=transcript["path"],
+                analysis_types=selected_types,
+                model=model,
+                save=True,
+                skip_existing=True
+            )
+
+            # Count successes
+            successes = sum(1 for r in results.values() if "error" not in r)
+            if successes > 0:
+                success_count += 1
+
+        except Exception as e:
+            console.print(f"[red]Error: {e}[/red]")
+
+    console.print(f"\n[bold green]Done! Analyzed {success_count}/{len(selected_transcripts)} transcript(s).[/bold green]")
+
+
+def run_batch_pending(
+    analysis_types: list[str] | None = None,
+    model: str = DEFAULT_MODEL
+):
+    """Batch analyze all transcripts with pending analysis."""
+    console.print(Panel("[bold]Batch Analysis - All Pending[/bold]", border_style="cyan"))
+
+    transcripts = get_all_transcripts()
+    pending = [t for t in transcripts if t["has_pending"]]
+
+    if not pending:
+        console.print("[green]No transcripts with pending analysis.[/green]")
+        return
+
+    # Default to summary if no types specified
+    if not analysis_types:
+        analysis_types = ["summary"]
+
+    console.print(f"[bold]Found {len(pending)} transcript(s) with pending analysis[/bold]")
+    console.print(f"  Types: {', '.join(analysis_types)}")
+    console.print(f"  Model: {model}")
+
+    if not questionary.confirm("Proceed?", default=True, style=custom_style).ask():
+        console.print("[yellow]Cancelled.[/yellow]")
+        return
+
+    success_count = 0
+    for i, transcript in enumerate(pending, 1):
+        console.print(f"\n[bold cyan]({i}/{len(pending)}) {transcript['title']}[/bold cyan]")
+
+        try:
+            results = analyze_transcript_file(
+                transcript_path=transcript["path"],
+                analysis_types=analysis_types,
+                model=model,
+                save=True,
+                skip_existing=True
+            )
+
+            successes = sum(1 for r in results.values() if "error" not in r)
+            if successes > 0:
+                success_count += 1
+
+        except Exception as e:
+            console.print(f"[red]Error: {e}[/red]")
+
+    console.print(f"\n[bold green]Done! Analyzed {success_count}/{len(pending)} transcript(s).[/bold green]")
+
+
+def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Analyze transcripts with LLM",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python kb_analyze.py                    # Interactive mode
+  python kb_analyze.py -p                 # Only show pending transcripts
+  python kb_analyze.py --all-pending      # Batch analyze all pending
+  python kb_analyze.py /path/to/file.json # Analyze specific file
+  python kb_analyze.py --list-types       # Show analysis types
+        """
+    )
+    parser.add_argument("transcript", nargs="?", help="Path to transcript JSON file (optional)")
+    parser.add_argument("--type", "-t", action="append", dest="types",
+                        help="Analysis type to run (can specify multiple)")
+    parser.add_argument("--pending", "-p", action="store_true",
+                        help="Only show transcripts with pending analysis")
+    parser.add_argument("--all-pending", action="store_true",
+                        help="Batch analyze all pending transcripts")
+    parser.add_argument("--decimal", "-d", help="Filter to specific decimal category")
+    parser.add_argument("--recent", "-r", type=int, help="Only show N most recent transcripts")
+    parser.add_argument("--model", "-m", default=DEFAULT_MODEL,
+                        help=f"Gemini model (default: {DEFAULT_MODEL})")
+    parser.add_argument("--no-save", action="store_true",
+                        help="Don't save results to transcript file")
+    parser.add_argument("--list-types", "-l", action="store_true",
+                        help="List available analysis types")
+    parser.add_argument("--list", action="store_true",
+                        help="List all transcripts and their analysis status")
+
+    args = parser.parse_args()
+
+    # List analysis types
+    if args.list_types:
+        console.print(Panel("[bold]Available Analysis Types[/bold]", border_style="cyan"))
+        for t in list_analysis_types():
+            console.print(f"  [cyan]{t['name']}[/cyan]: {t['description']}")
+        return
+
+    # List transcripts
+    if args.list:
+        transcripts = get_all_transcripts(
+            decimal_filter=args.decimal,
+            limit=args.recent
+        )
+
+        table = Table(title="Transcripts", show_header=True, header_style="bold magenta")
+        table.add_column("Date", style="cyan")
+        table.add_column("Title")
+        table.add_column("Decimal")
+        table.add_column("Analysis Status")
+
+        for t in transcripts:
+            status = format_analysis_status(t["done_types"], t["pending_types"])
+            table.add_row(
+                t["date"].strftime("%Y-%m-%d"),
+                t["title"][:35],
+                t["decimal"],
+                status
+            )
+
+        console.print(table)
+
+        total = len(transcripts)
+        pending = sum(1 for t in transcripts if t["has_pending"])
+        console.print(f"\n[bold]Total:[/bold] {total} transcripts, {pending} with pending analysis")
+        return
+
+    # Batch mode
+    if args.all_pending:
+        run_batch_pending(
+            analysis_types=args.types,
+            model=args.model
+        )
+        return
+
+    # Direct file mode
+    if args.transcript:
+        if not os.path.isfile(args.transcript):
+            console.print(f"[red]File not found: {args.transcript}[/red]")
+            sys.exit(1)
+
+        # Determine which types to run
+        if args.types:
+            analysis_types = args.types
+        else:
+            analysis_types = ["summary"]
+
+        console.print(Panel(
+            f"[bold]Transcript Analysis[/bold]\n"
+            f"File: {args.transcript}\n"
+            f"Types: {', '.join(analysis_types)}\n"
+            f"Model: {args.model}",
+            border_style="cyan"
+        ))
+
+        try:
+            results = analyze_transcript_file(
+                transcript_path=args.transcript,
+                analysis_types=analysis_types,
+                model=args.model,
+                save=not args.no_save,
+                skip_existing=True
+            )
+
+            console.print("\n[bold]Results:[/bold]")
+            for name, result in results.items():
+                if "error" in result:
+                    console.print(f"  [red]✗ {name}[/red]: {result['error']}")
+                else:
+                    console.print(f"  [green]✓ {name}[/green]")
+
+        except Exception as e:
+            console.print(f"[red]Error: {e}[/red]")
+            sys.exit(1)
+        return
+
+    # Interactive mode (default)
+    run_interactive_mode(
+        pending_only=args.pending,
+        decimal_filter=args.decimal,
+        recent_limit=args.recent,
+        model=args.model
+    )
+
+
+if __name__ == "__main__":
+    main()

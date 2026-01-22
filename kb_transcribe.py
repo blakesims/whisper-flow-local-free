@@ -310,6 +310,8 @@ def main():
                         choices=["tiny", "base", "small", "medium", "large-v2", "large-v3"],
                         help="Whisper model (default: medium for quality)")
     parser.add_argument("--interactive", "-i", action="store_true", help="Interactive mode with rich CLI")
+    parser.add_argument("--analyze", "-a", nargs="*", metavar="TYPE",
+                        help="Run LLM analysis after transcription (e.g., --analyze summary key_points)")
     parser.add_argument("--list-decimals", action="store_true", help="List available decimal categories")
     parser.add_argument("--list-tags", action="store_true", help="List available tags")
 
@@ -346,7 +348,9 @@ def main():
             args.title = result["title"]
             args.tags = result["tags"]
             args.date = result["date"]
-            # analyses stored for future Phase 6
+            # Get analysis types from interactive selection
+            if result.get("analyses"):
+                args.analyze = result["analyses"]
         except ImportError:
             print("Error: rich library required for interactive mode")
             print("Install with: pip install rich")
@@ -379,6 +383,37 @@ def main():
         print_status("Transcription complete!")
         print_status(f"ID: {result['id']}")
         print_status(f"Words: {len(result['transcript'].split())}")
+
+        # Run analysis if requested
+        if args.analyze is not None:
+            # Get the transcript file path
+            date_str = result.get("recorded_at", "")
+            if len(date_str) == 10:  # YYYY-MM-DD format
+                date_str = datetime.strptime(date_str, "%Y-%m-%d").strftime("%y%m%d")
+            slug = slugify(args.title)
+            filename = f"{date_str}-{slug}.json"
+            transcript_path = KB_ROOT / args.decimal / filename
+
+            # Determine analysis types
+            if len(args.analyze) == 0:
+                # --analyze with no args = default to summary
+                analysis_types = ["summary"]
+            else:
+                analysis_types = args.analyze
+
+            print_status(f"Running analysis: {', '.join(analysis_types)}")
+
+            try:
+                from kb_analyze import analyze_transcript_file
+                analyze_transcript_file(
+                    transcript_path=str(transcript_path),
+                    analysis_types=analysis_types,
+                    save=True
+                )
+            except ImportError as e:
+                print(f"Warning: Could not run analysis - {e}")
+            except Exception as e:
+                print(f"Warning: Analysis failed - {e}")
 
     except Exception as e:
         print(f"Error: {e}")

@@ -32,6 +32,7 @@ Build a systematic, machine-readable knowledge base for capturing all spoken/vid
 | `kb_cli.py` | Rich interactive CLI components (questionary checkboxes) |
 | `kb_cap_capture.py` | Multi-select Cap recordings for batch transcription |
 | `kb_volume_sync.py` | Auto-transcribe new videos from mounted volume |
+| `kb_analyze.py` | LLM analysis with interactive transcript selector |
 
 ## Phases Breakdown
 
@@ -125,19 +126,54 @@ python kb_volume_sync.py -d 50.02.01  # Override decimal
 ---
 
 ### Phase 6: LLM Analysis Integration
-**Status**: Not Started
+**Status**: Complete
 
 **Objectives**:
 - Load analysis type definitions from `config/analysis_types/`
-- Call LLM (Google Gemini or Claude Code) with configured prompts
-- Enforce structured output matching analysis type schema
+- Call Google Gemini API with configured prompts
+- Enforce structured JSON output using Pydantic models
 - Support analysis types: summary, key_points, guide, resources, improvements, lead_magnet
 - Show progress feedback during analysis
 - Make analysis toggleable at transcription time
 
-**Resources Needed**:
-- Google Gemini API (google-genai Python module) OR Claude Code integration
-- Analysis type prompt definitions (already created in Phase 1)
+**Technical Decisions**:
+- **LLM Provider**: Google Gemini (`google-genai` SDK, NOT deprecated `google-generativeai`)
+- **Model**: `gemini-2.5-flash` (best price-performance, 1M context, 65K output)
+- **Structured Output**: Pydantic models with `response_schema` parameter
+- **Auth**: Environment variable `GEMINI_API_KEY`
+
+**Implementation Plan**:
+
+1. **Create `kb_analyze.py`** - Standalone analysis module
+   - Load analysis type definitions from config
+   - Convert JSON schemas to Pydantic models dynamically
+   - Call Gemini with transcript + prompt
+   - Validate and return structured response
+
+2. **Analysis Type Pydantic Models**:
+   ```python
+   class SummaryAnalysis(BaseModel):
+       summary: str
+       word_count: int
+
+   class KeyPointsAnalysis(BaseModel):
+       key_points: list[str]
+       themes: list[str]
+   ```
+
+3. **Integration Points**:
+   - `kb_transcribe.py`: Add `--analyze` flag to run analysis after transcription
+   - `kb_cli.py`: Analysis type selection already exists, wire up to actual calls
+   - Store results in transcript JSON's `analysis` field
+
+4. **Error Handling**:
+   - Retry with exponential backoff on rate limits (429)
+   - Graceful fallback if analysis fails (don't lose transcript)
+
+**Resources**:
+- Research doc: `tasks/active/T011-knowledge-base-capture/google-genai-research.md`
+- Analysis type definitions: `~/Obsidian/zen-ai/knowledge-base/transcripts/config/analysis_types/`
+- Dependency: `pip install google-genai pydantic`
 
 ---
 
@@ -179,3 +215,5 @@ After LLM analysis (Phase 6), add options to:
 - 2026-01-22: Updated to use questionary for checkbox-style selection (vim/arrow navigation, spacebar toggle).
 - 2026-01-22: Phases 4-5 complete. Cap capture and Volume sync scripts working.
 - 2026-01-22: Default model changed to "medium" for quality transcriptions.
+- 2026-01-22: Phase 6 research complete. Chose Google Gemini (`google-genai` SDK) over Claude Code for simpler integration. Research doc created at `google-genai-research.md`.
+- 2026-01-22: Phase 6 complete. `kb_analyze.py` with interactive transcript selector, skip-existing logic, batch mode, and structured JSON output via Gemini.
