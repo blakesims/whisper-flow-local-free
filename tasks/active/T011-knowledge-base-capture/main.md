@@ -88,7 +88,7 @@ Build a systematic, machine-readable knowledge base for capturing all spoken/vid
 ---
 
 ### Phase 4: Cap Recordings Capture Script
-**Status**: Not Started
+**Status**: Complete
 
 **Objectives**:
 - Script to list Cap recordings sorted by date (newest first)
@@ -109,7 +109,7 @@ Build a systematic, machine-readable knowledge base for capturing all spoken/vid
 ---
 
 ### Phase 5: Volume Auto-Transcriber with Ledger
-**Status**: Not Started
+**Status**: Complete
 
 **Objectives**:
 - Script to scan `/Volumes/BackupArchive/skool-videos/` for videos

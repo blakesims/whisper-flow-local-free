@@ -5,7 +5,7 @@
 | ID   | Task Name | Priority (1-5) | Phases (Done/Total) | Status | Dependencies | Rules Required | Link to `main.md` |
 | :--- | :---- | :---- | :--- | :---- | :--- | :---- | :---- |
 | T010 | WhisperX Speaker Diarization | 2 | 0/5 | PLANNING | - | task-documentation | [main.md](active/T010-whisperx-diarization/main.md) |
-| T011 | Knowledge Base Capture System | 1 | 3/6 | ACTIVE | - | - | [main.md](active/T011-knowledge-base-capture/main.md) |
+| T011 | Knowledge Base Capture System | 1 | 5/6 | ACTIVE | - | - | [main.md](active/T011-knowledge-base-capture/main.md) |
 
 ## Notes
 - Priority: 1=Highest, 5=Lowest
