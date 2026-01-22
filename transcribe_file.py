@@ -17,6 +17,9 @@ import os
 import json
 import hashlib
 import time
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 # Add project root to path
@@ -37,10 +40,118 @@ SUPPORTED_FORMATS = (
 CACHE_DIR = Path.home() / ".cache" / "whisper-transcripts"
 CACHE_EXPIRY_HOURS = 24
 
+# Network volume prefixes that benefit from local copy
+NETWORK_VOLUME_PREFIXES = (
+    '/Volumes/',      # macOS mounted volumes (except Macintosh HD)
+    '/mnt/',          # Linux mount points
+    '/media/',        # Linux media mounts
+    '///',            # UNC paths
+)
+
+
+def is_network_or_external_path(file_path: str) -> bool:
+    """Check if file is on a network/external volume that would benefit from local copy."""
+    abs_path = os.path.abspath(file_path)
+
+    # Check for /Volumes/ but exclude the boot drive
+    if abs_path.startswith('/Volumes/'):
+        # /Volumes/Macintosh HD is typically the boot drive
+        volume_name = abs_path.split('/')[2] if len(abs_path.split('/')) > 2 else ''
+        if volume_name in ('Macintosh HD', 'Macintosh HD - Data'):
+            return False
+        return True
+
+    # Check other network prefixes
+    for prefix in NETWORK_VOLUME_PREFIXES[1:]:  # Skip /Volumes/ already handled
+        if abs_path.startswith(prefix):
+            return True
+
+    return False
+
 
 def print_progress(msg: str):
     """Print progress to stderr (visible in Raycast)"""
     print(msg, file=sys.stderr, flush=True)
+
+
+VIDEO_FORMATS = ('.mp4', '.m4v', '.mov', '.webm', '.mkv', '.avi')
+
+
+class LocalFileCopy:
+    """Context manager to extract audio from network files for faster processing."""
+
+    def __init__(self, file_path: str):
+        self.original_path = file_path
+        self.local_path = None
+        self.temp_dir = None
+        self.needs_extraction = is_network_or_external_path(file_path)
+
+    def __enter__(self) -> str:
+        if not self.needs_extraction:
+            return self.original_path
+
+        ext = os.path.splitext(self.original_path)[1].lower()
+        is_video = ext in VIDEO_FORMATS
+
+        # Create temp directory
+        self.temp_dir = tempfile.mkdtemp(prefix='whisper_')
+
+        if is_video:
+            # Extract audio only using ffmpeg (much smaller than full video)
+            self.local_path = os.path.join(self.temp_dir, 'audio.wav')
+            size_mb = os.path.getsize(self.original_path) / (1024 * 1024)
+            print_progress(f"Extracting audio from video ({size_mb:.1f} MB video)...")
+
+            try:
+                result = subprocess.run([
+                    'ffmpeg', '-i', self.original_path,
+                    '-vn',                    # No video
+                    '-acodec', 'pcm_s16le',   # 16-bit PCM (what whisper needs)
+                    '-ar', '16000',           # 16kHz sample rate (whisper optimal)
+                    '-ac', '1',               # Mono
+                    '-y',                     # Overwrite
+                    self.local_path
+                ], capture_output=True, text=True, timeout=900)  # 15 min for long videos
+
+                if result.returncode != 0:
+                    print_progress(f"ffmpeg warning: {result.stderr[:200]}")
+                    # Fall back to copying the whole file
+                    return self._copy_whole_file()
+
+                audio_size_mb = os.path.getsize(self.local_path) / (1024 * 1024)
+                print_progress(f"Audio extracted ({audio_size_mb:.1f} MB)")
+                return self.local_path
+
+            except FileNotFoundError:
+                print_progress("ffmpeg not found, copying whole file...")
+                return self._copy_whole_file()
+            except subprocess.TimeoutExpired:
+                print_progress("Audio extraction timed out, copying whole file...")
+                return self._copy_whole_file()
+        else:
+            # For audio files, just copy (they're already small)
+            return self._copy_whole_file()
+
+    def _copy_whole_file(self) -> str:
+        """Fallback: copy the entire file."""
+        filename = os.path.basename(self.original_path)
+        self.local_path = os.path.join(self.temp_dir, filename)
+
+        size_mb = os.path.getsize(self.original_path) / (1024 * 1024)
+        print_progress(f"Copying from network volume ({size_mb:.1f} MB)...")
+
+        shutil.copy2(self.original_path, self.local_path)
+        print_progress("File copied locally")
+        return self.local_path
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # Clean up temp directory
+        if self.temp_dir and os.path.exists(self.temp_dir):
+            try:
+                shutil.rmtree(self.temp_dir)
+            except Exception:
+                pass
+        return False
 
 
 def get_cache_key(file_path: str) -> str:
@@ -156,14 +267,15 @@ def transcribe_file(file_path: str, force: bool = False) -> str:
             last_percent[0] = percent
             print_progress(f"Transcribing: {percent}%")
 
-    # Transcribe
+    # Transcribe (copy to local if on network volume)
     print_progress("Transcribing...")
-    result = service.transcribe(
-        file_path,
-        language=config.get("transcription_language", None),
-        beam_size=1,
-        progress_callback=progress_callback
-    )
+    with LocalFileCopy(file_path) as local_path:
+        result = service.transcribe(
+            local_path,
+            language=config.get("transcription_language", None),
+            beam_size=1,
+            progress_callback=progress_callback
+        )
 
     text = result.get("text", "").strip()
 
