@@ -13,16 +13,25 @@ Build a systematic, machine-readable knowledge base for capturing all spoken/vid
 - Add configurable LLM analysis pipeline (summaries, key points, etc.)
 
 ## Dependencies
-- None (builds on existing transcribe_file.py)
+- None (standalone scripts, use existing whisper.cpp transcription service)
 
 ## Rules Required
 - None
 
 ## Resources & References
-- Existing script: `transcribe_file.py` (already handles ffmpeg audio extraction)
 - Destination: `~/Obsidian/zen-ai/knowledge-base/transcripts/`
 - Cap recordings: `/Users/blake/Library/Application Support/so.cap.desktop.dev/recordings/`
 - Volume videos: `/Volumes/BackupArchive/skool-videos/`
+- Config: `~/Obsidian/zen-ai/knowledge-base/transcripts/config/`
+
+## Scripts Created
+
+| Script | Purpose |
+|--------|---------|
+| `kb_transcribe.py` | Core transcription to JSON with CLI args or interactive mode |
+| `kb_cli.py` | Rich interactive CLI components (questionary checkboxes) |
+| `kb_cap_capture.py` | Multi-select Cap recordings for batch transcription |
+| `kb_volume_sync.py` | Auto-transcribe new videos from mounted volume |
 
 ## Phases Breakdown
 
@@ -32,16 +41,13 @@ Build a systematic, machine-readable knowledge base for capturing all spoken/vid
 **Objectives**:
 - Create transcript directory structure at `~/Obsidian/zen-ai/knowledge-base/transcripts/`
 - Create `config/registry.json` with decimal definitions and tag list
-- Create `config/analysis_types/` directory with initial analysis type definitions
+- Create `config/analysis_types/` directory with analysis type definitions (summary, key_points, guide, resources, improvements, lead_magnet)
 - Define JSON schema for transcript files
 
-**Estimated Time**: 1-2 hours
-
-**Resources Needed**:
-- JSON schema definition from planning discussion
-
-**Dependencies**:
-- None
+**Deliverables**:
+- Decimal folders: 50.00.01, 50.01.01, 50.01.02, 50.02.01, 50.03.01, 50.03.02
+- registry.json with decimals, tags, and transcribed_files ledger
+- 6 analysis type JSON definitions with prompts and output schemas
 
 ---
 
@@ -49,18 +55,19 @@ Build a systematic, machine-readable knowledge base for capturing all spoken/vid
 **Status**: Complete
 
 **Objectives**:
-- Modify `transcribe_file.py` to output JSON instead of plain text
+- Create standalone `kb_transcribe.py` (separate from transcribe_file.py)
+- Output structured JSON to knowledge base
 - Include metadata: id, decimal, title, source_files, recorded_at, duration_seconds, speakers, tags
-- Compute duration automatically from audio
-- Support both single and multi-speaker transcript formats
+- Compute duration automatically via ffprobe
+- Network volume support: extract audio via ffmpeg (transfers ~1% of video size)
+- Default to medium model for quality (configurable via --model flag)
 
-**Estimated Time**: 2-3 hours
-
-**Resources Needed**:
-- JSON schema from Phase 1
-
-**Dependencies**:
-- T011#P1
+**Usage**:
+```bash
+python kb_transcribe.py -d 50.01.01 -t "Title" /path/to/video.mp4
+python kb_transcribe.py -i /path/to/video.mp4  # Interactive mode
+python kb_transcribe.py --list-decimals
+```
 
 ---
 
@@ -68,22 +75,15 @@ Build a systematic, machine-readable knowledge base for capturing all spoken/vid
 **Status**: Complete
 
 **Objectives**:
-- Build rich text CLI using `rich` library for interactive metadata input
+- Build interactive CLI using `rich` and `questionary` libraries
+- Arrow key / vim navigation (↑↓ or j/k)
+- Spacebar to toggle selections
+- Decimal category selector (single select)
 - Multi-select tag picker with "add new tag" option
-- Decimal category selector (loads from registry.json)
+- Analysis type toggles with defaults pre-selected based on decimal
 - Optional recording date input
-- Analysis type toggles (defaults pre-selected based on decimal category)
-- Progress feedback during LLM analysis
 
-**Estimated Time**: 3-4 hours
-
-**Resources Needed**:
-- `rich` Python library
-- registry.json from Phase 1
-
-**Dependencies**:
-- T011#P1
-- T011#P2
+**Libraries**: rich, questionary
 
 ---
 
@@ -95,16 +95,12 @@ Build a systematic, machine-readable knowledge base for capturing all spoken/vid
 - Multi-select which recordings to transcribe
 - Extract and merge audio from `.cap` package segments
 - Integrate with rich CLI for metadata input
-- Output JSON transcripts to knowledge base
 
-**Estimated Time**: 2-3 hours
-
-**Resources Needed**:
-- Cap package structure: `content/segments/segment-N/audio-input.ogg`
-
-**Dependencies**:
-- T011#P2
-- T011#P3
+**Usage**:
+```bash
+python kb_cap_capture.py --list   # List recordings
+python kb_cap_capture.py          # Interactive selection and transcription
+```
 
 ---
 
@@ -112,19 +108,19 @@ Build a systematic, machine-readable knowledge base for capturing all spoken/vid
 **Status**: Complete
 
 **Objectives**:
-- Script to scan `/Volumes/BackupArchive/skool-videos/` for videos
-- Maintain ledger of already-transcribed files (in registry.json or separate file)
+- Script to scan mounted volume for videos
+- Maintain ledger in registry.json (transcribed_files array)
 - Auto-transcribe new files without manual input
-- Use filename for title, derive decimal from config defaults
-- Support batch processing
+- Use filename for title (cleaned up), configurable decimal
+- Support batch processing with dry-run option
 
-**Estimated Time**: 2-3 hours
-
-**Resources Needed**:
-- Ledger storage decision
-
-**Dependencies**:
-- T011#P2
+**Usage**:
+```bash
+python kb_volume_sync.py --list       # Show status
+python kb_volume_sync.py --dry-run    # Preview what would be transcribed
+python kb_volume_sync.py              # Transcribe all new files
+python kb_volume_sync.py -d 50.02.01  # Override decimal
+```
 
 ---
 
@@ -139,18 +135,47 @@ Build a systematic, machine-readable knowledge base for capturing all spoken/vid
 - Show progress feedback during analysis
 - Make analysis toggleable at transcription time
 
-**Estimated Time**: 4-6 hours
-
 **Resources Needed**:
 - Google Gemini API (google-genai Python module) OR Claude Code integration
-- Analysis type prompt definitions
+- Analysis type prompt definitions (already created in Phase 1)
 
-**Dependencies**:
-- T011#P1
-- T011#P2
-- T011#P3
+---
+
+## Future Enhancements
+
+### CLI Package for Global Access
+Create a proper Python package with entry points so the CLI can be run from anywhere:
+```bash
+kb-transcribe -i /path/to/file.mp4   # Instead of navigating to project dir
+kb-cap                                # Cap recordings capture
+kb-sync                               # Volume sync
+```
+
+**Approach**: Add entry points to pyproject.toml, then `pip install -e .` for development mode.
+
+### Email/Clipboard for Student-Facing Content
+After LLM analysis (Phase 6), add options to:
+
+1. **Copy to clipboard**: Prompt user to copy summary, key_points, or both
+2. **Email to student**: Send analysis output via SMTP through Google Workspace (zenaitutoring.com domain)
+
+**Student-facing analysis types**:
+- summary ✓
+- key_points ✓
+- guide ✓
+- resources ✓
+- improvements ✗ (instructor-only)
+
+**Email implementation**:
+- Use SMTP with App Password (simpler than OAuth)
+- Add optional `student_email` field to cohort transcript metadata
+- Sender: noreply@zenaitutoring.com or blake@zenaitutoring.com
 
 ---
 
 ## Notes & Updates
-- 2026-01-22: Task created from planning discussion. ffmpeg audio extraction already implemented in transcribe_file.py. Decimal system and JSON schema agreed upon.
+- 2026-01-22: Task created from planning discussion. Decimal system and JSON schema agreed upon.
+- 2026-01-22: Phases 1-3 complete. Tested full pipeline with 7.6GB video → 56MB audio extraction → JSON output.
+- 2026-01-22: Updated to use questionary for checkbox-style selection (vim/arrow navigation, spacebar toggle).
+- 2026-01-22: Phases 4-5 complete. Cap capture and Volume sync scripts working.
+- 2026-01-22: Default model changed to "medium" for quality transcriptions.
