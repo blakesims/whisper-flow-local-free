@@ -24,6 +24,23 @@ A larger floating window with more controls. Uses **faster-whisper** library.
 
 **Note**: The daemon mode is the actively used and developed mode. The full UI mode is maintained but secondary.
 
+### Knowledge Base Workflow (`kb/`)
+Standalone scripts for archiving video content to a structured JSON knowledge base with LLM analysis.
+- **Location**: `kb/` directory
+- **Output**: `~/Obsidian/zen-ai/knowledge-base/transcripts/`
+- **Entry points**:
+  - `python kb/transcribe.py` - Core transcription to JSON
+  - `python kb/analyze.py` - LLM analysis (Gemini API)
+  - `python kb/capture.py` - Cap recordings batch capture
+  - `python kb/volume_sync.py` - Auto-transcribe from mounted volumes
+
+## Key Rules
+
+- **Gemini API**: Use `google-genai` package (NOT `google-generativeai`, deprecated Nov 2025)
+- **Network volumes**: Extract audio via ffmpeg, never copy whole video files
+- **Transcription quality**: Default to "medium" Whisper model for quality
+- **Venv**: `source .venv/bin/activate && pip install -r requirements.txt`
+
 ## Common Development Commands
 
 ### Running the Application
@@ -43,36 +60,15 @@ python -m app.daemon.whisper_daemon start  # Daemon mode
 python -m app.main                          # Full UI mode
 ```
 
-### Package Management
+### Raycast File Transcription
 ```bash
-# Create virtual environment
-python -m venv .venv
-
-# Activate virtual environment
-source .venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
-### Raycast Scripts
-```bash
-# File transcription (with 24h cache)
-python transcribe_file.py /path/to/audio.mp3
+python transcribe_file.py /path/to/audio.mp3          # With 24h cache
 python transcribe_file.py --force /path/to/audio.mp3  # Bypass cache
-
-# Raycast integration at: ~/raycast-scripts/whisper-file-transcribe.sh
 ```
 
-### Building macOS App Bundle
+### Build macOS App
 ```bash
-# Quick build using the build script
-./scripts/build_app.sh
-
-# Or manually:
-python setup.py py2app
-
-# The app will be in dist/Whisper Transcription UI.app
+./scripts/build_app.sh  # Output: dist/Whisper Transcription UI.app
 ```
 
 ## Architecture Overview
