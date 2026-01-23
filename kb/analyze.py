@@ -30,15 +30,20 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 import questionary
 from questionary import Style
 
+from kb.__main__ import load_config, get_paths, DEFAULTS
+
 console = Console()
 
-# Knowledge base paths
-KB_ROOT = Path.home() / "Obsidian" / "zen-ai" / "knowledge-base" / "transcripts"
-CONFIG_DIR = KB_ROOT / "config"
+# Load paths from config
+_config = load_config()
+_paths = get_paths(_config)
+
+KB_ROOT = _paths["kb_output"]
+CONFIG_DIR = _paths["config_dir"]
 ANALYSIS_TYPES_DIR = CONFIG_DIR / "analysis_types"
 
-# Default model
-DEFAULT_MODEL = "gemini-2.0-flash"
+# Default model from config
+DEFAULT_MODEL = _config.get("defaults", {}).get("gemini_model", DEFAULTS["defaults"]["gemini_model"])
 
 # Questionary style (matching kb.cli)
 custom_style = Style([
@@ -127,6 +132,7 @@ def get_all_transcripts(
                     "pending_types": pending_types,
                     "has_pending": len(pending_types) > 0,
                     "word_count": len(data.get("transcript", "").split()),
+                    "analysis": existing_analysis,  # Include full analysis data for model checking
                 })
             except (json.JSONDecodeError, KeyError) as e:
                 console.print(f"[yellow]Warning: Could not read {json_file}: {e}[/yellow]")
@@ -194,20 +200,33 @@ def select_transcripts(
 
 def select_analysis_types_interactive(
     available: list[dict],
-    already_done: set[str] | None = None
+    existing_analysis: dict | None = None,
+    current_model: str = DEFAULT_MODEL
 ) -> list[str]:
-    """Interactive multi-select for analysis types, excluding already done."""
-    already_done = already_done or set()
+    """Interactive multi-select for analysis types.
+
+    Shows model info for already-done analyses and allows re-running with different model.
+    """
+    existing_analysis = existing_analysis or {}
 
     console.print("\n[bold cyan]Select analysis types:[/bold cyan]")
     console.print("[dim]up/down/jk to move, Space to select, Enter when done[/dim]\n")
 
     choices = []
     for t in available:
-        if t["name"] in already_done:
-            # Show as disabled/done
-            label = f"{t['name']}: {t['description']} [already done]"
-            choices.append(questionary.Choice(title=label, value=t["name"], disabled="already done"))
+        if t["name"] in existing_analysis:
+            # Get the model used for this analysis
+            analysis_data = existing_analysis[t["name"]]
+            done_model = analysis_data.get("_model", "unknown")
+
+            if done_model == current_model:
+                # Same model - show as done, disabled
+                label = f"{t['name']}: {t['description']} [done with {done_model}]"
+                choices.append(questionary.Choice(title=label, value=t["name"], disabled="already done"))
+            else:
+                # Different model - allow re-running
+                label = f"{t['name']}: {t['description']} [done with {done_model}, re-run with {current_model}?]"
+                choices.append(questionary.Choice(title=label, value=t["name"], checked=False))
         else:
             label = f"{t['name']}: {t['description']}"
             # Pre-select summary by default
@@ -328,7 +347,8 @@ def analyze_transcript_file(
     analysis_types: list[str],
     model: str = DEFAULT_MODEL,
     save: bool = True,
-    skip_existing: bool = True
+    skip_existing: bool = True,
+    force: bool = False
 ) -> dict:
     """
     Run multiple analysis types on a transcript file.
@@ -338,7 +358,8 @@ def analyze_transcript_file(
         analysis_types: List of analysis type names to run
         model: Gemini model to use
         save: Whether to save results back to the transcript file
-        skip_existing: Skip analysis types that already exist
+        skip_existing: Skip analysis types that already exist (unless force=True)
+        force: Force re-run all requested analyses regardless of existing
 
     Returns:
         Dict of analysis results keyed by type name
@@ -354,14 +375,28 @@ def analyze_transcript_file(
     if not transcript_text:
         raise ValueError("Transcript file has no transcript text")
 
-    # Filter out already-done types if requested
-    if skip_existing:
-        types_to_run = [t for t in analysis_types if t not in existing_analysis]
-        skipped = [t for t in analysis_types if t in existing_analysis]
+    # Filter out already-done types if requested (unless force)
+    if skip_existing and not force:
+        # Only skip if same model was used
+        types_to_run = []
+        skipped = []
+        for t in analysis_types:
+            if t in existing_analysis:
+                existing_model = existing_analysis[t].get("_model", "unknown")
+                if existing_model == model:
+                    skipped.append(f"{t} ({existing_model})")
+                else:
+                    # Different model, re-run
+                    types_to_run.append(t)
+                    console.print(f"[dim]Re-running {t}: {existing_model} → {model}[/dim]")
+            else:
+                types_to_run.append(t)
         if skipped:
-            console.print(f"[dim]Skipping already done: {', '.join(skipped)}[/dim]")
+            console.print(f"[dim]Skipping (same model): {', '.join(skipped)}[/dim]")
     else:
         types_to_run = analysis_types
+        if force and analysis_types:
+            console.print(f"[dim]Force re-running: {', '.join(analysis_types)}[/dim]")
 
     if not types_to_run:
         console.print("[green]All requested analyses already complete.[/green]")
@@ -398,6 +433,9 @@ def analyze_transcript_file(
 
         for name, result in results.items():
             if "error" not in result:
+                # Add metadata to the result
+                result["_model"] = model
+                result["_analyzed_at"] = datetime.now().isoformat()
                 transcript_data["analysis"][name] = result
 
         with open(transcript_path, 'w') as f:
@@ -412,7 +450,8 @@ def run_interactive_mode(
     pending_only: bool = False,
     decimal_filter: str | None = None,
     recent_limit: int | None = None,
-    model: str = DEFAULT_MODEL
+    model: str = DEFAULT_MODEL,
+    force: bool = False
 ):
     """Run the interactive transcript selector and analyzer."""
     console.print(Panel("[bold]Transcript Analyzer[/bold]", border_style="cyan"))
@@ -441,17 +480,22 @@ def run_interactive_mode(
 
     console.print(f"\n[bold]Selected {len(selected_transcripts)} transcript(s)[/bold]")
 
-    # If single transcript, show which types are already done
+    # If single transcript, pass full analysis data for model-aware selection
     if len(selected_transcripts) == 1:
         t = selected_transcripts[0]
-        already_done = set(t["done_types"])
+        existing_analysis = t.get("analysis", {})
     else:
-        # For multiple, find common already-done (conservative)
-        already_done = set()
+        # For multiple transcripts, we can't show per-transcript model info
+        # Just show what's commonly done (conservative approach)
+        existing_analysis = {}
 
     # Select analysis types
     available_types = list_analysis_types()
-    selected_types = select_analysis_types_interactive(available_types, already_done)
+    selected_types = select_analysis_types_interactive(
+        available_types,
+        existing_analysis=existing_analysis,
+        current_model=model
+    )
 
     if not selected_types:
         console.print("[yellow]No analysis types selected.[/yellow]")
@@ -477,7 +521,8 @@ def run_interactive_mode(
                 analysis_types=selected_types,
                 model=model,
                 save=True,
-                skip_existing=True
+                skip_existing=True,
+                force=force
             )
 
             # Count successes
@@ -493,7 +538,8 @@ def run_interactive_mode(
 
 def run_batch_pending(
     analysis_types: list[str] | None = None,
-    model: str = DEFAULT_MODEL
+    model: str = DEFAULT_MODEL,
+    force: bool = False
 ):
     """Batch analyze all transcripts with pending analysis."""
     console.print(Panel("[bold]Batch Analysis - All Pending[/bold]", border_style="cyan"))
@@ -512,6 +558,8 @@ def run_batch_pending(
     console.print(f"[bold]Found {len(pending)} transcript(s) with pending analysis[/bold]")
     console.print(f"  Types: {', '.join(analysis_types)}")
     console.print(f"  Model: {model}")
+    if force:
+        console.print(f"  [yellow]Force mode: re-running all[/yellow]")
 
     if not questionary.confirm("Proceed?", default=True, style=custom_style).ask():
         console.print("[yellow]Cancelled.[/yellow]")
@@ -527,7 +575,8 @@ def run_batch_pending(
                 analysis_types=analysis_types,
                 model=model,
                 save=True,
-                skip_existing=True
+                skip_existing=True,
+                force=force
             )
 
             successes = sum(1 for r in results.values() if "error" not in r)
@@ -566,6 +615,8 @@ Examples:
     parser.add_argument("--recent", "-r", type=int, help="Only show N most recent transcripts")
     parser.add_argument("--model", "-m", default=DEFAULT_MODEL,
                         help=f"Gemini model (default: {DEFAULT_MODEL})")
+    parser.add_argument("--force", "-f", action="store_true",
+                        help="Force re-run analyses even if already done with same model")
     parser.add_argument("--no-save", action="store_true",
                         help="Don't save results to transcript file")
     parser.add_argument("--list-types", "-l", action="store_true",
@@ -615,7 +666,8 @@ Examples:
     if args.all_pending:
         run_batch_pending(
             analysis_types=args.types,
-            model=args.model
+            model=args.model,
+            force=args.force
         )
         return
 
@@ -645,7 +697,8 @@ Examples:
                 analysis_types=analysis_types,
                 model=args.model,
                 save=not args.no_save,
-                skip_existing=True
+                skip_existing=True,
+                force=args.force
             )
 
             console.print("\n[bold]Results:[/bold]")
@@ -665,7 +718,8 @@ Examples:
         pending_only=args.pending,
         decimal_filter=args.decimal,
         recent_limit=args.recent,
-        model=args.model
+        model=args.model,
+        force=args.force
     )
 
 

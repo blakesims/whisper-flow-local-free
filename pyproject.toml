@@ -20,6 +20,8 @@ dependencies = [
     "pywhispercpp>=1.0.0",
     "google-genai>=1.0.0",
     "pydantic>=2.0.0",
+    "scipy>=1.10.0",
+    "pyyaml>=6.0.0",
 ]
 
 [project.optional-dependencies]
@@ -28,7 +30,9 @@ dev = [
 ]
 
 [project.scripts]
-# KB workflow commands - usable from anywhere after `pip install -e .`
+# Main KB CLI - interactive menu
+kb = "kb.__main__:main"
+# Individual commands (also accessible via `kb <command>`)
 kb-transcribe = "kb.transcribe:main"
 kb-analyze = "kb.analyze:main"
 kb-capture = "kb.capture:main"

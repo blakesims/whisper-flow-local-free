@@ -25,6 +25,8 @@ from rich import print as rprint
 import questionary
 from questionary import Style
 
+from kb.__main__ import load_config, get_paths
+
 console = Console()
 
 # Custom style for questionary
@@ -38,9 +40,12 @@ custom_style = Style([
     ('instruction', 'fg:white'),
 ])
 
-# Knowledge base paths
-KB_ROOT = Path.home() / "Obsidian" / "zen-ai" / "knowledge-base" / "transcripts"
-CONFIG_DIR = KB_ROOT / "config"
+# Load paths from config
+_config = load_config()
+_paths = get_paths(_config)
+
+KB_ROOT = _paths["kb_output"]
+CONFIG_DIR = _paths["config_dir"]
 REGISTRY_PATH = CONFIG_DIR / "registry.json"
 
 

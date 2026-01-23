@@ -26,11 +26,18 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.core.transcription_service_cpp import get_transcription_service
 from app.utils.config_manager import ConfigManager
+from kb.__main__ import load_config, get_paths, DEFAULTS
 
-# Knowledge base paths
-KB_ROOT = Path.home() / "Obsidian" / "zen-ai" / "knowledge-base" / "transcripts"
-CONFIG_DIR = KB_ROOT / "config"
+# Load paths from config
+_config = load_config()
+_paths = get_paths(_config)
+
+KB_ROOT = _paths["kb_output"]
+CONFIG_DIR = _paths["config_dir"]
 REGISTRY_PATH = CONFIG_DIR / "registry.json"
+
+# Default whisper model from config
+DEFAULT_WHISPER_MODEL = _config.get("defaults", {}).get("whisper_model", DEFAULTS["defaults"]["whisper_model"])
 
 SUPPORTED_FORMATS = (
     '.wav', '.mp3', '.m4a', '.flac', '.ogg', '.opus', '.webm',

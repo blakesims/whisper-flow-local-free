@@ -29,11 +29,15 @@ from questionary import Style
 
 from kb.transcribe import transcribe_to_kb, load_registry
 from kb.cli import run_interactive_cli, custom_style
+from kb.__main__ import load_config, get_paths
 
 console = Console()
 
-# Cap recordings location
-CAP_RECORDINGS_DIR = Path.home() / "Library" / "Application Support" / "so.cap.desktop.dev" / "recordings"
+# Load from config
+_config = load_config()
+_paths = get_paths(_config)
+
+CAP_RECORDINGS_DIR = _paths["cap_recordings"]
 
 
 def get_cap_recordings() -> list[dict]:

@@ -28,15 +28,18 @@ from rich.panel import Panel
 from rich.prompt import Confirm
 
 from kb.transcribe import transcribe_to_kb, load_registry, save_registry
+from kb.__main__ import load_config, get_paths, DEFAULTS
 
 console = Console()
 
-# Default volume path
-DEFAULT_VOLUME_PATH = "/Volumes/BackupArchive/skool-videos"
+# Load from config
+_config = load_config()
+_paths = get_paths(_config)
+_defaults = _config.get("defaults", DEFAULTS["defaults"])
 
-# Default settings for auto-transcription
-DEFAULT_DECIMAL = "50.01.01"  # Skool classroom content
-DEFAULT_MODEL = "medium"
+DEFAULT_VOLUME_PATH = str(_paths["volume_sync"])
+DEFAULT_DECIMAL = _defaults.get("decimal", "50.01.01")
+DEFAULT_MODEL = _defaults.get("whisper_model", "medium")
 
 # Supported video formats
 VIDEO_FORMATS = ('.mp4', '.m4v', '.mov', '.webm', '.mkv', '.avi')
