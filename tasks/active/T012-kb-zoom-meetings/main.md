@@ -651,77 +651,160 @@ Use `kb.core.print_status()` for consistent output:
 - Implement segment merging and sorting by timestamp
 - Zoom folder discovery from `~/Documents/Zoom/`
 - Registry tracking of processed meeting folders (`transcribed_zoom_meetings` array)
-- Interactive: multi-select from unprocessed meetings list
-- Decimal selection: Alpha (50.03.01), Beta (50.03.02), Generic (50.04)
-- Skip failed participant files, continue with remaining
+- Interactive: single meeting selection (multi-select deferred to v2)
+- Reuse `select_decimal()` from cli.py for decimal selection
+- Skip failed participant files, continue with remaining (require at least 1 success)
+
+#### Critical: Transcription Flow
+
+**Zoom source does NOT use `transcribe_to_kb()` for transcription.** Instead:
+
+```
+1. Load WhisperCppService once (shared across all participant files)
+2. For each participant audio file:
+   - Call service.transcribe(audio_file)
+   - Extract segments from result["segments"]
+   - Tag each segment with speaker name and timestamps (t0/t1)
+3. Merge all segments, sort by start timestamp
+4. Format as transcript text: [MM:SS] Speaker: Text
+5. Call transcribe_to_kb(transcript_text=..., source_type="meeting")
+6. Manually update registry["transcribed_zoom_meetings"]
+```
+
+This follows the paste source pattern - `transcribe_to_kb()` is only used for saving, not transcribing.
 
 **Key Code** (`kb/sources/zoom.py`):
 ```python
-ZOOM_DIR = Path.home() / "Documents" / "Zoom"
+import re
+from pathlib import Path
+from datetime import datetime
+from rich.console import Console
+import questionary
 
-DECIMAL_OPTIONS = [
-    {"label": "Alpha cohort (50.03.01)", "value": "50.03.01"},
-    {"label": "Beta cohort (50.03.02)", "value": "50.03.02"},
-    {"label": "Generic zoom (50.04)", "value": "50.04"},
-]
+from app.core.transcription_service_cpp import get_transcription_service
+from app.utils.config_manager import ConfigManager
+from kb.core import (
+    transcribe_to_kb, load_registry, save_registry,
+    format_timestamp, print_status, KB_ROOT
+)
+from kb.cli import select_decimal, get_title, select_tags, custom_style
+
+console = Console()
+
+ZOOM_DIR = Path.home() / "Documents" / "Zoom"
+AUDIO_EXTENSIONS = {'.m4a', '.mp3', '.wav'}
+
+def parse_date_from_folder(folder_name: str) -> str:
+    """Extract date from Zoom folder name (YYYY-MM-DD HH.MM.SS ...)."""
+    match = re.match(r'^(\d{4}-\d{2}-\d{2})', folder_name)
+    if match:
+        return match.group(1)
+    return datetime.now().strftime("%Y-%m-%d")
 
 def extract_speaker_name(filename: str) -> str:
     """Extract speaker name from Zoom audio filename."""
-    match = re.match(r'audio([A-Za-z]+)(\d+)\.(m4a|mp3|wav)', filename)
+    # Pattern: audioBlakeSims21759316641.m4a -> Blake Sims
+    match = re.match(r'audio([A-Za-z]+)\d+\.\w+', filename)
     if match:
         name = match.group(1)
+        # Insert spaces before capitals: BlakeSims -> Blake Sims
         return re.sub(r'(?<!^)(?=[A-Z])', ' ', name)
-    return os.path.splitext(filename)[0]
+    # Fallback: use filename without extension
+    return Path(filename).stem
 
-def discover_meetings() -> list[dict]:
+def discover_meetings(zoom_dir: Path = ZOOM_DIR) -> list[dict]:
     """Find all Zoom meeting folders with Audio Record subdirs."""
+    if not zoom_dir.exists():
+        return []
+
     meetings = []
-    for folder in ZOOM_DIR.iterdir():
+    for folder in zoom_dir.iterdir():
         if not folder.is_dir():
             continue
         audio_dir = folder / "Audio Record"
-        if audio_dir.exists():
-            audio_files = list(audio_dir.glob("audio*.m4a"))
-            if audio_files:
-                meetings.append({
-                    "path": folder,
-                    "name": folder.name,
-                    "date": parse_date_from_folder(folder.name),
-                    "participants": [extract_speaker_name(f.name) for f in audio_files],
-                })
+        if not audio_dir.exists():
+            continue
+
+        # Find audio files (support multiple extensions)
+        audio_files = [f for f in audio_dir.iterdir()
+                       if f.suffix.lower() in AUDIO_EXTENSIONS
+                       and f.name.lower().startswith('audio')]
+
+        if audio_files:
+            meetings.append({
+                "path": folder,
+                "name": folder.name,
+                "date": parse_date_from_folder(folder.name),
+                "participants": [extract_speaker_name(f.name) for f in audio_files],
+                "audio_files": audio_files,
+            })
+
     return sorted(meetings, key=lambda m: m["date"], reverse=True)
 
-def transcribe_meeting(meeting_folder: Path, speakers: list[str] = None) -> dict:
-    """Transcribe all audio files and merge by timestamp."""
-    audio_dir = meeting_folder / "Audio Record"
-    audio_files = list(audio_dir.glob("audio*.m4a"))
+def get_unprocessed_meetings(zoom_dir: Path = ZOOM_DIR) -> list[dict]:
+    """Get meetings not yet in registry."""
+    registry = load_registry()
+    processed = set(registry.get("transcribed_zoom_meetings", []))
+
+    all_meetings = discover_meetings(zoom_dir)
+    return [m for m in all_meetings if str(m["path"]) not in processed]
+
+def transcribe_meeting(meeting: dict, model_name: str = "medium") -> tuple[str, list[str], int]:
+    """
+    Transcribe all audio files and merge by timestamp.
+
+    Returns: (transcript_text, speakers, duration_seconds)
+    """
+    config = ConfigManager()
+    service = get_transcription_service(config)
+    service.set_target_model_config(model_name, "cpu", "int8")
+
+    print_status(f"Loading model: {model_name}...")
+    service.load_model()
 
     all_segments = []
-    for audio_file in audio_files:
+    speakers = []
+    max_duration = 0
+
+    for audio_file in meeting["audio_files"]:
         speaker = extract_speaker_name(audio_file.name)
+        if speaker not in speakers:
+            speakers.append(speaker)
+
+        print_status(f"Transcribing {speaker}...")
         try:
-            result = transcribe_file(audio_file)
-            for seg in result["segments"]:
+            result = service.transcribe(str(audio_file))
+
+            # Extract segments with timestamps
+            for seg in result.get("segments", []):
+                start = seg.t0 / 100.0  # centiseconds to seconds
+                end = seg.t1 / 100.0
                 all_segments.append({
                     "speaker": speaker,
-                    "start": seg.t0 / 100.0,  # centiseconds to seconds
-                    "end": seg.t1 / 100.0,
+                    "start": start,
+                    "end": end,
                     "text": seg.text.strip(),
                 })
+                max_duration = max(max_duration, end)
+
         except Exception as e:
             console.print(f"[yellow]Warning: Failed {speaker}: {e}[/yellow]")
             continue
 
-    all_segments.sort(key=lambda s: s["start"])
-    return format_transcript(all_segments)
+    if not all_segments:
+        raise RuntimeError("No segments transcribed from any participant")
 
-def format_transcript(segments: list[dict]) -> str:
-    """Format segments as plain text transcript."""
+    # Sort by start timestamp
+    all_segments.sort(key=lambda s: s["start"])
+
+    # Format transcript
     lines = []
-    for seg in segments:
+    for seg in all_segments:
         ts = format_timestamp(seg["start"])
         lines.append(f"[{ts}] {seg['speaker']}: {seg['text']}")
-    return "\n".join(lines)
+
+    transcript_text = "\n".join(lines)
+    return transcript_text, speakers, int(max_duration)
 ```
 
 **Non-Interactive Mode**:
@@ -730,7 +813,40 @@ kb transcribe zoom --list                              # Show unprocessed
 kb transcribe zoom "2024-03-11 21.54..." --decimal 50.03.01 --title "Alpha S5"
 ```
 
+**CLI Arguments**:
+```python
+parser.add_argument("folder_name", nargs="?", help="Zoom meeting folder name")
+parser.add_argument("--decimal", "-d", help="Decimal category (required for non-interactive)")
+parser.add_argument("--title", "-t", help="Title for the transcript")
+parser.add_argument("--tags", nargs="+", help="Tags")
+parser.add_argument("--analyze", "-a", nargs="*", help="Run analysis after transcription")
+parser.add_argument("--list", action="store_true", help="List unprocessed meetings")
+parser.add_argument("--zoom-dir", help="Custom Zoom recordings directory")
+parser.add_argument("--model", "-m", default="medium", help="Whisper model")
+```
+
+**Registry Update**:
+```python
+# After successful transcription
+registry = load_registry()
+if "transcribed_zoom_meetings" not in registry:
+    registry["transcribed_zoom_meetings"] = []
+registry["transcribed_zoom_meetings"].append(str(meeting["path"]))
+save_registry(registry)
+```
+
 **Dependencies**: Phase 0
+
+#### Implementation Order
+
+1. Create `kb/sources/zoom.py` skeleton with imports and constants
+2. Implement `parse_date_from_folder()` and `extract_speaker_name()`
+3. Implement `discover_meetings()` and `get_unprocessed_meetings()`
+4. Implement `transcribe_meeting()` - test with one real meeting
+5. Implement `run_interactive()` - meeting selection, decimal/title prompts
+6. Implement `main()` for non-interactive mode
+7. Update SOURCES registry to remove placeholder flag
+8. Test both modes
 
 ---
 
@@ -774,13 +890,19 @@ When speakers talk simultaneously, segments will overlap. Use simple interleavin
 Skip failed participant files and continue with remaining participants. Log warning but don't abort the meeting transcription.
 
 ### Memory Efficiency
-For long meetings, transcribe one file at a time and release model memory between files:
+For long meetings, transcribe one file at a time with a single shared model instance:
 ```python
-for audio_file, speaker in zip(files, speakers):
-    segments = transcribe_file(audio_file, speaker)
-    all_segments.extend(segments)
-    gc.collect()  # Free memory before next file
+service = get_transcription_service(config)
+service.load_model()  # Load once
+
+for audio_file in audio_files:
+    result = service.transcribe(audio_file)
+    # Process segments...
+
+# Model stays loaded for speed - unloaded when service goes out of scope
 ```
+
+Note: `gc.collect()` is not effective here since the model remains referenced by the service instance. This is intentional for performance.
 
 ## Deferred to v2
 - `--all` batch processing mode
@@ -826,6 +948,14 @@ for audio_file, speaker in zip(files, speakers):
   - Added paste source for Google Meet clipboard import
   - Standardized transcript format: `[MM:SS]` or `[HH:MM:SS]` (no markdown bold)
   - Breaking change to CLI structure accepted
+- 2025-01-23: Phase 1 review - clarified transcription flow:
+  - Zoom source manages its own WhisperCppService (doesn't use transcribe_to_kb for transcription)
+  - Uses transcribe_to_kb() only for saving with transcript_text parameter (like paste source)
+  - Simplified to single meeting selection (multi-select deferred)
+  - Reuse select_decimal() from cli.py instead of custom options
+  - Expanded audio file pattern to support .m4a, .mp3, .wav
+  - Added parse_date_from_folder() function
+  - Removed gc.collect() (not effective with model loaded)
 - 2025-01-23: Phase 0 deep review - identified 3 critical issues, 8 gaps:
   - **Critical**: Must create `kb/core.py` for shared utilities (`transcribe_to_kb()`, registry functions)
   - **Critical**: Must update `pyproject.toml` to remove old entry points
