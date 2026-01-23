@@ -146,24 +146,25 @@ def detect_source_type(file_path: str, explicit_type: str | None = None) -> str:
 # --- LocalFileCopy for network volumes ---
 
 class LocalFileCopy:
-    """Context manager to extract audio from network files for faster processing."""
+    """Context manager to extract audio from video files and handle network volumes."""
 
     def __init__(self, file_path: str):
         self.original_path = file_path
         self.local_path = None
         self.temp_dir = None
-        self.needs_extraction = is_network_path(file_path)
+        ext = os.path.splitext(file_path)[1].lower()
+        self.is_video = ext in VIDEO_FORMATS
+        self.is_network = is_network_path(file_path)
 
     def __enter__(self) -> str:
-        if not self.needs_extraction:
+        # Video files always need audio extraction (whisper can't read video containers)
+        # Network files need local copy for performance
+        if not self.is_video and not self.is_network:
             return self.original_path
-
-        ext = os.path.splitext(self.original_path)[1].lower()
-        is_video = ext in VIDEO_FORMATS
 
         self.temp_dir = tempfile.mkdtemp(prefix='kb_whisper_')
 
-        if is_video:
+        if self.is_video:
             self.local_path = os.path.join(self.temp_dir, 'audio.wav')
             size_mb = os.path.getsize(self.original_path) / (1024 * 1024)
             print_status(f"Extracting audio from video ({size_mb:.1f} MB)...")
@@ -325,7 +326,21 @@ def transcribe_to_kb(
                 progress_callback=progress_callback
             )
 
-        transcript_text = result.get("text", "").strip()
+        # Format transcript with timestamps from segments
+        segments = result.get("segments", [])
+        if segments:
+            lines = []
+            for seg in segments:
+                # pywhispercpp segments have t0/t1 in centiseconds
+                start_seconds = seg.t0 / 100.0
+                ts = format_timestamp(start_seconds)
+                text = seg.text.strip()
+                if text:
+                    lines.append(f"[{ts}] {text}")
+            transcript_text = "\n".join(lines)
+        else:
+            # Fallback if no segments (shouldn't happen)
+            transcript_text = result.get("text", "").strip()
 
         if not transcript_text:
             raise RuntimeError("No transcription result")
