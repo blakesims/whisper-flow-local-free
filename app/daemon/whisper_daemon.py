@@ -107,6 +107,9 @@ class WhisperDaemon(QObject):
         self._cancelled_recordings_dir = os.path.expanduser("~/Documents/WhisperRecordings")
         os.makedirs(self._cancelled_recordings_dir, exist_ok=True)
 
+        # Track cancelled recording for undo functionality
+        self._cancelled_audio_path = None
+
         # Connect state changes to indicator
         self.state_changed.connect(self._update_indicator)
 
@@ -129,6 +132,7 @@ class WhisperDaemon(QObject):
         self.indicator.post_processing_toggled.connect(self._on_post_processing_toggled)
         self.indicator.input_device_changed.connect(self._on_input_device_changed)
         self.indicator.quit_requested.connect(self._on_quit_requested)
+        self.indicator.undo_cancel_requested.connect(self._on_undo_cancel)
 
     @Slot(str)
     def _on_model_change_requested(self, model_name: str):
@@ -384,10 +388,34 @@ class WhisperDaemon(QObject):
         self._cancel_recording = True
         self.audio_recorder.stop_recording()
 
+    @Slot()
+    def _on_undo_cancel(self):
+        """Handle undo request - transcribe the cancelled recording"""
+        if not self._cancelled_audio_path or not os.path.exists(self._cancelled_audio_path):
+            print("[Daemon] No cancelled recording to undo")
+            self.indicator.show_idle()
+            return
+
+        print(f"[Daemon] Undo cancel - transcribing: {self._cancelled_audio_path}")
+        self._current_audio_path = self._cancelled_audio_path
+        self._cancelled_audio_path = None
+        self._is_temp_file = True
+        self._transcribe_audio()
+
     def _start_recording(self):
         """Start audio recording"""
         self._cancel_recording = False  # Reset cancel flag
         self._is_temp_file = True  # Recording creates temp file
+
+        # Clean up any pending cancelled audio (undo timed out)
+        if self._cancelled_audio_path and os.path.exists(self._cancelled_audio_path):
+            try:
+                os.remove(self._cancelled_audio_path)
+                print(f"[Daemon] Cleaned up expired cancelled recording: {self._cancelled_audio_path}")
+            except Exception as e:
+                print(f"[Daemon] Could not clean up cancelled recording: {e}")
+        self._cancelled_audio_path = None
+
         if not self._model_loaded:
             print("[Daemon] Model not loaded, cannot record")
             self.error_occurred.emit("Model not loaded")
@@ -426,9 +454,14 @@ class WhisperDaemon(QObject):
         if audio_path_or_message and os.path.exists(audio_path_or_message):
             # Check if recording was cancelled
             if getattr(self, '_cancel_recording', False):
-                self._save_cancelled_recording(audio_path_or_message)
                 self._cancel_recording = False
+                # Keep the audio file for potential undo
+                self._cancelled_audio_path = audio_path_or_message
+                self._is_temp_file = True
+                print(f"[Daemon] Recording cancelled, undo available for 10s")
                 self.state = DaemonState.IDLE
+                # Show cancelled state with undo option
+                self.indicator.show_cancelled()
             else:
                 self._current_audio_path = audio_path_or_message
                 self._transcribe_audio()
@@ -461,6 +494,7 @@ class WhisperDaemon(QObject):
     def _on_recorder_error(self, error_msg: str):
         """Handle recorder error"""
         print(f"[Daemon] Recorder error: {error_msg}")
+        self.indicator.play_error_sound()
         self.error_occurred.emit(error_msg)
         self.state = DaemonState.ERROR
         # Try to recover after a delay

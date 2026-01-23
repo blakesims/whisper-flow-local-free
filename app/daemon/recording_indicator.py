@@ -14,7 +14,7 @@ import os
 import json
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QLabel, QApplication,
-    QGraphicsOpacityEffect, QMenu, QGraphicsDropShadowEffect
+    QGraphicsOpacityEffect, QMenu, QGraphicsDropShadowEffect, QPushButton
 )
 from PySide6.QtCore import (
     Qt, QTimer, QPropertyAnimation, QEasingCurve,
@@ -28,6 +28,8 @@ from PySide6.QtGui import (
 
 # macOS system sounds
 SOUND_TOGGLE = "/System/Library/Sounds/Pop.aiff"
+SOUND_ERROR = "/System/Library/Sounds/Basso.aiff"
+SOUND_CANCEL = "/System/Library/Sounds/Purr.aiff"
 
 # Settings file for position persistence
 SETTINGS_DIR = os.path.expanduser("~/Library/Application Support/WhisperTranscribeUI")
@@ -284,11 +286,13 @@ class RecordingIndicator(QWidget):
     post_processing_toggled = Signal(bool)  # True = enabled
     input_device_changed = Signal(object)  # device index or None for default
     quit_requested = Signal()
+    undo_cancel_requested = Signal()  # User wants to transcribe cancelled recording
 
     # State constants
     STATE_IDLE = "idle"
     STATE_RECORDING = "recording"
     STATE_TRANSCRIBING = "transcribing"
+    STATE_CANCELLED = "cancelled"  # Showing undo option
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -343,6 +347,14 @@ class RecordingIndicator(QWidget):
         self._is_hovered = False
         self.setMouseTracking(True)
 
+        # Undo timer (10 seconds to undo a cancelled recording)
+        self._undo_timer = QTimer(self)
+        self._undo_timer.setSingleShot(True)
+        self._undo_timer.timeout.connect(self._on_undo_timeout)
+        self._undo_countdown = 10
+        self._countdown_timer = QTimer(self)
+        self._countdown_timer.timeout.connect(self._update_undo_countdown)
+
         # Start in idle state
         self._set_idle_state()
 
@@ -373,6 +385,29 @@ class RecordingIndicator(QWidget):
         self.label.setStyleSheet(f"color: {COLORS['text'].name()};")
         self.label.hide()
         self._layout.addWidget(self.label)
+
+        # Undo button (for cancelled state)
+        self.undo_button = QPushButton("Undo")
+        self.undo_button.setFont(QFont(".AppleSystemUIFont", 10, QFont.Medium))
+        self.undo_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['blue'].name()};
+                color: {COLORS['bg_dark'].name()};
+                border: none;
+                border-radius: 8px;
+                padding: 2px 10px;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['cyan'].name()};
+            }}
+            QPushButton:pressed {{
+                background-color: {COLORS['purple'].name()};
+            }}
+        """)
+        self.undo_button.setCursor(Qt.PointingHandCursor)
+        self.undo_button.clicked.connect(self._on_undo_clicked)
+        self.undo_button.hide()
+        self._layout.addWidget(self.undo_button)
 
         self.setLayout(self._layout)
 
@@ -427,6 +462,7 @@ class RecordingIndicator(QWidget):
         self.spinner.stop_spinning()
         self.waveform.hide()
         self.label.hide()
+        self.undo_button.hide()
 
         # Small pill size (no inner elements shown)
         self.setFixedHeight(20)
@@ -496,6 +532,61 @@ class RecordingIndicator(QWidget):
         self._follow_cursor_timer.stop()
         self.update()
 
+    def _set_cancelled_state(self):
+        """Set to cancelled state - show undo option for 10 seconds"""
+        self._state = self.STATE_CANCELLED
+        play_sound(SOUND_CANCEL)
+
+        # Hide other elements
+        self.recording_dot.hide()
+        self.recording_dot.stop_pulsing()
+        self.spinner.hide()
+        self.spinner.stop_spinning()
+        self.waveform.hide()
+
+        # Show cancelled label and undo button
+        self._undo_countdown = 10
+        self.label.setText("Cancelled (10s)")
+        self.label.setStyleSheet(f"color: {COLORS['text_dim'].name()};")
+        self.label.show()
+        self.undo_button.show()
+
+        # Expand for undo button
+        self.setFixedHeight(28)
+        self.setMinimumWidth(160)
+        self.setMaximumWidth(200)
+        self.adjustSize()
+
+        # Reposition for new size
+        self._position_default()
+
+        # Start timers
+        self._undo_timer.start(10000)  # 10 seconds
+        self._countdown_timer.start(1000)  # Update every second
+
+        self._follow_cursor_timer.stop()
+        self.update()
+
+    def _on_undo_clicked(self):
+        """Handle undo button click"""
+        self._undo_timer.stop()
+        self._countdown_timer.stop()
+        self.undo_cancel_requested.emit()
+        # Daemon will transition to transcribing state
+
+    def _on_undo_timeout(self):
+        """Undo timed out - return to idle"""
+        self._countdown_timer.stop()
+        self._set_idle_state()
+
+    def _update_undo_countdown(self):
+        """Update the countdown display"""
+        self._undo_countdown -= 1
+        if self._undo_countdown > 0:
+            self.label.setText(f"Cancelled ({self._undo_countdown}s)")
+        else:
+            self._countdown_timer.stop()
+
     def _check_screen_change(self):
         """Check if we should move to a different screen (follows cursor)"""
         cursor_pos = QCursor.pos()
@@ -525,8 +616,20 @@ class RecordingIndicator(QWidget):
 
     def show_idle(self):
         """Called by daemon to return to idle state"""
+        # Stop any undo timers if returning to idle
+        self._undo_timer.stop()
+        self._countdown_timer.stop()
         self._set_idle_state()
         self._ensure_visible()
+
+    def show_cancelled(self):
+        """Called by daemon to show cancelled state with undo option"""
+        self._set_cancelled_state()
+        self._ensure_visible()
+
+    def play_error_sound(self):
+        """Play error sound (recording failed to start)"""
+        play_sound(SOUND_ERROR)
 
     def hide_indicator(self):
         """Legacy method - now just returns to idle"""
