@@ -25,14 +25,12 @@ A larger floating window with more controls. Uses **faster-whisper** library.
 **Note**: The daemon mode is the actively used and developed mode. The full UI mode is maintained but secondary.
 
 ### Knowledge Base Workflow (`kb/`)
-Standalone scripts for archiving video content to a structured JSON knowledge base with LLM analysis.
-- **Location**: `kb/` directory
+Modular CLI for transcribing content to structured JSON knowledge base.
+- **Entry**: `kb` (interactive menu) or `kb transcribe <source>`
+- **Sources**: `file`, `cap`, `volume`, `zoom`, `paste` (handlers in `kb/sources/`)
+- **Shared utils**: `kb/core.py` (transcribe_to_kb, registry, format_timestamp)
+- **Analysis**: `kb analyze` for LLM analysis (Gemini API)
 - **Output**: `~/Obsidian/zen-ai/knowledge-base/transcripts/`
-- **Entry points**:
-  - `python kb/transcribe.py` - Core transcription to JSON
-  - `python kb/analyze.py` - LLM analysis (Gemini API)
-  - `python kb/capture.py` - Cap recordings batch capture
-  - `python kb/volume_sync.py` - Auto-transcribe from mounted volumes
 
 ## Key Rules
 
@@ -40,6 +38,13 @@ Standalone scripts for archiving video content to a structured JSON knowledge ba
 - **Network volumes**: Extract audio via ffmpeg, never copy whole video files
 - **Transcription quality**: Default to "medium" Whisper model for quality
 - **Venv**: `source .venv/bin/activate && pip install -r requirements.txt`
+
+### KB Module Rules
+- **KB CLI**: Use `kb transcribe <source>` - old `kb capture`/`kb sync` commands removed
+- **KB Sources**: Add new handlers to `kb/sources/`, register in `__init__.py` SOURCES dict
+- **KB Imports**: Always import from `kb/core.py` - never duplicate registry/transcribe functions
+- **Transcripts**: Format as `[MM:SS] Speaker: Text` - no markdown bold (saves LLM tokens)
+- **Pre-built transcripts**: Use `transcribe_to_kb(transcript_text=...)` for paste/zoom-style sources
 
 ## Common Development Commands
 
