@@ -22,8 +22,8 @@ if [ -f "$PID_FILE" ] && ps -p "$(cat "$PID_FILE")" > /dev/null 2>&1; then
     echo "Whisper daemon stopped"
 else
     # Daemon is not running - start it
-    "$SCRIPT_DIR/whisper-daemon.sh" start > /dev/null 2>&1 &
-    sleep 2
+    # Note: whisper-daemon.sh already backgrounds the daemon process internally
+    "$SCRIPT_DIR/whisper-daemon.sh" start > /dev/null 2>&1
     if [ -f "$PID_FILE" ] && ps -p "$(cat "$PID_FILE")" > /dev/null 2>&1; then
         echo "Whisper daemon started"
     else
