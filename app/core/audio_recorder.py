@@ -38,8 +38,21 @@ class AudioRecorder(QThread):
         self.device = device
 
     @staticmethod
-    def get_input_devices():
+    def refresh_devices():
+        """Force refresh of audio device list (handles hot-plug)."""
+        try:
+            # Reset sounddevice to re-query PortAudio devices
+            sd._terminate()
+            sd._initialize()
+            print("AudioRecorder: Device list refreshed")
+        except Exception as e:
+            print(f"AudioRecorder: Could not refresh devices: {e}")
+
+    @staticmethod
+    def get_input_devices(refresh=False):
         """Get list of available input devices as (index, name) tuples."""
+        if refresh:
+            AudioRecorder.refresh_devices()
         devices = []
         for i, dev in enumerate(sd.query_devices()):
             if dev['max_input_channels'] > 0:
@@ -47,13 +60,81 @@ class AudioRecorder(QThread):
         return devices
 
     @staticmethod
-    def get_default_input_device():
+    def get_default_input_device(refresh=False):
         """Get the default input device index and name."""
+        if refresh:
+            AudioRecorder.refresh_devices()
         try:
             dev = sd.query_devices(kind='input')
             return (dev['index'] if 'index' in dev else None, dev['name'])
         except Exception:
             return (None, "Unknown")
+
+    def _find_working_device(self):
+        """Find a working input device with fallback logic.
+
+        Priority:
+        1. Configured device (self.device) if it exists and works
+        2. System default input device
+        3. Any available input device
+
+        Returns device index/name or None if nothing works.
+        """
+        # Refresh device list to handle hot-plug
+        AudioRecorder.refresh_devices()
+
+        available_devices = AudioRecorder.get_input_devices()
+        if not available_devices:
+            print("AudioRecorder: No input devices available!")
+            return None
+
+        available_indices = {idx for idx, name in available_devices}
+        available_names = {name for idx, name in available_devices}
+
+        # Try 1: Configured device
+        if self.device is not None:
+            # Check if configured device is available
+            if isinstance(self.device, int) and self.device in available_indices:
+                try:
+                    sd.check_input_settings(device=self.device, channels=self.channels,
+                                           samplerate=self.sample_rate, dtype=self.dtype)
+                    print(f"AudioRecorder: Using configured device index {self.device}")
+                    return self.device
+                except Exception as e:
+                    print(f"AudioRecorder: Configured device {self.device} failed: {e}")
+            elif isinstance(self.device, str) and self.device in available_names:
+                try:
+                    sd.check_input_settings(device=self.device, channels=self.channels,
+                                           samplerate=self.sample_rate, dtype=self.dtype)
+                    print(f"AudioRecorder: Using configured device '{self.device}'")
+                    return self.device
+                except Exception as e:
+                    print(f"AudioRecorder: Configured device '{self.device}' failed: {e}")
+            else:
+                print(f"AudioRecorder: Configured device {self.device} not found in available devices")
+
+        # Try 2: System default (device=None)
+        try:
+            sd.check_input_settings(device=None, channels=self.channels,
+                                   samplerate=self.sample_rate, dtype=self.dtype)
+            default_idx, default_name = AudioRecorder.get_default_input_device()
+            print(f"AudioRecorder: Using system default device: {default_name}")
+            return None  # None means system default in sounddevice
+        except Exception as e:
+            print(f"AudioRecorder: System default device failed: {e}")
+
+        # Try 3: Any available input device
+        for idx, name in available_devices:
+            try:
+                sd.check_input_settings(device=idx, channels=self.channels,
+                                       samplerate=self.sample_rate, dtype=self.dtype)
+                print(f"AudioRecorder: Falling back to device: {name} (index {idx})")
+                return idx
+            except Exception as e:
+                print(f"AudioRecorder: Device {name} (index {idx}) failed: {e}")
+
+        print("AudioRecorder: No working input device found!")
+        return None
 
     def _audio_callback(self, indata, frames, time_info, status):
         if status:
@@ -98,16 +179,22 @@ class AudioRecorder(QThread):
         self._is_paused = False # Ensure recording starts in unpaused state
 
         try:
-            # It's good practice to check if the desired settings are supported.
-            sd.check_input_settings(device=self.device, channels=self.channels, 
-                                    samplerate=self.sample_rate, dtype=self.dtype)
+            # Find a working device with hot-plug support and fallback
+            working_device = self._find_working_device()
+            if working_device is None and self.device is not None:
+                # _find_working_device returns None for system default, but also if nothing works
+                # Check if we actually have any devices
+                if not AudioRecorder.get_input_devices():
+                    self.error_signal.emit("No audio input devices available")
+                    self._is_recording = False
+                    return
 
             self._audio_stream = sd.InputStream(
                 samplerate=self.sample_rate,
                 channels=self.channels,
-                device=self.device,
+                device=working_device,
                 dtype=self.dtype,
-                blocksize=self.chunk_size, 
+                blocksize=self.chunk_size,
                 callback=self._audio_callback
             )
             self._audio_stream.start() # This starts invoking the callback
