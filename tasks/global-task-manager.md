@@ -6,6 +6,7 @@
 | :--- | :---- | :---- | :--- | :---- | :--- | :---- | :---- |
 | T010 | WhisperX Speaker Diarization | 2 | 0/5 | PLANNING | - | task-documentation | [main.md](active/T010-whisperx-diarization/main.md) |
 | T011 | Knowledge Base Capture System | 1 | 6/6 | ACTIVE | - | - | [main.md](active/T011-knowledge-base-capture/main.md) |
+| T012 | KB Transcription Architecture + Zoom | 2 | 0/3 | PLANNING | - | task-documentation | [main.md](active/T012-kb-zoom-meetings/main.md) |
 
 ## Notes
 - Priority: 1=Highest, 5=Lowest
