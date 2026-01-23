@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """
-Cap Recordings Capture Script
-
-Lists Cap recordings and allows multi-select transcription to knowledge base.
+Cap Source - Batch process Cap recordings.
 
 Usage:
-    python kb/capture.py           # Interactive selection
-    python kb/capture.py --list    # Just list recordings
+    kb transcribe cap           # Interactive selection
+    kb transcribe cap --list    # Just list recordings
 """
 
 import sys
@@ -16,9 +14,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 from datetime import datetime
-
-# Add project root to path for app.* imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import argparse
 
 from rich.console import Console
 from rich.table import Table
@@ -27,11 +23,21 @@ from rich.prompt import Confirm
 import questionary
 from questionary import Style
 
-from kb.transcribe import transcribe_to_kb, load_registry
-from kb.cli import run_interactive_cli, custom_style
+from kb.core import (
+    transcribe_to_kb, load_registry, print_status
+)
 from kb.__main__ import load_config, get_paths
 
 console = Console()
+
+custom_style = Style([
+    ('qmark', 'fg:cyan bold'),
+    ('question', 'fg:white bold'),
+    ('answer', 'fg:green bold'),
+    ('pointer', 'fg:cyan bold'),
+    ('highlighted', 'fg:cyan bold'),
+    ('selected', 'fg:green'),
+])
 
 # Load from config
 _config = load_config()
@@ -211,10 +217,11 @@ def transcribe_cap_recording(recording: dict, metadata: dict) -> bool:
             tags=metadata["tags"],
             recorded_at=metadata.get("date") or recording["date"].strftime("%Y-%m-%d"),
             speakers=metadata.get("speakers"),
+            source_type="cap",  # Mark as cap source type
             model_name=metadata.get("model", "medium")
         )
 
-        console.print(f"[green]done Transcribed: {result['id']}[/green]")
+        console.print(f"[green]Transcribed: {result['id']}[/green]")
         return True
 
     except Exception as e:
@@ -225,12 +232,9 @@ def transcribe_cap_recording(recording: dict, metadata: dict) -> bool:
             os.unlink(temp_audio)
 
 
-def main():
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Transcribe Cap recordings to knowledge base")
-    parser.add_argument("--list", "-l", action="store_true", help="List recordings only")
-    args = parser.parse_args()
+def run_interactive():
+    """Interactive mode for Cap recordings."""
+    from kb.cli import select_decimal, select_tags
 
     console.print(Panel("[bold]Cap Recordings Capture[/bold]", border_style="cyan"))
 
@@ -239,10 +243,6 @@ def main():
     if not recordings:
         console.print("[yellow]No Cap recordings found.[/yellow]")
         console.print(f"[dim]Looking in: {CAP_RECORDINGS_DIR}[/dim]")
-        return
-
-    if args.list:
-        list_recordings()
         return
 
     # Show table first
@@ -257,14 +257,10 @@ def main():
 
     console.print(f"\n[bold]Selected {len(selected)} recording(s)[/bold]")
 
-    # Get metadata for all (using first recording's name as default title)
-    # For Cap recordings, default to 50.00.01 (raw captures)
+    # Get metadata for all
     console.print("\n[bold cyan]Configure transcription settings:[/bold cyan]")
 
     registry = load_registry()
-
-    # Simplified metadata collection for batch
-    from kb.cli import select_decimal, select_tags
 
     decimal = select_decimal(registry)
     tags = select_tags(registry)
@@ -301,6 +297,20 @@ def main():
             success += 1
 
     console.print(f"\n[bold green]Done! Transcribed {success}/{len(selected)} recordings.[/bold green]")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Transcribe Cap recordings to knowledge base")
+    parser.add_argument("--list", "-l", action="store_true", help="List recordings only")
+    args = parser.parse_args()
+
+    if args.list:
+        console.print(Panel("[bold]Cap Recordings[/bold]", border_style="cyan"))
+        list_recordings()
+        return
+
+    # Default to interactive mode
+    run_interactive()
 
 
 if __name__ == "__main__":

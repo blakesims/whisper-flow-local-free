@@ -35,14 +35,12 @@ kb = "kb.__main__:main"
 # Individual commands (also accessible via `kb <command>`)
 kb-transcribe = "kb.transcribe:main"
 kb-analyze = "kb.analyze:main"
-kb-capture = "kb.capture:main"
-kb-sync = "kb.volume_sync:main"
 
 [project.urls]
 "Homepage" = "https://github.com/blakesims/whisper-transcribe-ui"
 
 [tool.setuptools]
-packages = ["kb", "app", "app.core", "app.daemon", "app.utils"]
+packages = ["kb", "kb.sources", "app", "app.core", "app.daemon", "app.utils"]
 py-modules = ["transcribe_file"]
 
 [tool.setuptools.package-data]

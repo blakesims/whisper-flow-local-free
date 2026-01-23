@@ -25,7 +25,8 @@ from rich import print as rprint
 import questionary
 from questionary import Style
 
-from kb.__main__ import load_config, get_paths
+# Import from core to avoid duplication
+from kb.core import load_registry, save_registry, KB_ROOT, CONFIG_DIR
 
 console = Console()
 
@@ -39,30 +40,6 @@ custom_style = Style([
     ('selected', 'fg:green'),
     ('instruction', 'fg:white'),
 ])
-
-# Load paths from config
-_config = load_config()
-_paths = get_paths(_config)
-
-KB_ROOT = _paths["kb_output"]
-CONFIG_DIR = _paths["config_dir"]
-REGISTRY_PATH = CONFIG_DIR / "registry.json"
-
-
-def load_registry() -> dict:
-    """Load the registry.json file."""
-    import json
-    if REGISTRY_PATH.exists():
-        with open(REGISTRY_PATH, 'r') as f:
-            return json.load(f)
-    return {"decimals": {}, "tags": [], "transcribed_files": []}
-
-
-def save_registry(registry: dict):
-    """Save the registry.json file."""
-    import json
-    with open(REGISTRY_PATH, 'w') as f:
-        json.dump(registry, f, indent=2)
 
 
 def select_decimal(registry: dict) -> str:

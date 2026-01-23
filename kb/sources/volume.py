@@ -1,33 +1,33 @@
 #!/usr/bin/env python3
 """
-Volume Auto-Transcriber
+Volume Source - Auto-transcribe from mounted volumes.
 
 Scans a mounted volume for videos and transcribes any not already in the ledger.
 Runs without manual input - uses filename as title and configured defaults.
 
 Usage:
-    python kb/volume_sync.py                    # Scan and transcribe new files
-    python kb/volume_sync.py --list             # List files and their status
-    python kb/volume_sync.py --dry-run          # Show what would be transcribed
-    python kb/volume_sync.py --decimal 50.01.01 # Override default decimal
+    kb transcribe volume                    # Scan and transcribe new files
+    kb transcribe volume --list             # List files and their status
+    kb transcribe volume --dry-run          # Show what would be transcribed
+    kb transcribe volume --decimal 50.01.01 # Override default decimal
 """
 
 import sys
 import os
-import json
 import re
+import argparse
 from pathlib import Path
 from datetime import datetime
-
-# Add project root to path for app.* imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich.prompt import Confirm
 
-from kb.transcribe import transcribe_to_kb, load_registry, save_registry
+from kb.core import (
+    transcribe_to_kb, load_registry, save_registry, print_status,
+    VIDEO_FORMATS
+)
 from kb.__main__ import load_config, get_paths, DEFAULTS
 
 console = Console()
@@ -40,9 +40,6 @@ _defaults = _config.get("defaults", DEFAULTS["defaults"])
 DEFAULT_VOLUME_PATH = str(_paths["volume_sync"])
 DEFAULT_DECIMAL = _defaults.get("decimal", "50.01.01")
 DEFAULT_MODEL = _defaults.get("whisper_model", "medium")
-
-# Supported video formats
-VIDEO_FORMATS = ('.mp4', '.m4v', '.mov', '.webm', '.mkv', '.avi')
 
 
 def get_volume_videos(volume_path: str) -> list[dict]:
@@ -176,22 +173,26 @@ def sync_volume(
                 title=title,
                 tags=tags or [],
                 recorded_at=video["date"].strftime("%Y-%m-%d"),
+                source_type="video",  # Videos from volume
                 model_name=model
             )
 
-            console.print(f"[green]done Saved: {result['id']}[/green]")
+            console.print(f"[green]Saved: {result['id']}[/green]")
             success += 1
 
         except Exception as e:
-            console.print(f"[red]x Error: {e}[/red]")
+            console.print(f"[red]Error: {e}[/red]")
             # Continue with next file
 
     return success
 
 
-def main():
-    import argparse
+def run_interactive():
+    """Interactive mode - same as main with default args."""
+    main()
 
+
+def main():
     parser = argparse.ArgumentParser(description="Auto-transcribe videos from mounted volume")
     parser.add_argument("--volume", "-v", default=DEFAULT_VOLUME_PATH,
                         help=f"Volume path (default: {DEFAULT_VOLUME_PATH})")

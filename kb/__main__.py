@@ -99,23 +99,13 @@ CAP_RECORDINGS_DIR = _paths["cap_recordings"]
 COMMANDS = {
     "transcribe": {
         "label": "Transcribe",
-        "description": "Transcribe video/audio to Knowledge Base JSON",
+        "description": "Transcribe audio/video to Knowledge Base (file, cap, volume, paste)",
         "module": "kb.transcribe",
     },
     "analyze": {
         "label": "Analyze",
         "description": "Run LLM analysis on existing transcript",
         "module": "kb.analyze",
-    },
-    "capture": {
-        "label": "Capture",
-        "description": "Batch capture from Cap recordings",
-        "module": "kb.capture",
-    },
-    "sync": {
-        "label": "Sync",
-        "description": "Auto-transcribe from mounted volumes",
-        "module": "kb.volume_sync",
     },
 }
 
@@ -286,14 +276,6 @@ def run_command(command: str, args: list[str], interactive: bool = False):
 
     cmd_info = COMMANDS[command]
     module = importlib.import_module(cmd_info["module"])
-
-    # Special handling for transcribe in interactive mode
-    if command == "transcribe" and interactive and not args:
-        file_path = prompt_for_file()
-        if not file_path:
-            console.print("[yellow]Cancelled.[/yellow]")
-            return
-        args = ["--interactive", file_path]
 
     # Replace sys.argv so the subcommand sees correct args
     sys.argv = [command] + args

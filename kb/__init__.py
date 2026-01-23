@@ -7,18 +7,20 @@ Usage:
     # Import from the package
     from kb import transcribe_to_kb, run_interactive_cli, analyze_transcript_file
 
-    # Or run modules directly
-    python kb/transcribe.py /path/to/file.mp4
-    python kb/analyze.py --list-types
-    python kb/capture.py --list
-    python kb/volume_sync.py --dry-run
+    # Or run via CLI
+    kb                              # Interactive main menu
+    kb transcribe                   # Source submenu (file, cap, volume, paste, zoom)
+    kb transcribe file <path>       # Transcribe single file
+    kb transcribe cap --list        # List Cap recordings
+    kb transcribe volume --dry-run  # Volume sync dry run
+    kb analyze --list-types         # List analysis types
 """
 
 
 def __getattr__(name):
     """Lazy import to avoid circular import issues when running modules directly."""
     if name in ("transcribe_to_kb", "load_registry", "save_registry"):
-        from kb.transcribe import transcribe_to_kb, load_registry, save_registry
+        from kb.core import transcribe_to_kb, load_registry, save_registry
         return {"transcribe_to_kb": transcribe_to_kb, "load_registry": load_registry, "save_registry": save_registry}[name]
 
     if name in ("run_interactive_cli", "custom_style"):
