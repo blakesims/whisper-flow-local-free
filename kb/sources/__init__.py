@@ -28,7 +28,6 @@ SOURCES = {
         "label": "Zoom",
         "description": "Transcribe Zoom meeting recordings",
         "handler": "kb.sources.zoom",
-        "placeholder": True,  # Not yet implemented (Phase 1)
     },
     "paste": {
         "label": "Paste",
