@@ -4,17 +4,17 @@
 - **Task Name:** Cap Recording Auto-Clean
 - **Priority:** 1
 - **Number of Stories:** 5
-- **Current Status:** PLANNING
+- **Current Status:** ACTIVE (implementation complete, needs testing)
 - **Dependencies:** kb.sources.cap, whisper.cpp models, Gemini API
 - **Rules Required:** task-documentation
 - **Acceptance Criteria:**
-  - [ ] `kb clean` command transcribes all segments in a .cap recording
-  - [ ] Explicit trigger phrases ("delete delete", "cut cut") auto-delete segments
-  - [ ] LLM suggests deletions for dead air, stumbles, duplicate takes
-  - [ ] Interactive review allows quick audio preview and approve/reject
-  - [ ] Soft-deleted segments renamed to `_deleted_segment-N/` (recoverable)
-  - [ ] Cap opens the cleaned recording with no awareness of deleted segments
-  - [ ] `kb clean --restore` can undo soft-deletes
+  - [x] `kb clean` command transcribes all segments in a .cap recording
+  - [x] Explicit trigger phrases ("delete delete", "cut cut") auto-delete segments
+  - [x] LLM suggests deletions for dead air, stumbles, duplicate takes
+  - [x] Interactive review allows quick audio preview and approve/reject
+  - [x] Soft-deleted segments renamed to `_deleted_segment-N/` (recoverable)
+  - [x] Cap opens the cleaned recording with no awareness of deleted segments
+  - [ ] `kb clean --restore` can undo soft-deletes (future enhancement)
 
 ## 1. Goal / Objective
 
@@ -24,7 +24,7 @@ This is an 80/20 optimization: voice commands during recording + quick CLI revie
 
 ## 2. Overall Status
 
-PLANNING - Design complete, ready for implementation.
+ACTIVE - Implementation complete (S00-S04). Ready for user testing.
 
 ## 3. Stories Breakdown
 
@@ -307,17 +307,17 @@ def analyze_segments_for_cleanup(segments: list[dict], script: str = None) -> di
 ### S04 - Interactive Review + Soft-Delete
 
 **Acceptance Criteria:**
-- [ ] Check if Cap is running with recording open → warn user
-- [ ] Show each LLM suggestion with transcript preview
-- [ ] Audio preview with `p` (afplay, blocking)
-- [ ] Keyboard-driven: `p`=play, `d`=delete, `k`=keep
-- [ ] For duplicates: `1`/`2` to play, `a`=accept LLM, `s`=swap
-- [ ] Soft-delete: rename `segment-N` → `_deleted_segment-N`
-- [ ] Renumber remaining segments sequentially
-- [ ] Update `recording-meta.json` with new paths
-- [ ] Delete `project-config.json` (Cap regenerates)
-- [ ] Save audit log to `_clean_audit.json`
-- [ ] `--restore` command to undo soft-deletes
+- [x] Check if Cap is running with recording open → warn user
+- [x] Show each LLM suggestion with transcript preview
+- [x] Audio preview with `p` (afplay, blocking)
+- [x] Keyboard-driven: `p`=play, `d`=delete, `k`=keep
+- [x] For duplicates: `1`/`2` to play, `a`=accept LLM, `s`=swap
+- [x] Soft-delete: rename `segment-N` → `_deleted_segment-N`
+- [x] Renumber remaining segments sequentially
+- [x] Update `recording-meta.json` with new paths
+- [x] Delete `project-config.json` (Cap regenerates)
+- [x] Save audit log to `_clean_audit.json`
+- [ ] `--restore` command to undo soft-deletes (future enhancement)
 
 **Implementation - Core Functions:**
 ```python

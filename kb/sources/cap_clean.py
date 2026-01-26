@@ -9,12 +9,15 @@ Usage:
 
 import json
 import os
+import subprocess
+from datetime import datetime
 from pathlib import Path
 
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from rich.prompt import Confirm
 import questionary
 from questionary import Style
 
@@ -324,6 +327,335 @@ def analyze_segments_for_cleanup(segments: list[dict]) -> list[dict]:
         return []
 
 
+def is_cap_running() -> bool:
+    """Check if Cap app is currently running."""
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", "Cap"],
+            capture_output=True, text=True
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def play_audio(audio_path: str, timeout: int = None) -> None:
+    """Play audio file using afplay (macOS).
+
+    Args:
+        audio_path: Path to audio file
+        timeout: Optional timeout in seconds (plays first N seconds)
+    """
+    try:
+        if timeout:
+            # Use timeout command to limit playback
+            subprocess.run(
+                ["timeout", str(timeout), "afplay", audio_path],
+                capture_output=True
+            )
+        else:
+            subprocess.run(["afplay", audio_path], capture_output=True)
+    except FileNotFoundError:
+        console.print("[yellow]afplay not available (macOS only)[/yellow]")
+    except Exception as e:
+        console.print(f"[yellow]Could not play audio: {e}[/yellow]")
+
+
+def run_interactive_review(
+    segments: list[dict],
+    suggestions: list[dict]
+) -> set[int]:
+    """
+    Interactive CLI review of LLM suggestions.
+
+    Args:
+        segments: List of segment dicts
+        suggestions: LLM suggestions to review
+
+    Returns:
+        Set of segment indices to delete
+    """
+    to_delete = set()
+
+    # First: collect auto-deletes from triggers
+    for seg in segments:
+        if seg.get("auto_delete"):
+            to_delete.add(seg["index"])
+
+    # If no suggestions to review, return early
+    if not suggestions:
+        return to_delete
+
+    console.print("\n[bold]━━━ Interactive Review ━━━[/bold]\n")
+
+    for i, sug in enumerate(suggestions):
+        action = sug.get("action", "delete")
+        confidence = sug.get("confidence", 0) * 100
+        reason = sug.get("reason", "unknown")
+        explanation = sug.get("explanation", "")
+
+        if action == "delete":
+            idx = sug.get("segment_index")
+            if idx is None:
+                continue
+
+            seg = next((s for s in segments if s["index"] == idx), None)
+            if not seg:
+                continue
+
+            console.print(f"[bold]Segment {idx}[/bold] ({seg['duration']:.1f}s) — DELETE? ({confidence:.0f}%)")
+            console.print(Panel(seg["text"][:200] or "[silence]", border_style="dim"))
+            console.print(f"[dim]Reason: {explanation}[/dim]\n")
+
+            choice = questionary.select(
+                "Action:",
+                choices=[
+                    questionary.Choice("play audio", "p"),
+                    questionary.Choice("delete", "d"),
+                    questionary.Choice("keep", "k"),
+                ],
+                style=custom_style
+            ).ask()
+
+            if choice == "p":
+                console.print("[dim]Playing...[/dim]")
+                play_audio(seg["path"])
+                # Ask again after playing
+                choice = questionary.select(
+                    "After listening:",
+                    choices=[
+                        questionary.Choice("delete", "d"),
+                        questionary.Choice("keep", "k"),
+                    ],
+                    style=custom_style
+                ).ask()
+
+            if choice == "d":
+                to_delete.add(idx)
+                console.print("[green]✓ Marked for deletion[/green]\n")
+            else:
+                console.print("[dim]Keeping segment[/dim]\n")
+
+        elif action == "duplicate":
+            indices = sug.get("segment_indices", [])
+            keep_idx = sug.get("keep_index")
+
+            if len(indices) != 2 or keep_idx is None:
+                continue
+
+            delete_idx = indices[0] if indices[1] == keep_idx else indices[1]
+
+            console.print(f"[bold]DUPLICATE TAKES[/bold]: Segments {indices[0]} & {indices[1]}")
+            console.print(f"[dim]LLM recommends keeping segment {keep_idx}[/dim]\n")
+
+            for idx in indices:
+                seg = next((s for s in segments if s["index"] == idx), None)
+                if seg:
+                    marker = " [KEEP]" if idx == keep_idx else ""
+                    console.print(f"Segment {idx} ({seg['duration']:.1f}s){marker}:")
+                    console.print(Panel(seg["text"][:150] or "[silence]", border_style="dim"))
+
+            console.print(f"[dim]{explanation}[/dim]\n")
+
+            choice = questionary.select(
+                "Action:",
+                choices=[
+                    questionary.Choice(f"play segment {indices[0]}", "1"),
+                    questionary.Choice(f"play segment {indices[1]}", "2"),
+                    questionary.Choice("accept LLM recommendation", "a"),
+                    questionary.Choice("swap (keep other)", "s"),
+                    questionary.Choice("keep both", "b"),
+                ],
+                style=custom_style
+            ).ask()
+
+            if choice == "1":
+                seg = next((s for s in segments if s["index"] == indices[0]), None)
+                if seg:
+                    console.print("[dim]Playing...[/dim]")
+                    play_audio(seg["path"])
+            elif choice == "2":
+                seg = next((s for s in segments if s["index"] == indices[1]), None)
+                if seg:
+                    console.print("[dim]Playing...[/dim]")
+                    play_audio(seg["path"])
+
+            if choice in ("1", "2"):
+                choice = questionary.select(
+                    "After listening:",
+                    choices=[
+                        questionary.Choice("accept LLM recommendation", "a"),
+                        questionary.Choice("swap (keep other)", "s"),
+                        questionary.Choice("keep both", "b"),
+                    ],
+                    style=custom_style
+                ).ask()
+
+            if choice == "a":
+                to_delete.add(delete_idx)
+                console.print(f"[green]✓ Deleting segment {delete_idx}, keeping {keep_idx}[/green]\n")
+            elif choice == "s":
+                to_delete.add(keep_idx)
+                console.print(f"[green]✓ Deleting segment {keep_idx}, keeping {delete_idx}[/green]\n")
+            else:
+                console.print("[dim]Keeping both segments[/dim]\n")
+
+    return to_delete
+
+
+def soft_delete_segments(cap_path: Path, indices_to_delete: set[int]) -> dict:
+    """
+    Soft-delete segments by renaming folders and updating metadata.
+
+    Instead of permanently deleting, renames segment folders to
+    _deleted_segment-N so they can be recovered if needed.
+
+    Args:
+        cap_path: Path to the .cap recording
+        indices_to_delete: Set of segment indices to delete
+
+    Returns:
+        Audit data dict with deletion details
+    """
+    segments_dir = cap_path / "content" / "segments"
+    meta_path = cap_path / "recording-meta.json"
+    config_path = cap_path / "project-config.json"
+
+    # Load current metadata
+    with open(meta_path) as f:
+        meta = json.load(f)
+
+    original_count = len(meta.get("segments", []))
+    indices_to_delete = sorted(indices_to_delete)
+
+    audit_data = {
+        "original_segment_count": original_count,
+        "deleted_segments": [],
+        "kept_segments": [],
+        "triggers_used": DEFAULT_TRIGGERS,
+    }
+
+    console.print("\n[bold]🗑️  Soft-deleting segments...[/bold]")
+
+    # Step 1: Rename deleted segment folders to _deleted_segment-N
+    for idx in indices_to_delete:
+        src = segments_dir / f"segment-{idx}"
+        dst = segments_dir / f"_deleted_segment-{idx}"
+        if src.exists():
+            src.rename(dst)
+            console.print(f"   segment-{idx} → _deleted_segment-{idx}")
+
+            # Record in audit
+            seg_meta = meta["segments"][idx] if idx < len(meta["segments"]) else {}
+            audit_data["deleted_segments"].append({
+                "original_index": idx,
+                "reason": "user_confirmed",  # Could be more specific
+            })
+
+    # Step 2: Identify remaining segments and prepare for renumbering
+    remaining = []
+    for i, seg in enumerate(meta.get("segments", [])):
+        if i not in indices_to_delete:
+            remaining.append((i, seg))
+
+    console.print("\n[bold]📁 Renumbering remaining segments...[/bold]")
+
+    # Step 3: Renumber folders (process in reverse to avoid conflicts)
+    # First pass: rename to temp names to avoid collisions
+    temp_mapping = {}
+    for new_idx, (old_idx, _) in enumerate(remaining):
+        if new_idx != old_idx:
+            src = segments_dir / f"segment-{old_idx}"
+            tmp = segments_dir / f"_temp_segment-{new_idx}"
+            if src.exists():
+                src.rename(tmp)
+                temp_mapping[new_idx] = tmp
+
+    # Second pass: rename from temp to final
+    for new_idx, tmp_path in temp_mapping.items():
+        dst = segments_dir / f"segment-{new_idx}"
+        if tmp_path.exists():
+            tmp_path.rename(dst)
+            old_idx = remaining[new_idx][0]
+            console.print(f"   segment-{old_idx} → segment-{new_idx}")
+
+    # Step 4: Update metadata with new paths
+    console.print("\n[bold]📝 Updating recording-meta.json...[/bold]")
+
+    new_segments = []
+    for new_idx, (old_idx, seg) in enumerate(remaining):
+        # Update all paths in the segment to reflect new index
+        updated_seg = _update_segment_paths(seg, new_idx)
+        new_segments.append(updated_seg)
+
+        audit_data["kept_segments"].append({
+            "original_index": old_idx,
+            "new_index": new_idx,
+        })
+
+    meta["segments"] = new_segments
+
+    with open(meta_path, 'w') as f:
+        json.dump(meta, f, indent=2)
+
+    # Step 5: Delete project-config.json (Cap will regenerate)
+    if config_path.exists():
+        config_path.unlink()
+        console.print("[bold]🧹 Removed project-config.json[/bold] (Cap will regenerate)")
+
+    audit_data["remaining_segment_count"] = len(new_segments)
+
+    return audit_data
+
+
+def _update_segment_paths(seg: dict, new_index: int) -> dict:
+    """Update all paths in a segment dict to reflect new index."""
+    new_seg = {}
+    for key, value in seg.items():
+        if isinstance(value, dict) and "path" in value:
+            # Handle nested objects with path (display, camera, mic)
+            old_path = value["path"]
+            # Replace segment-N with segment-{new_index}
+            import re
+            new_path = re.sub(
+                r'segment-\d+',
+                f'segment-{new_index}',
+                old_path
+            )
+            new_seg[key] = {**value, "path": new_path}
+        elif key == "cursor" and isinstance(value, str):
+            # cursor is just a string path
+            import re
+            new_seg[key] = re.sub(
+                r'segment-\d+',
+                f'segment-{new_index}',
+                value
+            )
+        else:
+            new_seg[key] = value
+    return new_seg
+
+
+def save_audit_log(cap_path: Path, audit_data: dict, segments: list[dict]) -> None:
+    """Save cleanup audit log to the recording directory."""
+    audit_path = cap_path / "_clean_audit.json"
+
+    # Add transcripts to deleted segments
+    for del_info in audit_data.get("deleted_segments", []):
+        idx = del_info["original_index"]
+        seg = next((s for s in segments if s["index"] == idx), None)
+        if seg:
+            del_info["duration"] = seg.get("duration", 0)
+            del_info["transcript"] = seg.get("text", "")[:500]
+
+    audit_data["cleaned_at"] = datetime.now().isoformat()
+
+    with open(audit_path, 'w') as f:
+        json.dump(audit_data, f, indent=2)
+
+    console.print(f"[bold]💾 Saved audit log:[/bold] {audit_path.name}")
+
+
 def select_recording() -> Path | None:
     """Interactive selection of Cap recording."""
     recordings = get_cap_recordings()
@@ -371,13 +703,21 @@ def select_recording() -> Path | None:
     return None
 
 
-def main(triggers_only: bool = False):
+def main(triggers_only: bool = False, dry_run: bool = False):
     """Main entry point for kb clean.
 
     Args:
         triggers_only: If True, skip LLM analysis (only use trigger phrases)
+        dry_run: If True, show what would be deleted but don't modify files
     """
     console.print(Panel("[bold]Cap Recording Cleanup[/bold]", border_style="cyan"))
+
+    # Check if Cap is running
+    if is_cap_running():
+        console.print("\n[yellow]⚠️  Cap appears to be running.[/yellow]")
+        console.print("[dim]Close Cap before cleaning to avoid file conflicts.[/dim]")
+        if not Confirm.ask("\nContinue anyway?", default=False):
+            return
 
     # Select recording
     cap_path = select_recording()
@@ -401,27 +741,47 @@ def main(triggers_only: bool = False):
     # LLM analysis (unless triggers_only)
     suggestions = []
     if not triggers_only:
-        from rich.prompt import Confirm
         if Confirm.ask("\n[bold]Continue to LLM analysis?[/bold]", default=True):
             suggestions = analyze_segments_for_cleanup(segments)
 
-            # Display suggestions
-            if suggestions:
-                console.print("\n[bold]LLM Suggestions:[/bold]")
-                for i, sug in enumerate(suggestions, 1):
-                    conf = sug.get("confidence", 0) * 100
-                    reason = sug.get("reason", "unknown")
-                    explanation = sug.get("explanation", "")
+    # Interactive review
+    to_delete = run_interactive_review(segments, suggestions)
 
-                    if sug.get("action") == "duplicate":
-                        indices = sug.get("segment_indices", [])
-                        keep = sug.get("keep_index")
-                        console.print(f"  {i}. [cyan]DUPLICATE[/cyan]: Segments {indices} - keep {keep} ({conf:.0f}%)")
-                    else:
-                        idx = sug.get("segment_index")
-                        console.print(f"  {i}. [yellow]DELETE[/yellow]: Segment {idx} - {reason} ({conf:.0f}%)")
+    # Summary
+    if not to_delete:
+        console.print("\n[green]No segments to delete. Recording is clean![/green]")
+        return
 
-                    console.print(f"     [dim]{explanation}[/dim]")
+    # Show summary
+    console.print("\n[bold]━━━ Summary ━━━[/bold]")
+    console.print(f"\nTo DELETE ({len(to_delete)} segments):")
+    for idx in sorted(to_delete):
+        seg = next((s for s in segments if s["index"] == idx), None)
+        if seg:
+            reason = "trigger" if seg.get("auto_delete") else "reviewed"
+            console.print(f"  • Segment {idx} ({seg['duration']:.1f}s) — {reason}")
+
+    kept = [s["index"] for s in segments if s["index"] not in to_delete]
+    console.print(f"\nTo KEEP: {', '.join(map(str, kept))}")
+    console.print(f"\nResult: {len(segments)} → {len(kept)} segments")
+
+    if dry_run:
+        console.print("\n[yellow]DRY RUN: No changes made.[/yellow]")
+        return
+
+    # Confirm and execute
+    if not Confirm.ask("\n[bold]Proceed with cleanup?[/bold]", default=True):
+        console.print("[yellow]Cancelled.[/yellow]")
+        return
+
+    # Execute soft-delete
+    audit_data = soft_delete_segments(cap_path, to_delete)
+
+    # Save audit log
+    save_audit_log(cap_path, audit_data, segments)
+
+    console.print(f"\n[green]✓ Done! {len(kept)} segments remain.[/green]")
+    console.print("[dim]Open in Cap to see the clean timeline.[/dim]")
 
 
 if __name__ == "__main__":
