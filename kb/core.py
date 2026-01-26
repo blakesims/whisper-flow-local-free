@@ -220,6 +220,103 @@ class LocalFileCopy:
 
 # --- Core Transcription Function ---
 
+def transcribe_audio(
+    file_path: str,
+    model_name: str = "medium",
+    progress_callback: callable = None,
+) -> dict:
+    """
+    Transcribe an audio/video file using Whisper.
+
+    Args:
+        file_path: Path to audio/video file
+        model_name: Whisper model to use (default: "medium")
+        progress_callback: Optional callback function(percent, text, lang_info)
+
+    Returns:
+        Dictionary with:
+        - "text": Full concatenated text
+        - "segments": Raw pywhispercpp Segment objects (with .t0, .t1, .text attributes)
+        - "duration": Duration in seconds from ffprobe
+        - "formatted": Timestamp-formatted text like "[MM:SS] text\\n[MM:SS] text\\n..."
+
+    Raises:
+        FileNotFoundError: If file doesn't exist
+        ValueError: If file format is unsupported
+        RuntimeError: If transcription produces no result
+    """
+    # Import here to avoid circular imports
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from app.core.transcription_service_cpp import get_transcription_service
+    from app.utils.config_manager import ConfigManager
+
+    # Validate file
+    if not os.path.isfile(file_path):
+        raise FileNotFoundError(f"File not found: {file_path}")
+
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext not in SUPPORTED_FORMATS:
+        raise ValueError(f"Unsupported format: {ext}")
+
+    # Get duration
+    duration = get_audio_duration(file_path)
+    print_status(f"Duration: {duration}s ({duration // 60}m {duration % 60}s)")
+
+    # Initialize transcription service
+    config = ConfigManager()
+    service = get_transcription_service(config)
+
+    print_status(f"Loading model: {model_name}...")
+    service.set_target_model_config(model_name, "cpu", "int8")
+    service.load_model()
+    print_status("Model loaded!")
+
+    # Default progress callback if none provided
+    def default_progress_callback(percent, text, lang_info):
+        if percent % 10 == 0:
+            print_status(f"Transcribing: {percent}%")
+
+    callback = progress_callback or default_progress_callback
+
+    # Handle network volumes and video files
+    print_status("Starting transcription...")
+    with LocalFileCopy(file_path) as local_path:
+        result = service.transcribe(
+            local_path,
+            language=config.get("transcription_language", None),
+            beam_size=1,
+            progress_callback=callback
+        )
+
+    # Extract segments and format transcript with timestamps
+    segments = result.get("segments", [])
+    full_text = result.get("text", "").strip()
+
+    if not segments and not full_text:
+        raise RuntimeError("No transcription result")
+
+    # Format transcript with timestamps from segments
+    formatted_lines = []
+    if segments:
+        for seg in segments:
+            # pywhispercpp segments have t0/t1 in centiseconds
+            start_seconds = seg.t0 / 100.0
+            ts = format_timestamp(start_seconds)
+            text = seg.text.strip()
+            if text:
+                formatted_lines.append(f"[{ts}] {text}")
+
+    formatted_text = "\n".join(formatted_lines) if formatted_lines else full_text
+
+    return {
+        "text": full_text,
+        "segments": segments,
+        "duration": duration,
+        "formatted": formatted_text,
+    }
+
+
 def transcribe_to_kb(
     file_path: str,
     decimal: str,
@@ -248,21 +345,6 @@ def transcribe_to_kb(
     Returns:
         The saved transcript data dict.
     """
-    # Import here to avoid circular imports
-    import sys
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from app.core.transcription_service_cpp import get_transcription_service
-    from app.utils.config_manager import ConfigManager
-
-    # Validate file (unless paste source with existing transcript)
-    if transcript_text is None:
-        if not os.path.isfile(file_path):
-            raise FileNotFoundError(f"File not found: {file_path}")
-
-        ext = os.path.splitext(file_path)[1].lower()
-        if ext not in SUPPORTED_FORMATS:
-            raise ValueError(f"Unsupported format: {ext}")
-
     # Load registry
     registry = load_registry()
 
@@ -297,53 +379,10 @@ def transcribe_to_kb(
         print_status("Using provided transcript text")
         duration = 0  # Unknown for paste
     else:
-        # Need to transcribe the file
-        duration = get_audio_duration(file_path)
-        print_status(f"Duration: {duration}s ({duration // 60}m {duration % 60}s)")
-
-        # Initialize transcription service
-        config = ConfigManager()
-        service = get_transcription_service(config)
-
-        print_status(f"Loading model: {model_name}...")
-
-        service.set_target_model_config(model_name, "cpu", "int8")
-        service.load_model()
-        print_status("Model loaded!")
-
-        # Progress callback
-        def progress_callback(percent, text, lang_info):
-            if percent % 10 == 0:
-                print_status(f"Transcribing: {percent}%")
-
-        # Handle network volumes
-        print_status("Starting transcription...")
-        with LocalFileCopy(file_path) as local_path:
-            result = service.transcribe(
-                local_path,
-                language=config.get("transcription_language", None),
-                beam_size=1,
-                progress_callback=progress_callback
-            )
-
-        # Format transcript with timestamps from segments
-        segments = result.get("segments", [])
-        if segments:
-            lines = []
-            for seg in segments:
-                # pywhispercpp segments have t0/t1 in centiseconds
-                start_seconds = seg.t0 / 100.0
-                ts = format_timestamp(start_seconds)
-                text = seg.text.strip()
-                if text:
-                    lines.append(f"[{ts}] {text}")
-            transcript_text = "\n".join(lines)
-        else:
-            # Fallback if no segments (shouldn't happen)
-            transcript_text = result.get("text", "").strip()
-
-        if not transcript_text:
-            raise RuntimeError("No transcription result")
+        # Need to transcribe the file - use transcribe_audio()
+        result = transcribe_audio(file_path, model_name=model_name)
+        transcript_text = result["formatted"]
+        duration = result["duration"]
 
     # Build transcript data
     transcript_data = {
