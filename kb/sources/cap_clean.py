@@ -24,6 +24,9 @@ from kb.sources.cap import get_cap_recordings, CAP_RECORDINGS_DIR
 # Reuse from core
 from kb.core import format_timestamp, get_audio_duration
 
+# Default trigger phrases for auto-deletion
+DEFAULT_TRIGGERS = ["delete delete", "cut cut", "delete this"]
+
 console = Console()
 
 custom_style = Style([
@@ -212,6 +215,44 @@ def display_segments_table(segments: list[dict], triggers: list[str] = None) -> 
     console.print(table)
 
 
+def detect_triggers(segments: list[dict], triggers: list[str] = None) -> list[dict]:
+    """
+    Scan transcripts for trigger phrases that mark segments for auto-deletion.
+
+    Args:
+        segments: List of segment dicts with "text" field
+        triggers: List of trigger phrases (default: DEFAULT_TRIGGERS)
+
+    Returns:
+        The same segments list with added fields:
+        - auto_delete: bool - True if trigger phrase found
+        - trigger_match: str | None - The matched trigger phrase
+    """
+    triggers = triggers or DEFAULT_TRIGGERS
+    triggers_lower = [t.lower().strip() for t in triggers]
+
+    auto_delete_count = 0
+    for seg in segments:
+        text_lower = seg.get("text", "").lower()
+        seg["auto_delete"] = False
+        seg["trigger_match"] = None
+
+        for trigger in triggers_lower:
+            if trigger in text_lower:
+                seg["auto_delete"] = True
+                seg["trigger_match"] = trigger
+                auto_delete_count += 1
+                break
+
+    if auto_delete_count > 0:
+        console.print(f"\n[yellow]⚡ Auto-delete triggered for {auto_delete_count} segment(s)[/yellow]")
+        for seg in segments:
+            if seg["auto_delete"]:
+                console.print(f"  • Segment {seg['index']}: \"{seg['trigger_match']}\"")
+
+    return segments
+
+
 def select_recording() -> Path | None:
     """Interactive selection of Cap recording."""
     recordings = get_cap_recordings()
@@ -276,8 +317,11 @@ def main():
     if not segments:
         return
 
-    # Display results
-    display_segments_table(segments)
+    # Detect trigger phrases for auto-deletion
+    segments = detect_triggers(segments)
+
+    # Display results with trigger highlighting
+    display_segments_table(segments, triggers=DEFAULT_TRIGGERS)
 
 
 if __name__ == "__main__":

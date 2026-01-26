@@ -170,10 +170,10 @@ def transcribe_segments(cap_path: Path, model_name: str = "medium") -> list[dict
 ### S02 - Trigger Phrase Detection
 
 **Acceptance Criteria:**
-- [ ] Default triggers: `["delete delete", "cut cut", "delete this"]`
-- [ ] Case-insensitive matching
-- [ ] Segments with triggers marked `auto_delete: True`
-- [ ] Report which segments will be auto-deleted
+- [x] Default triggers: `["delete delete", "cut cut", "delete this"]`
+- [x] Case-insensitive matching
+- [x] Segments with triggers marked `auto_delete: True`
+- [x] Report which segments will be auto-deleted
 
 **Implementation:**
 ```python
