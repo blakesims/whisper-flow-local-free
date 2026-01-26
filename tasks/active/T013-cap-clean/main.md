@@ -87,18 +87,21 @@ def transcribe_to_kb(...):
 ### S01 - Per-Segment Transcription
 
 **Acceptance Criteria:**
-- [ ] Iterate `content/segments/segment-*/audio-input.ogg`
-- [ ] Transcribe 3 segments in parallel (ThreadPoolExecutor)
-- [ ] Store transcripts with segment index and duration
-- [ ] Handle missing audio files gracefully (warn + skip)
-- [ ] Progress display with Rich
+- [x] Iterate `content/segments/segment-*/audio-input.ogg`
+- [x] Sequential transcription with single shared model (thread-safety requirement)
+- [x] Store transcripts with segment index, duration, status
+- [x] Handle missing audio files gracefully (warn + skip)
+- [x] Progress display with Rich
+
+**Note:** Originally planned parallel transcription with ThreadPoolExecutor, but
+whisper.cpp model is NOT thread-safe. Sequential with single shared model instance
+is more efficient than loading 3 separate models (~4.5GB RAM vs ~1.5GB).
 
 **Implementation:**
 ```python
 # kb/sources/cap_clean.py
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from kb.core import transcribe_audio, get_audio_duration
+from kb.core import get_audio_duration, format_timestamp, LocalFileCopy
 from kb.sources.cap import get_cap_recordings, CAP_RECORDINGS_DIR
 
 def transcribe_segments(cap_path: Path, model_name: str = "medium") -> list[dict]:
