@@ -10,6 +10,7 @@ Usage:
 import json
 import os
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -785,4 +786,73 @@ def main(triggers_only: bool = False, dry_run: bool = False):
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Clean up Cap recording by removing junk segments"
+    )
+    parser.add_argument(
+        "recording",
+        nargs="?",
+        help="Path to .cap recording (interactive selection if not provided)"
+    )
+    parser.add_argument(
+        "--triggers-only",
+        action="store_true",
+        help="Only use trigger phrases, skip LLM analysis"
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview what would be deleted without making changes"
+    )
+
+    args = parser.parse_args()
+
+    # If recording path provided, use it directly instead of interactive selection
+    if args.recording:
+        cap_path = Path(args.recording)
+        if not cap_path.exists():
+            console.print(f"[red]Recording not found: {cap_path}[/red]")
+            sys.exit(1)
+
+        console.print(Panel("[bold]Cap Recording Cleanup[/bold]", border_style="cyan"))
+
+        # Check if Cap is running
+        if is_cap_running():
+            console.print("\n[yellow]⚠️  Cap appears to be running.[/yellow]")
+            if not Confirm.ask("Continue anyway?", default=False):
+                sys.exit(0)
+
+        console.print(f"\n[bold]Recording:[/bold] {cap_path.name}\n")
+
+        # Run the cleanup flow directly
+        segments = transcribe_segments(cap_path)
+        if segments:
+            segments = detect_triggers(segments)
+            display_segments_table(segments, triggers=DEFAULT_TRIGGERS)
+
+            suggestions = []
+            if not args.triggers_only:
+                if Confirm.ask("\n[bold]Continue to LLM analysis?[/bold]", default=True):
+                    suggestions = analyze_segments_for_cleanup(segments)
+
+            to_delete = run_interactive_review(segments, suggestions)
+
+            if to_delete:
+                console.print("\n[bold]━━━ Summary ━━━[/bold]")
+                console.print(f"\nTo DELETE: {sorted(to_delete)}")
+                kept = [s["index"] for s in segments if s["index"] not in to_delete]
+                console.print(f"To KEEP: {kept}")
+                console.print(f"\nResult: {len(segments)} → {len(kept)} segments")
+
+                if args.dry_run:
+                    console.print("\n[yellow]DRY RUN: No changes made.[/yellow]")
+                elif Confirm.ask("\n[bold]Proceed?[/bold]", default=True):
+                    audit_data = soft_delete_segments(cap_path, to_delete)
+                    save_audit_log(cap_path, audit_data, segments)
+                    console.print(f"\n[green]✓ Done! {len(kept)} segments remain.[/green]")
+            else:
+                console.print("\n[green]No segments to delete.[/green]")
+    else:
+        main(triggers_only=args.triggers_only, dry_run=args.dry_run)

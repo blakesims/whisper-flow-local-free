@@ -151,6 +151,11 @@ COMMANDS = {
         "description": "Transcribe audio/video to Knowledge Base (file, cap, volume, paste)",
         "module": "kb.transcribe",
     },
+    "clean": {
+        "label": "Clean",
+        "description": "Clean up Cap recording by removing junk segments",
+        "module": "kb.sources.cap_clean",
+    },
     "analyze": {
         "label": "Analyze",
         "description": "Run LLM analysis on existing transcript",
