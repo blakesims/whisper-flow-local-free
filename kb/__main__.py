@@ -40,6 +40,50 @@ DEFAULTS = {
         "whisper_model": "medium",
         "gemini_model": "gemini-2.0-flash",
         "decimal": "50.01.01",
+    },
+    "zoom": {
+        "ignore_participants": [
+            "Fireflies",
+            "Otter",
+            "Fathom",
+        ],
+    },
+    "presets": {
+        "alpha_session": {
+            "label": "Alpha Cohort Session",
+            "decimal": "50.03.01",
+            "title_template": "Alpha - {participants}",
+            "tags": ["alpha-cohort", "coaching"],
+            "sources": ["zoom"],
+        },
+        "beta_session": {
+            "label": "Beta Cohort Session",
+            "decimal": "50.03.02",
+            "title_template": "Beta - {participants}",
+            "tags": ["beta-cohort", "coaching"],
+            "sources": ["zoom"],
+        },
+        "generic_meeting": {
+            "label": "Generic Meeting",
+            "decimal": "50.04",
+            "title_template": "Meeting - {participants} - {date}",
+            "tags": ["meeting"],
+            "sources": ["zoom"],
+        },
+        "quick_capture": {
+            "label": "Quick Capture",
+            "decimal": "50.00.01",
+            "title_template": "{filename}",
+            "tags": [],
+            "sources": ["cap", "paste"],
+        },
+        "skool_content": {
+            "label": "Skool Classroom Content",
+            "decimal": "50.01.01",
+            "title_template": "{filename}",
+            "tags": ["skool"],
+            "sources": ["file", "volume"],
+        },
     }
 }
 
@@ -59,6 +103,11 @@ def load_config() -> dict:
                 config["paths"] = {**DEFAULTS["paths"], **file_config["paths"]}
             if "defaults" in file_config:
                 config["defaults"] = {**DEFAULTS["defaults"], **file_config["defaults"]}
+            if "zoom" in file_config:
+                config["zoom"] = {**DEFAULTS["zoom"], **file_config["zoom"]}
+            if "presets" in file_config:
+                # Deep merge presets - user can override or add new presets
+                config["presets"] = {**DEFAULTS["presets"], **file_config["presets"]}
         except Exception as e:
             console.print(f"[yellow]Warning: Could not load config: {e}[/yellow]")
 
@@ -106,6 +155,11 @@ COMMANDS = {
         "label": "Analyze",
         "description": "Run LLM analysis on existing transcript",
         "module": "kb.analyze",
+    },
+    "dashboard": {
+        "label": "Dashboard",
+        "description": "Open visual overview of KB configuration in browser",
+        "module": "kb.dashboard",
     },
 }
 
@@ -205,6 +259,33 @@ def show_config():
     reg_table.add_row("Transcribed", f"{len(transcribed)} files logged")
     console.print(reg_table)
 
+    # Presets section
+    console.print("\n[bold cyan]Presets[/bold cyan]  [dim](quick input for common workflows)[/dim]")
+    presets = config.get("presets", {})
+    if presets:
+        # Group by source
+        by_source = {}
+        for key, preset in presets.items():
+            for source in preset.get("sources", ["all"]):
+                if source not in by_source:
+                    by_source[source] = []
+                by_source[source].append((key, preset))
+
+        for source in sorted(by_source.keys()):
+            source_presets = by_source[source]
+            preset_names = [f"[green]{preset.get('label', key)}[/green] ({preset.get('decimal', '')})"
+                          for key, preset in source_presets]
+            console.print(f"  [cyan]{source}:[/cyan] {', '.join(preset_names)}")
+    else:
+        console.print("  [yellow]No presets configured[/yellow]")
+
+    # Zoom ignore list
+    zoom_config = config.get("zoom", {})
+    ignore_list = zoom_config.get("ignore_participants", [])
+    if ignore_list:
+        console.print(f"\n[bold cyan]Zoom Ignore List[/bold cyan]")
+        console.print(f"  {', '.join(ignore_list)}")
+
     # Analysis types section
     console.print("\n[bold cyan]Analysis Prompts[/bold cyan]  [dim](config/analysis_types/)[/dim]")
     if analysis_types:
@@ -212,8 +293,50 @@ def show_config():
     else:
         console.print("  [yellow]No analysis types configured[/yellow]")
 
+    # Config file hint and edit option
     console.print()
-    input("[dim]Press Enter to return...[/dim]")
+
+    editor = os.environ.get("EDITOR", "nvim")
+    editor_name = os.path.basename(editor)
+
+    edit_choice = questionary.select(
+        "",
+        choices=[
+            questionary.Choice(title="← Back to menu", value="back"),
+            questionary.Choice(title=f"Edit config in {editor_name}", value="edit"),
+        ],
+        style=custom_style,
+        instruction="",
+    ).ask()
+
+    if edit_choice == "edit":
+        import subprocess
+        config_path = CONFIG_FILE.resolve() if CONFIG_FILE.is_symlink() else CONFIG_FILE
+
+        # Ensure config file exists with starter template
+        if not config_path.exists():
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(config_path, 'w') as f:
+                f.write("""# KB Workflow Configuration
+# See defaults in kb/__main__.py
+
+# Uncomment and modify to customize:
+# presets:
+#   my_preset:
+#     label: "My Custom Preset"
+#     decimal: "50.01.01"
+#     title_template: "{filename}"
+#     tags: ["my-tag"]
+#     sources: ["file", "cap"]
+
+# zoom:
+#   ignore_participants:
+#     - "Fireflies"
+#     - "Otter"
+""")
+
+        console.print(f"[dim]Opening {shorten_path(config_path)}...[/dim]")
+        subprocess.run([editor, str(config_path)])
 
 
 def prompt_for_file() -> str | None:

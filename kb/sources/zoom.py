@@ -30,6 +30,9 @@ import sys
 import os
 import re
 import argparse
+import subprocess
+import tempfile
+import shutil
 from pathlib import Path
 from datetime import datetime
 
@@ -46,6 +49,7 @@ from kb.core import (
     transcribe_to_kb, load_registry, save_registry, print_status,
     slugify, format_timestamp, KB_ROOT, DEFAULT_WHISPER_MODEL
 )
+from kb.__main__ import load_config
 
 console = Console()
 
@@ -61,6 +65,65 @@ custom_style = Style([
 # Constants
 ZOOM_DIR = Path.home() / "Documents" / "Zoom"
 AUDIO_EXTENSIONS = {'.m4a', '.mp3', '.wav'}
+
+
+def get_ignore_list() -> list[str]:
+    """Get list of participant names to ignore from config."""
+    config = load_config()
+    return config.get("zoom", {}).get("ignore_participants", [])
+
+
+def should_ignore_participant(speaker_name: str, ignore_list: list[str] | None = None) -> bool:
+    """Check if a speaker should be ignored (case-insensitive partial match)."""
+    if ignore_list is None:
+        ignore_list = get_ignore_list()
+
+    speaker_lower = speaker_name.lower()
+    for pattern in ignore_list:
+        if pattern.lower() in speaker_lower:
+            return True
+    return False
+
+
+def convert_to_wav(audio_file: Path, temp_dir: str) -> str:
+    """
+    Convert audio file to WAV format for whisper.cpp.
+
+    whisper.cpp only supports WAV (RIFF) format, so we need to convert
+    m4a, mp3, and other formats using ffmpeg.
+
+    Args:
+        audio_file: Path to source audio file
+        temp_dir: Directory to store converted file
+
+    Returns:
+        Path to converted WAV file
+
+    Raises:
+        RuntimeError: If conversion fails
+    """
+    output_path = os.path.join(temp_dir, f"{audio_file.stem}.wav")
+
+    try:
+        result = subprocess.run([
+            'ffmpeg', '-i', str(audio_file),
+            '-vn',                    # No video
+            '-acodec', 'pcm_s16le',   # 16-bit PCM (required by whisper.cpp)
+            '-ar', '16000',           # 16kHz sample rate (optimal for Whisper)
+            '-ac', '1',               # Mono
+            '-y',                     # Overwrite
+            output_path
+        ], capture_output=True, text=True, timeout=300)  # 5 min timeout
+
+        if result.returncode != 0:
+            raise RuntimeError(f"ffmpeg error: {result.stderr}")
+
+        return output_path
+
+    except FileNotFoundError:
+        raise RuntimeError("ffmpeg not found - please install ffmpeg")
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("Audio conversion timed out")
 
 
 def parse_date_from_folder(folder_name: str) -> str:
@@ -120,13 +183,16 @@ def discover_meetings(zoom_dir: Path = ZOOM_DIR) -> list[dict]:
         - path: Full path to meeting folder
         - name: Folder name
         - date: Extracted date (YYYY-MM-DD)
-        - participants: List of speaker names
-        - audio_files: List of audio file paths
+        - participants: List of speaker names (excluding ignored)
+        - audio_files: List of audio file paths (excluding ignored)
+        - ignored_participants: List of ignored speaker names
     """
     if not zoom_dir.exists():
         return []
 
+    ignore_list = get_ignore_list()
     meetings = []
+
     for folder in zoom_dir.iterdir():
         if not folder.is_dir():
             continue
@@ -136,19 +202,33 @@ def discover_meetings(zoom_dir: Path = ZOOM_DIR) -> list[dict]:
             continue
 
         # Find audio files starting with 'audio'
-        audio_files = [
+        all_audio_files = [
             f for f in audio_dir.iterdir()
             if f.suffix.lower() in AUDIO_EXTENSIONS
             and f.name.lower().startswith('audio')
         ]
+
+        # Filter out ignored participants
+        audio_files = []
+        participants = []
+        ignored_participants = []
+
+        for f in all_audio_files:
+            speaker = extract_speaker_name(f.name)
+            if should_ignore_participant(speaker, ignore_list):
+                ignored_participants.append(speaker)
+            else:
+                audio_files.append(f)
+                participants.append(speaker)
 
         if audio_files:
             meetings.append({
                 "path": folder,
                 "name": folder.name,
                 "date": parse_date_from_folder(folder.name),
-                "participants": [extract_speaker_name(f.name) for f in audio_files],
+                "participants": participants,
                 "audio_files": sorted(audio_files, key=lambda f: f.name),
+                "ignored_participants": ignored_participants,
             })
 
     # Sort by date (most recent first)
@@ -193,37 +273,54 @@ def transcribe_meeting(meeting: dict, model_name: str = "medium") -> tuple[str, 
     max_duration = 0
     successful_files = 0
 
-    for audio_file in meeting["audio_files"]:
-        speaker = extract_speaker_name(audio_file.name)
-        if speaker not in speakers:
-            speakers.append(speaker)
+    # Create temp directory for WAV conversions
+    temp_dir = tempfile.mkdtemp(prefix='kb_zoom_')
 
-        print_status(f"Transcribing {speaker}...")
-        try:
-            result = service.transcribe(str(audio_file))
+    try:
+        for audio_file in meeting["audio_files"]:
+            speaker = extract_speaker_name(audio_file.name)
+            if speaker not in speakers:
+                speakers.append(speaker)
 
-            # Extract segments with timestamps
-            # pywhispercpp returns Segment objects with t0/t1 (centiseconds) and text
-            for seg in result.get("segments", []):
-                start = seg.t0 / 100.0  # centiseconds to seconds
-                end = seg.t1 / 100.0
-                text = seg.text.strip()
+            print_status(f"Transcribing {speaker}...")
+            try:
+                # Convert to WAV if not already WAV
+                # whisper.cpp only supports WAV (RIFF) format
+                if audio_file.suffix.lower() != '.wav':
+                    print_status(f"  Converting {audio_file.suffix} to WAV...")
+                    wav_path = convert_to_wav(audio_file, temp_dir)
+                else:
+                    wav_path = str(audio_file)
 
-                if text:  # Skip empty segments
-                    all_segments.append({
-                        "speaker": speaker,
-                        "start": start,
-                        "end": end,
-                        "text": text,
-                    })
-                    max_duration = max(max_duration, end)
+                result = service.transcribe(wav_path)
 
-            successful_files += 1
-            print_status(f"  {speaker}: {len([s for s in all_segments if s['speaker'] == speaker])} segments")
+                # Extract segments with timestamps
+                # pywhispercpp returns Segment objects with t0/t1 (centiseconds) and text
+                for seg in result.get("segments", []):
+                    start = seg.t0 / 100.0  # centiseconds to seconds
+                    end = seg.t1 / 100.0
+                    text = seg.text.strip()
 
-        except Exception as e:
-            console.print(f"[yellow]Warning: Failed to transcribe {speaker}: {e}[/yellow]")
-            continue
+                    if text:  # Skip empty segments
+                        all_segments.append({
+                            "speaker": speaker,
+                            "start": start,
+                            "end": end,
+                            "text": text,
+                        })
+                        max_duration = max(max_duration, end)
+
+                successful_files += 1
+                print_status(f"  {speaker}: {len([s for s in all_segments if s['speaker'] == speaker])} segments")
+
+            except Exception as e:
+                console.print(f"[yellow]Warning: Failed to transcribe {speaker}: {e}[/yellow]")
+                continue
+
+    finally:
+        # Clean up temp directory
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
     if not all_segments:
         raise RuntimeError("No segments transcribed from any participant")
@@ -273,8 +370,11 @@ def select_meeting(meetings: list[dict]) -> dict | None:
 
 
 def run_interactive():
-    """Interactive Zoom meeting transcription flow."""
-    from kb.cli import select_decimal, select_tags, get_title, select_analysis_types
+    """Interactive Zoom meeting transcription flow with preset support."""
+    from kb.cli import (
+        select_preset, confirm_preset,
+        select_decimal, select_tags, get_title, select_analysis_types
+    )
 
     console.print(Panel("[bold]Zoom Meeting Transcription[/bold]", border_style="cyan"))
 
@@ -302,43 +402,64 @@ def run_interactive():
     console.print(f"  Date: {meeting['date']}")
     console.print(f"  Participants: {', '.join(meeting['participants'])}")
     console.print(f"  Files: {len(meeting['audio_files'])}")
+    if meeting.get('ignored_participants'):
+        console.print(f"  [dim]Ignored: {', '.join(meeting['ignored_participants'])}[/dim]")
 
-    # Get metadata
-    registry = load_registry()
+    # Try preset flow first
+    preset_result = select_preset(
+        source_type="zoom",
+        participants=meeting["participants"],
+        date=meeting["date"],
+    )
 
-    decimal = select_decimal(registry)
-    if decimal is None:
-        return
+    if preset_result:
+        # Quick preset flow - just confirm title
+        confirmed = confirm_preset(preset_result, meeting["participants"])
+        if confirmed is None:
+            console.print("[yellow]Cancelled.[/yellow]")
+            return
 
-    # Generate default title from participants
-    if len(meeting["participants"]) == 1:
-        default_title = f"Meeting with {meeting['participants'][0]}"
-    elif len(meeting["participants"]) == 2:
-        default_title = f"Meeting - {meeting['participants'][0]} & {meeting['participants'][1]}"
+        decimal = confirmed["decimal"]
+        title = confirmed["title"]
+        tags = confirmed["tags"]
+        analyses = confirmed["analyses"]
     else:
-        default_title = f"Meeting - {meeting['participants'][0]} et al"
+        # Full custom flow
+        registry = load_registry()
 
-    title = get_title(default_title)
-    if not title:
-        return
+        decimal = select_decimal(registry)
+        if decimal is None:
+            return
 
-    tags = select_tags(registry)
+        # Generate default title from participants
+        if len(meeting["participants"]) == 1:
+            default_title = f"Meeting with {meeting['participants'][0]}"
+        elif len(meeting["participants"]) == 2:
+            default_title = f"Meeting - {meeting['participants'][0]} & {meeting['participants'][1]}"
+        else:
+            default_title = f"Meeting - {meeting['participants'][0]} et al"
 
-    # Select analysis types
-    analyses = select_analysis_types(registry, decimal)
+        title = get_title(default_title)
+        if not title:
+            return
 
-    # Confirm
-    console.print(f"\n[bold]Will transcribe:[/bold]")
-    console.print(f"  Meeting: {meeting['date']}")
-    console.print(f"  Participants: {', '.join(meeting['participants'])}")
-    console.print(f"  Decimal: {decimal}")
-    console.print(f"  Title: {title}")
-    console.print(f"  Tags: {tags}")
-    console.print(f"  Analyses: {analyses}")
+        tags = select_tags(registry)
 
-    if not questionary.confirm("Proceed?", default=True, style=custom_style).ask():
-        console.print("[yellow]Cancelled.[/yellow]")
-        return
+        # Select analysis types
+        analyses = select_analysis_types(registry, decimal)
+
+        # Confirm
+        console.print(f"\n[bold]Will transcribe:[/bold]")
+        console.print(f"  Meeting: {meeting['date']}")
+        console.print(f"  Participants: {', '.join(meeting['participants'])}")
+        console.print(f"  Decimal: {decimal}")
+        console.print(f"  Title: {title}")
+        console.print(f"  Tags: {tags}")
+        console.print(f"  Analyses: {analyses}")
+
+        if not questionary.confirm("Proceed?", default=True, style=custom_style).ask():
+            console.print("[yellow]Cancelled.[/yellow]")
+            return
 
     # Transcribe
     try:
@@ -421,6 +542,7 @@ def list_meetings(zoom_dir: Path = ZOOM_DIR, unprocessed_only: bool = True):
     table.add_column("Date", style="cyan")
     table.add_column("Participants")
     table.add_column("Files", justify="right")
+    table.add_column("Ignored", style="dim", justify="right")
     table.add_column("Folder Name", style="dim")
 
     for m in meetings:
@@ -428,15 +550,24 @@ def list_meetings(zoom_dir: Path = ZOOM_DIR, unprocessed_only: bool = True):
         if len(m["participants"]) > 2:
             participants += f" (+{len(m['participants']) - 2})"
 
+        ignored_count = len(m.get("ignored_participants", []))
+        ignored_str = str(ignored_count) if ignored_count > 0 else ""
+
         table.add_row(
             m["date"],
             participants,
             str(len(m["audio_files"])),
+            ignored_str,
             m["name"][:50] + "..." if len(m["name"]) > 50 else m["name"]
         )
 
     console.print(table)
     console.print(f"\n[dim]Total: {len(meetings)} meeting(s)[/dim]")
+
+    # Show ignore list info
+    ignore_list = get_ignore_list()
+    if ignore_list:
+        console.print(f"[dim]Ignoring: {', '.join(ignore_list)}[/dim]")
 
 
 def find_meeting_by_name(folder_name: str, zoom_dir: Path = ZOOM_DIR) -> dict | None:
@@ -530,6 +661,8 @@ def main():
         console.print(f"\n[bold]Transcribing meeting:[/bold]")
         console.print(f"  Date: {meeting['date']}")
         console.print(f"  Participants: {', '.join(meeting['participants'])}")
+        if meeting.get('ignored_participants'):
+            console.print(f"  [dim]Ignored: {', '.join(meeting['ignored_participants'])}[/dim]")
         console.print(f"  Model: {args.model}")
 
         transcript_text, speakers, duration = transcribe_meeting(meeting, args.model)
