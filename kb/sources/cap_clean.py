@@ -253,6 +253,77 @@ def detect_triggers(segments: list[dict], triggers: list[str] = None) -> list[di
     return segments
 
 
+def analyze_segments_for_cleanup(segments: list[dict]) -> list[dict]:
+    """
+    Use Gemini LLM to analyze segments for cleanup suggestions.
+
+    Identifies:
+    - Dead air (silence, no speech)
+    - Filler/stumbles (excessive um, uh, like)
+    - Duplicate takes (similar content, recommend which to keep)
+
+    Args:
+        segments: List of segment dicts with "text" and "duration" fields
+
+    Returns:
+        List of suggestion dicts with:
+        - action: "delete" | "duplicate"
+        - segment_index: int (for delete)
+        - segment_indices: [int, int] (for duplicate)
+        - keep_index: int (for duplicate)
+        - confidence: float (0.0-1.0)
+        - reason: "dead_air" | "filler" | "stumble" | "duplicate" | "incomplete"
+        - explanation: str
+    """
+    from kb.analyze import analyze_transcript
+
+    # Skip segments already marked for auto-delete (trigger phrases)
+    segments_to_analyze = [s for s in segments if not s.get("auto_delete", False)]
+
+    if not segments_to_analyze:
+        console.print("[dim]All segments already marked for deletion by triggers.[/dim]")
+        return []
+
+    # Build context string for LLM
+    context_lines = []
+    for seg in segments_to_analyze:
+        text = seg.get("text", "").strip() or "[silence]"
+        context_lines.append(
+            f"Segment {seg['index']} ({seg['duration']:.1f}s): \"{text}\""
+        )
+
+    context = "\n".join(context_lines)
+
+    console.print("\n[bold]🤖 Analyzing segments with Gemini...[/bold]")
+
+    try:
+        result = analyze_transcript(
+            transcript_text=context,
+            analysis_type="cap_clean",
+            title="Cap Recording Cleanup Analysis",
+        )
+
+        suggestions = result.get("suggestions", [])
+
+        if suggestions:
+            console.print(f"[green]Found {len(suggestions)} suggestion(s)[/green]")
+        else:
+            console.print("[dim]No cleanup suggestions - recording looks clean![/dim]")
+
+        return suggestions
+
+    except ImportError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        console.print("[dim]Install with: pip install google-genai[/dim]")
+        return []
+    except ValueError as e:
+        console.print(f"[red]Analysis error: {e}[/red]")
+        return []
+    except Exception as e:
+        console.print(f"[red]LLM analysis failed: {e}[/red]")
+        return []
+
+
 def select_recording() -> Path | None:
     """Interactive selection of Cap recording."""
     recordings = get_cap_recordings()
@@ -300,8 +371,12 @@ def select_recording() -> Path | None:
     return None
 
 
-def main():
-    """Main entry point for kb clean."""
+def main(triggers_only: bool = False):
+    """Main entry point for kb clean.
+
+    Args:
+        triggers_only: If True, skip LLM analysis (only use trigger phrases)
+    """
     console.print(Panel("[bold]Cap Recording Cleanup[/bold]", border_style="cyan"))
 
     # Select recording
@@ -322,6 +397,31 @@ def main():
 
     # Display results with trigger highlighting
     display_segments_table(segments, triggers=DEFAULT_TRIGGERS)
+
+    # LLM analysis (unless triggers_only)
+    suggestions = []
+    if not triggers_only:
+        from rich.prompt import Confirm
+        if Confirm.ask("\n[bold]Continue to LLM analysis?[/bold]", default=True):
+            suggestions = analyze_segments_for_cleanup(segments)
+
+            # Display suggestions
+            if suggestions:
+                console.print("\n[bold]LLM Suggestions:[/bold]")
+                for i, sug in enumerate(suggestions, 1):
+                    conf = sug.get("confidence", 0) * 100
+                    reason = sug.get("reason", "unknown")
+                    explanation = sug.get("explanation", "")
+
+                    if sug.get("action") == "duplicate":
+                        indices = sug.get("segment_indices", [])
+                        keep = sug.get("keep_index")
+                        console.print(f"  {i}. [cyan]DUPLICATE[/cyan]: Segments {indices} - keep {keep} ({conf:.0f}%)")
+                    else:
+                        idx = sug.get("segment_index")
+                        console.print(f"  {i}. [yellow]DELETE[/yellow]: Segment {idx} - {reason} ({conf:.0f}%)")
+
+                    console.print(f"     [dim]{explanation}[/dim]")
 
 
 if __name__ == "__main__":

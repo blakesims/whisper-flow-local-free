@@ -214,11 +214,11 @@ def detect_triggers(segments: list[dict], triggers: list[str] = None) -> list[di
 ### S03 - LLM Analysis & Suggestions
 
 **Acceptance Criteria:**
-- [ ] Send segment list to Gemini with transcript text
-- [ ] LLM returns deletion suggestions with confidence scores
-- [ ] Identifies: dead air, filler/stumbles, duplicate takes
-- [ ] For duplicates, recommends which take to keep
-- [ ] Create `config/analysis_types/cap_clean.json` for prompt
+- [x] Send segment list to Gemini with transcript text
+- [x] LLM returns deletion suggestions with confidence scores
+- [x] Identifies: dead air, filler/stumbles, duplicate takes
+- [x] For duplicates, recommends which take to keep
+- [x] Create `config/analysis_types/cap_clean.json` for prompt
 
 **Implementation:**
 ```python
