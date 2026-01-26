@@ -43,6 +43,7 @@ COLORS = {
     'cyan': QColor(125, 207, 255),           # #7dcfff
     'purple': QColor(187, 154, 247),         # #bb9af7
     'green': QColor(158, 206, 106),          # #9ece6a
+    'orange': QColor(255, 158, 100),         # #ff9e64 - issue capture default
     'text': QColor(192, 202, 245),           # #c0caf5
     'text_dim': QColor(86, 95, 137),         # #565f89
     'border': QColor(41, 46, 66, 180),       # subtle border
@@ -94,6 +95,12 @@ class MiniWaveform(QWidget):
         self.setFixedSize(100, 28)
         self._samples = [0.0] * 20
         self._max_samples = 20
+        self._waveform_color = COLORS['blue']  # Dynamic color support
+
+    def set_color(self, color: QColor):
+        """Set the waveform bar color"""
+        self._waveform_color = color
+        self.update()
 
     def update_audio(self, audio_chunk):
         """Update with new audio data"""
@@ -135,8 +142,8 @@ class MiniWaveform(QWidget):
             x = i * (bar_width + bar_spacing)
             bar_height = max(3, int(amplitude * max_height))
 
-            # Gradient based on amplitude
-            color = QColor(COLORS['blue'])
+            # Gradient based on amplitude (use dynamic color)
+            color = QColor(self._waveform_color)
             opacity = 0.4 + (amplitude * 0.6)
             color.setAlphaF(opacity)
 
@@ -282,6 +289,7 @@ class RecordingIndicator(QWidget):
 
     # Signals for daemon communication
     toggle_recording_requested = Signal()
+    issue_capture_requested = Signal()  # Start recording in issue capture mode
     model_change_requested = Signal(str)
     post_processing_toggled = Signal(bool)  # True = enabled
     input_device_changed = Signal(object)  # device index or None for default
@@ -304,6 +312,7 @@ class RecordingIndicator(QWidget):
         self._llm_model = ""  # LLM model name for post-processing
         self._input_devices = []  # List of (index, name) tuples
         self._current_input_device = None  # None = system default
+        self._recording_mode = "normal"  # "normal" or "issue" - affects waveform color
 
         # Window flags for always-on-top, frameless, no focus stealing
         # Using SplashScreen type for overlay-style behavior on macOS
@@ -489,6 +498,13 @@ class RecordingIndicator(QWidget):
         self.waveform.clear()
         self.waveform.show()
 
+        # Set waveform color based on recording mode
+        if self._recording_mode == "issue":
+            waveform_color = self._get_issue_capture_color()
+        else:
+            waveform_color = COLORS['blue']
+        self.waveform.set_color(waveform_color)
+
         # Expand
         self.setFixedHeight(28)
         self.setMinimumWidth(130)
@@ -603,10 +619,21 @@ class RecordingIndicator(QWidget):
 
     # === Public API for daemon ===
 
-    def show_recording(self):
-        """Called by daemon to show recording state"""
+    def show_recording(self, mode: str = "normal"):
+        """Called by daemon to show recording state
+
+        Args:
+            mode: Recording mode - "normal" (blue) or "issue" (orange/configurable)
+        """
+        self._recording_mode = mode
         self._set_recording_state()
         self._ensure_visible()
+
+    def _get_issue_capture_color(self) -> QColor:
+        """Get the issue-capture waveform color from settings or default"""
+        settings = load_settings()
+        color_hex = settings.get('issue_capture_waveform_color', '#ff9e64')
+        return QColor(color_hex)
 
     def show_transcribing(self, progress: int = 0):
         """Called by daemon to show transcribing state"""
@@ -815,9 +842,14 @@ class RecordingIndicator(QWidget):
         # Recording toggle
         if self._state == self.STATE_RECORDING:
             action_record = menu.addAction("Stop Recording")
+            action_record.triggered.connect(self.toggle_recording_requested.emit)
         else:
             action_record = menu.addAction("Start Recording")
-        action_record.triggered.connect(self.toggle_recording_requested.emit)
+            action_record.triggered.connect(self.toggle_recording_requested.emit)
+
+            # Issue capture option (only when idle)
+            action_issue = menu.addAction("Start Issue Capture")
+            action_issue.triggered.connect(self.issue_capture_requested.emit)
 
         menu.addSeparator()
 

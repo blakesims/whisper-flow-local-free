@@ -46,6 +46,12 @@ class DaemonState(Enum):
     ERROR = "error"
 
 
+class RecordingMode(Enum):
+    """Mode determines output handling after transcription"""
+    NORMAL = "normal"         # Ctrl+F: clipboard + auto-paste
+    ISSUE_CAPTURE = "issue"   # Option+F: capture to file
+
+
 # Supported audio/video formats for file transcription
 SUPPORTED_AUDIO_FORMATS = (
     '.wav', '.mp3', '.m4a', '.flac', '.ogg', '.opus', '.webm',
@@ -77,6 +83,7 @@ class WhisperDaemon(QObject):
         self._state = DaemonState.IDLE
         self._current_audio_path = None
         self._is_temp_file = True  # Whether current audio is temp (should be deleted after)
+        self._recording_mode = RecordingMode.NORMAL  # Mode for current recording session
 
         # Initialize config manager
         self.config_manager = ConfigManager()
@@ -102,6 +109,7 @@ class WhisperDaemon(QObject):
         self.hotkey_listener.hotkey_triggered.connect(self._on_hotkey_triggered)
         self.hotkey_listener.file_transcribe_requested.connect(self._on_file_transcribe_requested)
         self.hotkey_listener.escape_pressed.connect(self._on_escape_pressed)
+        self.hotkey_listener.issue_capture_requested.connect(self._on_issue_capture_hotkey)
 
         # Directory for cancelled recordings
         self._cancelled_recordings_dir = os.path.expanduser("~/Documents/WhisperRecordings")
@@ -128,6 +136,7 @@ class WhisperDaemon(QObject):
     def _connect_indicator_signals(self):
         """Connect indicator UI signals"""
         self.indicator.toggle_recording_requested.connect(self._on_hotkey_triggered)
+        self.indicator.issue_capture_requested.connect(self._on_issue_capture_hotkey)
         self.indicator.model_change_requested.connect(self._on_model_change_requested)
         self.indicator.post_processing_toggled.connect(self._on_post_processing_toggled)
         self.indicator.input_device_changed.connect(self._on_input_device_changed)
@@ -229,7 +238,8 @@ class WhisperDaemon(QObject):
         # Start hotkey listener
         self.hotkey_listener.start()
         print("[Daemon] Hotkey listener started:")
-        print("[Daemon]   Ctrl+F: Toggle recording")
+        print("[Daemon]   Ctrl+F: Toggle recording (normal mode)")
+        print("[Daemon]   Option+F: Toggle recording (issue capture mode)")
         print("[Daemon]   Ctrl+Option+F: Transcribe file from clipboard")
         print("[Daemon] Click indicator dot to toggle, right-click for menu")
 
@@ -307,7 +317,7 @@ class WhisperDaemon(QObject):
 
     @Slot()
     def _on_hotkey_triggered(self):
-        """Handle hotkey press - toggle recording"""
+        """Handle Ctrl+F hotkey press - toggle recording (normal mode)"""
         print(f"[Daemon] Hotkey triggered! Current state: {self.state.value}")
 
         # Save the frontmost app BEFORE we do anything
@@ -319,6 +329,7 @@ class WhisperDaemon(QObject):
             self._frontmost_app = None
 
         if self.state == DaemonState.IDLE:
+            self._recording_mode = RecordingMode.NORMAL
             self._start_recording()
         elif self.state == DaemonState.RECORDING:
             self._stop_recording()
@@ -328,6 +339,32 @@ class WhisperDaemon(QObject):
             # Try to recover from error state
             print("[Daemon] Attempting to recover from error state...")
             self.state = DaemonState.IDLE
+            self._recording_mode = RecordingMode.NORMAL
+            self._start_recording()
+
+    @Slot()
+    def _on_issue_capture_hotkey(self):
+        """Handle Option+F hotkey press - toggle recording (issue capture mode)"""
+        print(f"[Daemon] Issue capture hotkey triggered! Current state: {self.state.value}")
+
+        # Save the frontmost app BEFORE we do anything
+        try:
+            from AppKit import NSWorkspace
+            self._frontmost_app = NSWorkspace.sharedWorkspace().frontmostApplication()
+        except:
+            self._frontmost_app = None
+
+        if self.state == DaemonState.IDLE:
+            self._recording_mode = RecordingMode.ISSUE_CAPTURE
+            self._start_recording()
+        elif self.state == DaemonState.RECORDING:
+            self._stop_recording()
+        elif self.state == DaemonState.TRANSCRIBING:
+            print("[Daemon] Already transcribing, please wait...")
+        elif self.state == DaemonState.ERROR:
+            print("[Daemon] Attempting to recover from error state...")
+            self.state = DaemonState.IDLE
+            self._recording_mode = RecordingMode.ISSUE_CAPTURE
             self._start_recording()
 
     @Slot()
@@ -553,13 +590,24 @@ class WhisperDaemon(QObject):
             self._cleanup_audio_file()
 
     def _handle_transcription_result(self, text: str):
-        """Handle successful transcription - copy to clipboard and paste"""
+        """Handle successful transcription - output depends on recording mode"""
         # Apply post-processing if enabled
         if self.post_processor.enabled:
             print("[Daemon] Applying post-processing...")
             text = self.post_processor.process(text)
             print(f"[Daemon] Post-processed: '{text[:50]}...'")
 
+        # Branch based on recording mode
+        if self._recording_mode == RecordingMode.ISSUE_CAPTURE:
+            self._handle_issue_capture_output(text)
+        else:
+            self._handle_normal_output(text)
+
+        # Reset mode for next recording
+        self._recording_mode = RecordingMode.NORMAL
+
+    def _handle_normal_output(self, text: str):
+        """Normal mode output: clipboard + auto-paste"""
         # Copy to clipboard
         try:
             pyperclip.copy(text)
@@ -578,6 +626,59 @@ class WhisperDaemon(QObject):
 
         # Auto-paste using Cmd+V simulation
         self._auto_paste()
+
+    def _handle_issue_capture_output(self, text: str):
+        """Issue capture mode output: save to file, no auto-paste"""
+        print(f"[Daemon] Issue capture mode: '{text[:50]}...'")
+
+        # Capture to file
+        filepath = self._capture_issue(text)
+
+        # Also copy to clipboard (useful but don't auto-paste)
+        try:
+            pyperclip.copy(text)
+            print("[Daemon] Text also copied to clipboard")
+        except Exception as e:
+            print(f"[Daemon] Clipboard error: {e}")
+
+        # Emit signal
+        self.transcription_complete.emit(text)
+
+        # Return to idle
+        self.state = DaemonState.IDLE
+
+        if filepath:
+            print(f"[Daemon] Issue captured successfully to: {filepath}")
+
+    def _capture_issue(self, text: str) -> str:
+        """
+        Capture issue text to file.
+
+        Returns the filepath where the issue was saved, or None on error.
+
+        Path is configurable via settings.json key "issue_capture_path".
+        Future: Could integrate with GitHub Issues, Linear, Jira, etc.
+        """
+        from datetime import datetime
+
+        # Get capture directory from config (default: ~/Documents/WhisperIssues)
+        capture_dir = self.config_manager.get("issue_capture_path", "~/Documents/WhisperIssues")
+        capture_dir = os.path.expanduser(capture_dir)
+        os.makedirs(capture_dir, exist_ok=True)
+
+        # Create filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"issue_{timestamp}.txt"
+        filepath = os.path.join(capture_dir, filename)
+
+        try:
+            with open(filepath, 'w') as f:
+                f.write(text)
+            print(f"[Daemon] Issue saved to: {filepath}")
+            return filepath
+        except Exception as e:
+            print(f"[Daemon] Error saving issue: {e}")
+            return None
 
     def _auto_paste(self):
         """Simulate Cmd+V to paste at cursor"""
@@ -628,7 +729,7 @@ class WhisperDaemon(QObject):
     def _update_indicator(self, state: DaemonState):
         """Update the floating indicator based on state"""
         if state == DaemonState.RECORDING:
-            self.indicator.show_recording()
+            self.indicator.show_recording(mode=self._recording_mode.value)
         elif state == DaemonState.TRANSCRIBING:
             self.indicator.show_transcribing()
         else:
