@@ -11,6 +11,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -27,6 +28,31 @@ from kb.sources.cap import get_cap_recordings, CAP_RECORDINGS_DIR
 
 # Reuse from core
 from kb.core import format_timestamp, get_audio_duration
+
+
+def convert_to_wav(input_path: str, output_path: str) -> bool:
+    """Convert audio file to WAV format using ffmpeg.
+
+    Args:
+        input_path: Path to input audio file (e.g., .ogg)
+        output_path: Path for output WAV file
+
+    Returns:
+        True if conversion succeeded, False otherwise
+    """
+    try:
+        result = subprocess.run([
+            'ffmpeg', '-i', input_path,
+            '-acodec', 'pcm_s16le',   # 16-bit PCM
+            '-ar', '16000',           # 16kHz sample rate
+            '-ac', '1',               # Mono
+            '-y',                     # Overwrite
+            '-loglevel', 'error',     # Suppress output
+            output_path
+        ], capture_output=True, text=True, timeout=60)
+        return result.returncode == 0
+    except Exception:
+        return False
 
 # Default trigger phrases for auto-deletion
 DEFAULT_TRIGGERS = ["delete delete", "cut cut", "delete this"]
@@ -86,7 +112,6 @@ def transcribe_segments(cap_path: Path, model_name: str = "medium") -> list[dict
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     from app.core.transcription_service_cpp import get_transcription_service
     from app.utils.config_manager import ConfigManager
-    from kb.core import LocalFileCopy
 
     # Load recording metadata
     meta = load_recording_meta(cap_path)
@@ -119,34 +144,51 @@ def transcribe_segments(cap_path: Path, model_name: str = "medium") -> list[dict
     service.load_model()
     console.print("[dim]Model loaded![/dim]")
 
+    # Silent progress callback to suppress internal whisper output
+    def silent_progress(percent, text, lang_info):
+        pass  # Suppress all internal progress output
+
     # Sequential transcription with progress display
     results = []
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TaskProgressColumn(),
-        console=console,
-    ) as progress:
-        task = progress.add_task(
-            f"Transcribing {len(audio_files)} segments...",
-            total=len(audio_files)
-        )
+    temp_dir = tempfile.mkdtemp(prefix='kb_clean_')
 
-        for idx, audio_path in audio_files:
-            progress.update(task, description=f"Segment {idx}...")
+    try:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            console=console,
+            transient=True,  # Clear progress bar on completion
+        ) as progress:
+            task = progress.add_task(
+                f"Transcribing {len(audio_files)} segments...",
+                total=len(audio_files)
+            )
 
-            # Get duration first (before try block to ensure it's always set)
-            duration = get_audio_duration(str(audio_path))
+            for idx, audio_path in audio_files:
+                progress.update(task, description=f"Segment {idx}...")
 
-            # Transcribe single segment
-            try:
-                with LocalFileCopy(str(audio_path)) as local_path:
+                # Get duration first (before try block to ensure it's always set)
+                duration = get_audio_duration(str(audio_path))
+
+                # Transcribe single segment
+                try:
+                    # Convert .ogg to .wav (whisper.cpp needs WAV format)
+                    audio_str = str(audio_path)
+                    if audio_str.lower().endswith('.ogg'):
+                        wav_path = os.path.join(temp_dir, f"segment-{idx}.wav")
+                        if not convert_to_wav(audio_str, wav_path):
+                            raise RuntimeError(f"Failed to convert {audio_path} to WAV")
+                        transcribe_path = wav_path
+                    else:
+                        transcribe_path = audio_str
+
                     result = service.transcribe(
-                        local_path,
+                        transcribe_path,
                         language=config.get("transcription_language", None),
                         beam_size=1,
-                        progress_callback=None  # No nested progress
+                        progress_callback=silent_progress  # Suppress internal progress
                     )
 
                 # Extract and format transcript
@@ -187,6 +229,12 @@ def transcribe_segments(cap_path: Path, model_name: str = "medium") -> list[dict
                 })
 
             progress.advance(task)
+
+    finally:
+        # Clean up temp WAV files
+        import shutil
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
     return results
 
