@@ -1,0 +1,921 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KB Serve - Action Queue Dashboard</title>
+    <style>
+        /* Catppuccin Mocha palette */
+        :root {
+            --base: #1e1e2e;
+            --mantle: #181825;
+            --crust: #11111b;
+            --surface0: #313244;
+            --surface1: #45475a;
+            --surface2: #585b70;
+            --overlay0: #6c7086;
+            --overlay1: #7f849c;
+            --text: #cdd6f4;
+            --subtext1: #bac2de;
+            --subtext0: #a6adc8;
+            --lavender: #b4befe;
+            --blue: #89b4fa;
+            --sapphire: #74c7ec;
+            --sky: #89dceb;
+            --teal: #94e2d5;
+            --green: #a6e3a1;
+            --yellow: #f9e2af;
+            --peach: #fab387;
+            --maroon: #eba0ac;
+            --red: #f38ba8;
+            --mauve: #cba6f7;
+            --pink: #f5c2e7;
+            --flamingo: #f2cdcd;
+            --rosewater: #f5e0dc;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: var(--crust);
+            color: var(--text);
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Tmux-style layout */
+        .tmux-container {
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            grid-template-rows: 1fr auto;
+            height: 100vh;
+            gap: 1px;
+            background: var(--surface1);
+        }
+
+        .pane {
+            background: var(--base);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .pane-header {
+            background: var(--mantle);
+            padding: 8px 16px;
+            font-size: 11px;
+            color: var(--subtext0);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            border-bottom: 1px solid var(--surface0);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .pane-header .pane-index {
+            color: var(--mauve);
+        }
+
+        .pane-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0;
+        }
+
+        /* Section headers */
+        .section-header {
+            background: var(--mantle);
+            padding: 12px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--surface0);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .section-title {
+            color: var(--text);
+            font-weight: 600;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .section-count {
+            background: var(--green);
+            color: var(--crust);
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .section-count.processing {
+            background: var(--yellow);
+        }
+
+        .section-count.empty {
+            background: var(--surface1);
+            color: var(--overlay0);
+        }
+
+        /* Action items */
+        .action-item {
+            padding: 16px;
+            border-bottom: 1px solid var(--surface0);
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+
+        .action-item:hover {
+            background: var(--mantle);
+        }
+
+        .action-item.selected {
+            background: var(--surface0);
+            border-left: 3px solid var(--green);
+        }
+
+        .action-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 8px;
+        }
+
+        .action-type {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .action-icon {
+            font-size: 16px;
+        }
+
+        .action-label {
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .action-destination {
+            font-size: 11px;
+            color: var(--overlay0);
+            background: var(--surface0);
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+
+        .action-source {
+            color: var(--subtext0);
+            font-size: 12px;
+            margin-bottom: 8px;
+        }
+
+        .action-source-title {
+            color: var(--sapphire);
+        }
+
+        .action-meta {
+            display: flex;
+            gap: 16px;
+            font-size: 11px;
+            color: var(--overlay0);
+        }
+
+        .meta-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .action-preview {
+            margin-top: 12px;
+            padding: 12px;
+            background: var(--mantle);
+            border-radius: 6px;
+            font-size: 12px;
+            color: var(--subtext1);
+            line-height: 1.6;
+            max-height: 80px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .action-preview::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 30px;
+            background: linear-gradient(transparent, var(--mantle));
+        }
+
+        /* Right pane - Preview */
+        .preview-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--overlay0);
+            text-align: center;
+            padding: 40px;
+        }
+
+        .preview-empty-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        .preview-content {
+            padding: 20px;
+        }
+
+        .preview-title {
+            color: var(--sapphire);
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .preview-subtitle {
+            color: var(--overlay0);
+            font-size: 12px;
+            margin-bottom: 20px;
+        }
+
+        .preview-section {
+            margin-bottom: 20px;
+        }
+
+        .preview-section-title {
+            color: var(--overlay0);
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 8px;
+        }
+
+        .preview-text {
+            background: var(--mantle);
+            padding: 16px;
+            border-radius: 6px;
+            font-size: 13px;
+            line-height: 1.7;
+            color: var(--text);
+            max-height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+
+        .preview-meta-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .preview-meta-item {
+            background: var(--mantle);
+            padding: 10px 12px;
+            border-radius: 6px;
+        }
+
+        .preview-meta-label {
+            color: var(--overlay0);
+            font-size: 10px;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .preview-meta-value {
+            color: var(--text);
+            font-size: 13px;
+        }
+
+        .preview-meta-value.decimal { color: var(--mauve); }
+        .preview-meta-value.date { color: var(--yellow); }
+
+        .preview-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 20px;
+        }
+
+        .preview-actions .btn {
+            flex: 1;
+            justify-content: center;
+            padding: 10px;
+        }
+
+        .btn {
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-family: inherit;
+            cursor: pointer;
+            border: none;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.1s;
+        }
+
+        .btn-primary {
+            background: var(--green);
+            color: var(--crust);
+            font-weight: 600;
+        }
+
+        .btn-primary:hover {
+            background: var(--teal);
+        }
+
+        .btn-secondary {
+            background: var(--surface0);
+            color: var(--text);
+        }
+
+        .btn-secondary:hover {
+            background: var(--surface1);
+        }
+
+        .btn .key {
+            background: rgba(0,0,0,0.2);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+        }
+
+        /* Status bar */
+        .status-bar {
+            grid-column: 1 / -1;
+            background: var(--green);
+            color: var(--crust);
+            padding: 4px 16px;
+            font-size: 11px;
+            display: flex;
+            justify-content: space-between;
+            font-weight: 500;
+        }
+
+        .status-section {
+            display: flex;
+            gap: 24px;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-key {
+            background: rgba(0,0,0,0.2);
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+        }
+
+        /* Toast notification */
+        .toast {
+            position: fixed;
+            bottom: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--surface0);
+            color: var(--text);
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 13px;
+            display: none;
+            align-items: center;
+            gap: 10px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            border: 1px solid var(--surface1);
+            z-index: 1000;
+        }
+
+        .toast.show {
+            display: flex;
+            animation: slideUp 0.3s ease;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateX(-50%) translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(-50%) translateY(0);
+            }
+        }
+
+        .toast-icon {
+            color: var(--green);
+            font-size: 16px;
+        }
+
+        /* Empty state */
+        .empty-state {
+            padding: 60px 20px;
+            text-align: center;
+            color: var(--overlay0);
+        }
+
+        .empty-state-icon {
+            font-size: 40px;
+            margin-bottom: 12px;
+            opacity: 0.5;
+        }
+
+        .empty-state-text {
+            font-size: 13px;
+        }
+
+        /* Completed items (dimmed) */
+        .action-item.completed {
+            opacity: 0.5;
+        }
+
+        .action-item.completed .action-label {
+            text-decoration: line-through;
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--mantle);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--surface1);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--surface2);
+        }
+
+        /* Shortcut hints */
+        .shortcut-bar {
+            background: var(--mantle);
+            padding: 8px 16px;
+            font-size: 11px;
+            color: var(--subtext0);
+            display: flex;
+            gap: 20px;
+            border-top: 1px solid var(--surface0);
+        }
+
+        .shortcut {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .key-hint {
+            background: var(--surface0);
+            color: var(--sapphire);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="tmux-container">
+        <!-- Left Pane: Action Queue -->
+        <div class="pane">
+            <div class="pane-header">
+                <span><span class="pane-index">0:</span> action-queue</span>
+                <span id="connection-status" style="color: var(--green);">⬤ connected</span>
+            </div>
+            <div class="pane-body" id="queue-list">
+                <!-- Populated by JavaScript -->
+            </div>
+            <div class="shortcut-bar">
+                <span class="shortcut"><span class="key-hint">j/k</span> navigate</span>
+                <span class="shortcut"><span class="key-hint">c</span> copy</span>
+                <span class="shortcut"><span class="key-hint">d</span> done</span>
+                <span class="shortcut"><span class="key-hint">s</span> skip</span>
+            </div>
+        </div>
+
+        <!-- Right Pane: Preview -->
+        <div class="pane">
+            <div class="pane-header">
+                <span><span class="pane-index">1:</span> preview</span>
+                <span id="preview-type-label" style="color: var(--sapphire);"></span>
+            </div>
+            <div class="pane-body" id="preview-pane">
+                <div class="preview-empty">
+                    <div class="preview-empty-icon">📋</div>
+                    <div>Select an item to preview</div>
+                </div>
+            </div>
+            <div class="shortcut-bar">
+                <span class="shortcut"><span class="key-hint">Ctrl+C</span> quit</span>
+            </div>
+        </div>
+
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <div class="status-section">
+                <span>[kb-serve]</span>
+                <span id="status-pending">0 pending</span>
+                <span id="status-processing">0 processing</span>
+                <span id="status-completed">0 completed today</span>
+            </div>
+            <div class="status-section">
+                <span id="status-host">localhost:8765</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast notification -->
+    <div class="toast" id="toast">
+        <span class="toast-icon">✓</span>
+        <span id="toast-message">Copied to clipboard!</span>
+    </div>
+
+    <script>
+        // State
+        let queueData = { pending: [], completed: [], processing: [] };
+        let selectedIndex = 0;
+        let selectedItem = null;
+
+        // Action type icons
+        const ACTION_ICONS = {
+            'skool_post': '📝',
+            'linkedin_post': '💼',
+            'student_guide': '📚',
+        };
+
+        // Fetch queue data
+        async function fetchQueue() {
+            try {
+                const response = await fetch('/api/queue');
+                queueData = await response.json();
+                renderQueue();
+                updateStatusBar();
+
+                // Auto-select first item if none selected
+                if (selectedItem === null && queueData.pending.length > 0) {
+                    selectItem(0);
+                }
+            } catch (error) {
+                console.error('Failed to fetch queue:', error);
+                document.getElementById('connection-status').innerHTML = '⬤ disconnected';
+                document.getElementById('connection-status').style.color = 'var(--red)';
+            }
+        }
+
+        // Render queue list
+        function renderQueue() {
+            const queueList = document.getElementById('queue-list');
+            queueList.innerHTML = '';
+
+            // Pending section
+            if (queueData.pending.length > 0) {
+                const header = document.createElement('div');
+                header.className = 'section-header';
+                header.innerHTML = `
+                    <div class="section-title">
+                        <span>📋 Ready for Action</span>
+                        <span class="section-count">${queueData.pending.length}</span>
+                    </div>
+                `;
+                queueList.appendChild(header);
+
+                queueData.pending.forEach((item, index) => {
+                    const actionItem = createActionItem(item, index);
+                    queueList.appendChild(actionItem);
+                });
+            } else {
+                const emptyState = document.createElement('div');
+                emptyState.className = 'empty-state';
+                emptyState.innerHTML = `
+                    <div class="empty-state-icon">✨</div>
+                    <div class="empty-state-text">No pending actions. All clear!</div>
+                `;
+                queueList.appendChild(emptyState);
+            }
+
+            // Processing section
+            if (queueData.processing.length > 0) {
+                const header = document.createElement('div');
+                header.className = 'section-header';
+                header.innerHTML = `
+                    <div class="section-title">
+                        <span>⟳ Processing</span>
+                        <span class="section-count processing">${queueData.processing.length}</span>
+                    </div>
+                `;
+                queueList.appendChild(header);
+
+                // TODO: Render processing items in Phase 2
+            }
+
+            // Completed section
+            if (queueData.completed.length > 0) {
+                const header = document.createElement('div');
+                header.className = 'section-header';
+                header.innerHTML = `
+                    <div class="section-title">
+                        <span>✓ Completed Today</span>
+                        <span class="section-count empty">${queueData.completed.length}</span>
+                    </div>
+                `;
+                queueList.appendChild(header);
+
+                queueData.completed.forEach(item => {
+                    const actionItem = createCompletedItem(item);
+                    queueList.appendChild(actionItem);
+                });
+            }
+        }
+
+        // Create action item element
+        function createActionItem(item, index) {
+            const div = document.createElement('div');
+            div.className = 'action-item';
+            if (index === selectedIndex) {
+                div.classList.add('selected');
+            }
+
+            const icon = ACTION_ICONS[item.type] || '📄';
+            const preview = item.content.substring(0, 200);
+
+            div.innerHTML = `
+                <div class="action-item-header">
+                    <div class="action-type">
+                        <span class="action-icon">${icon}</span>
+                        <span class="action-label">${formatActionType(item.type)}</span>
+                    </div>
+                    <span class="action-destination">→ ${item.destination}</span>
+                </div>
+                <div class="action-source">
+                    from <span class="action-source-title">"${item.source_title}"</span>
+                </div>
+                <div class="action-meta">
+                    <span class="meta-item">
+                        <span style="color: var(--mauve)">${item.source_decimal}</span>
+                    </span>
+                    <span class="meta-item">
+                        <span style="color: var(--yellow)">${item.relative_time}</span>
+                    </span>
+                    ${item.word_count > 0 ? `<span class="meta-item"><span>~${item.word_count} words</span></span>` : ''}
+                </div>
+                <div class="action-preview">${preview}...</div>
+            `;
+
+            div.addEventListener('click', () => selectItem(index));
+            return div;
+        }
+
+        // Create completed item element
+        function createCompletedItem(item) {
+            const div = document.createElement('div');
+            div.className = 'action-item completed';
+
+            const icon = ACTION_ICONS[item.type] || '📄';
+
+            div.innerHTML = `
+                <div class="action-item-header">
+                    <div class="action-type">
+                        <span class="action-icon" style="opacity: 0.5">${icon}</span>
+                        <span class="action-label">${formatActionType(item.type)}</span>
+                    </div>
+                    <span style="color: var(--green); font-size: 11px;">✓ ${item.status}</span>
+                </div>
+                <div class="action-source">
+                    from <span class="action-source-title">"${item.source_title}"</span>
+                </div>
+            `;
+
+            return div;
+        }
+
+        // Format action type for display
+        function formatActionType(type) {
+            return type.split('_').map(word =>
+                word.charAt(0).toUpperCase() + word.slice(1)
+            ).join(' ');
+        }
+
+        // Select an item
+        function selectItem(index) {
+            if (index < 0 || index >= queueData.pending.length) return;
+
+            selectedIndex = index;
+            selectedItem = queueData.pending[index];
+
+            // Update UI
+            document.querySelectorAll('.action-item:not(.completed)').forEach((el, i) => {
+                el.classList.toggle('selected', i === index);
+            });
+
+            loadPreview(selectedItem);
+        }
+
+        // Load preview pane
+        async function loadPreview(item) {
+            const previewPane = document.getElementById('preview-pane');
+            const previewTypeLabel = document.getElementById('preview-type-label');
+
+            previewTypeLabel.textContent = item.type;
+
+            previewPane.innerHTML = `
+                <div class="preview-content">
+                    <div class="preview-title">${formatActionType(item.type)}</div>
+                    <div class="preview-subtitle">${item.source_title} → ${item.destination}</div>
+
+                    <div class="preview-section">
+                        <div class="preview-meta-grid">
+                            <div class="preview-meta-item">
+                                <div class="preview-meta-label">Category</div>
+                                <div class="preview-meta-value decimal">${item.source_decimal}</div>
+                            </div>
+                            <div class="preview-meta-item">
+                                <div class="preview-meta-label">Generated</div>
+                                <div class="preview-meta-value date">${item.relative_time}</div>
+                            </div>
+                            <div class="preview-meta-item">
+                                <div class="preview-meta-label">Word Count</div>
+                                <div class="preview-meta-value">~${item.word_count} words</div>
+                            </div>
+                            <div class="preview-meta-item">
+                                <div class="preview-meta-label">Destination</div>
+                                <div class="preview-meta-value">${item.destination}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="preview-section">
+                        <div class="preview-section-title">Content Preview</div>
+                        <div class="preview-text">${item.content}</div>
+                    </div>
+
+                    <div class="preview-actions">
+                        <button class="btn btn-primary" onclick="copyToClipboard()">
+                            <span>📋 Copy to Clipboard</span>
+                            <span class="key">c</span>
+                        </button>
+                        <button class="btn btn-secondary" onclick="markDone()">
+                            <span>Mark Done</span>
+                            <span class="key">d</span>
+                        </button>
+                        <button class="btn btn-secondary" onclick="skipItem()">
+                            <span>Skip</span>
+                            <span class="key">s</span>
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Update status bar
+        function updateStatusBar() {
+            document.getElementById('status-pending').textContent = `${queueData.pending.length} pending`;
+            document.getElementById('status-processing').textContent = `${queueData.processing.length} processing`;
+            document.getElementById('status-completed').textContent = `${queueData.completed.length} completed today`;
+        }
+
+        // Show toast notification
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            const toastMessage = document.getElementById('toast-message');
+            toastMessage.textContent = message;
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 2000);
+        }
+
+        // Copy to clipboard
+        async function copyToClipboard() {
+            if (!selectedItem) return;
+
+            try {
+                // Try client-side clipboard API first
+                await navigator.clipboard.writeText(selectedItem.content);
+                showToast(`Copied to clipboard! Paste to ${selectedItem.destination}.`);
+            } catch (error) {
+                // Fallback to server-side pyperclip
+                try {
+                    const response = await fetch(`/api/action/${selectedItem.id}/copy`, {
+                        method: 'POST',
+                    });
+                    if (response.ok) {
+                        showToast(`Copied to clipboard! Paste to ${selectedItem.destination}.`);
+                    }
+                } catch (err) {
+                    console.error('Copy failed:', err);
+                    showToast('Copy failed - please try manually');
+                }
+            }
+        }
+
+        // Mark item as done
+        async function markDone() {
+            if (!selectedItem) return;
+
+            try {
+                const response = await fetch(`/api/action/${selectedItem.id}/done`, {
+                    method: 'POST',
+                });
+                if (response.ok) {
+                    showToast('Marked as done!');
+                    await fetchQueue();
+
+                    // Move to next item
+                    if (selectedIndex >= queueData.pending.length) {
+                        selectedIndex = Math.max(0, queueData.pending.length - 1);
+                    }
+                    if (queueData.pending.length > 0) {
+                        selectItem(selectedIndex);
+                    } else {
+                        selectedItem = null;
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to mark done:', error);
+            }
+        }
+
+        // Skip item
+        async function skipItem() {
+            if (!selectedItem) return;
+
+            try {
+                const response = await fetch(`/api/action/${selectedItem.id}/skip`, {
+                    method: 'POST',
+                });
+                if (response.ok) {
+                    showToast('Skipped!');
+                    await fetchQueue();
+
+                    // Move to next item
+                    if (selectedIndex >= queueData.pending.length) {
+                        selectedIndex = Math.max(0, queueData.pending.length - 1);
+                    }
+                    if (queueData.pending.length > 0) {
+                        selectItem(selectedIndex);
+                    } else {
+                        selectedItem = null;
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to skip:', error);
+            }
+        }
+
+        // Keyboard navigation
+        document.addEventListener('keydown', function(e) {
+            if (queueData.pending.length === 0) return;
+
+            if (e.key === 'j') {
+                // Move down
+                selectItem(Math.min(selectedIndex + 1, queueData.pending.length - 1));
+            } else if (e.key === 'k') {
+                // Move up
+                selectItem(Math.max(selectedIndex - 1, 0));
+            } else if (e.key === 'c') {
+                // Copy
+                copyToClipboard();
+            } else if (e.key === 'd') {
+                // Done
+                markDone();
+            } else if (e.key === 's') {
+                // Skip
+                skipItem();
+            }
+        });
+
+        // Initialize
+        fetchQueue();
+
+        // Poll for updates every 5 seconds
+        setInterval(fetchQueue, 5000);
+    </script>
+</body>
+</html>

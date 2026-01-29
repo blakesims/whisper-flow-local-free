@@ -24,3 +24,6 @@ mlx-lm>=0.30.0           # Local LLM for post-processing (Apple Silicon)
 
 # Daemon/Background Service
 pynput>=1.7.6
+
+# KB Serve - Web Dashboard
+Flask>=3.0.0

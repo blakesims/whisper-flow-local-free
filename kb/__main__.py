@@ -161,6 +161,11 @@ COMMANDS = {
         "description": "Run LLM analysis on existing transcript",
         "module": "kb.analyze",
     },
+    "serve": {
+        "label": "Serve",
+        "description": "Start action queue dashboard web server",
+        "module": "kb.serve",
+    },
     "dashboard": {
         "label": "Dashboard",
         "description": "Open visual overview of KB configuration in browser",
