@@ -191,42 +191,42 @@ def transcribe_segments(cap_path: Path, model_name: str = "medium") -> list[dict
                         progress_callback=silent_progress  # Suppress internal progress
                     )
 
-                # Extract and format transcript
-                segments = result.get("segments", [])
-                full_text = result.get("text", "").strip()
+                    # Extract and format transcript
+                    segments = result.get("segments", [])
+                    full_text = result.get("text", "").strip()
 
-                # Format with timestamps
-                formatted_lines = []
-                if segments:
-                    for seg in segments:
-                        start_seconds = seg.t0 / 100.0
-                        ts = format_timestamp(start_seconds)
-                        text = seg.text.strip()
-                        if text:
-                            formatted_lines.append(f"[{ts}] {text}")
+                    # Format with timestamps
+                    formatted_lines = []
+                    if segments:
+                        for seg in segments:
+                            start_seconds = seg.t0 / 100.0
+                            ts = format_timestamp(start_seconds)
+                            text = seg.text.strip()
+                            if text:
+                                formatted_lines.append(f"[{ts}] {text}")
 
-                formatted_text = "\n".join(formatted_lines) if formatted_lines else full_text
+                    formatted_text = "\n".join(formatted_lines) if formatted_lines else full_text
 
-                results.append({
-                    "index": idx,
-                    "path": str(audio_path),
-                    "duration": duration,
-                    "text": full_text,
-                    "formatted": formatted_text,
-                    "status": "success",
-                })
+                    results.append({
+                        "index": idx,
+                        "path": str(audio_path),
+                        "duration": duration,
+                        "text": full_text,
+                        "formatted": formatted_text,
+                        "status": "success",
+                    })
 
-            except Exception as e:
-                console.print(f"[red]Error transcribing segment {idx}: {e}[/red]")
-                results.append({
-                    "index": idx,
-                    "path": str(audio_path),
-                    "duration": duration,
-                    "text": "",
-                    "formatted": "",
-                    "status": "failed",
-                    "error": str(e),
-                })
+                except Exception as e:
+                    console.print(f"[red]Error transcribing segment {idx}: {e}[/red]")
+                    results.append({
+                        "index": idx,
+                        "path": str(audio_path),
+                        "duration": duration,
+                        "text": "",
+                        "formatted": "",
+                        "status": "failed",
+                        "error": str(e),
+                    })
 
             progress.advance(task)
 
@@ -388,22 +388,64 @@ def is_cap_running() -> bool:
         return False
 
 
-def play_audio(audio_path: str, timeout: int = None) -> None:
+def play_audio(audio_path: str) -> None:
     """Play audio file using afplay (macOS).
+
+    Converts OGG to WAV first since afplay doesn't support OGG natively.
+    User can press 'q' + Enter to stop playback early.
 
     Args:
         audio_path: Path to audio file
-        timeout: Optional timeout in seconds (plays first N seconds)
     """
+    import select
+    import sys
+    import tty
+    import termios
+
     try:
-        if timeout:
-            # Use timeout command to limit playback
-            subprocess.run(
-                ["timeout", str(timeout), "afplay", audio_path],
-                capture_output=True
-            )
-        else:
-            subprocess.run(["afplay", audio_path], capture_output=True)
+        play_path = audio_path
+
+        # Convert OGG to WAV if needed (afplay doesn't support ogg)
+        if audio_path.lower().endswith('.ogg'):
+            temp_wav = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
+            temp_wav.close()
+            if convert_to_wav(audio_path, temp_wav.name):
+                play_path = temp_wav.name
+            else:
+                console.print("[yellow]Failed to convert audio for playback[/yellow]")
+                return
+
+        # Start audio in background process
+        process = subprocess.Popen(
+            ["afplay", play_path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+
+        console.print("[dim]Playing... (press 'q' to stop)[/dim]")
+
+        # Save terminal settings and switch to raw mode for single keypress
+        old_settings = termios.tcgetattr(sys.stdin)
+        try:
+            tty.setraw(sys.stdin.fileno())
+
+            while process.poll() is None:  # While audio is still playing
+                # Check if key pressed (with 0.1s timeout)
+                if select.select([sys.stdin], [], [], 0.1)[0]:
+                    key = sys.stdin.read(1)
+                    if key.lower() == 'q':
+                        process.terminate()
+                        process.wait()
+                        console.print("\r[dim]Stopped[/dim]       ")
+                        break
+        finally:
+            # Restore terminal settings
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+
+        # Cleanup temp file if we created one
+        if play_path != audio_path and os.path.exists(play_path):
+            os.unlink(play_path)
+
     except FileNotFoundError:
         console.print("[yellow]afplay not available (macOS only)[/yellow]")
     except Exception as e:
@@ -685,6 +727,233 @@ def _update_segment_paths(seg: dict, new_index: int) -> dict:
     return new_seg
 
 
+def restore_segments(cap_path: Path) -> None:
+    """
+    Restore soft-deleted segments from a Cap recording.
+
+    Uses the audit log to determine correct insertion points,
+    then renumbers existing segments to make room.
+    """
+    segments_dir = cap_path / "content" / "segments"
+    meta_path = cap_path / "recording-meta.json"
+    config_path = cap_path / "project-config.json"
+    audit_path = cap_path / "_clean_audit.json"
+
+    # Check for deleted segments
+    deleted_folders = sorted(segments_dir.glob("_deleted_segment-*"))
+    if not deleted_folders:
+        console.print("[yellow]No deleted segments found to restore.[/yellow]")
+        return
+
+    # Load audit log for context
+    audit_data = {}
+    if audit_path.exists():
+        with open(audit_path) as f:
+            audit_data = json.load(f)
+
+    deleted_info = {d["original_index"]: d for d in audit_data.get("deleted_segments", [])}
+    kept_info = audit_data.get("kept_segments", [])
+
+    # Build list of restorable segments with info
+    restorable = []
+    for folder in deleted_folders:
+        # Extract original index from folder name
+        orig_idx = int(folder.name.replace("_deleted_segment-", ""))
+        info = deleted_info.get(orig_idx, {})
+        transcript = info.get("transcript", "[transcript not available]")
+        duration = info.get("duration", 0)
+
+        restorable.append({
+            "folder": folder,
+            "original_index": orig_idx,
+            "transcript": transcript,
+            "duration": duration,
+        })
+
+    # Display available segments
+    console.print("\n[bold]Deleted segments available to restore:[/bold]\n")
+    for i, seg in enumerate(restorable, 1):
+        console.print(f"[bold]{i}.[/bold] Segment {seg['original_index']} ({seg['duration']:.0f}s)")
+        preview = seg["transcript"][:100] + "..." if len(seg["transcript"]) > 100 else seg["transcript"]
+        console.print(Panel(preview, border_style="dim"))
+
+    # Let user select which to restore
+    choices = [
+        questionary.Choice(
+            f"Segment {seg['original_index']} ({seg['duration']:.0f}s)",
+            value=seg
+        )
+        for seg in restorable
+    ]
+    choices.append(questionary.Choice("Cancel", value=None))
+
+    selected = questionary.select(
+        "Select segment to restore:",
+        choices=choices,
+        style=custom_style
+    ).ask()
+
+    if not selected:
+        console.print("[dim]Cancelled.[/dim]")
+        return
+
+    orig_idx = selected["original_index"]
+    console.print(f"\n[bold]Restoring segment {orig_idx}...[/bold]")
+
+    # Load current metadata
+    with open(meta_path) as f:
+        meta = json.load(f)
+
+    current_segments = meta.get("segments", [])
+    current_count = len(current_segments)
+
+    # Compute insertion point
+    # Find where this segment belongs based on original indices
+    # It should go after any kept segment with lower original_index
+    # and before any kept segment with higher original_index
+
+    insertion_point = current_count  # Default: append at end
+
+    if kept_info:
+        # Build mapping of original_index -> new_index from audit
+        for kept in kept_info:
+            if kept["original_index"] > orig_idx:
+                # This kept segment was originally after our deleted segment
+                # So we insert before its current position
+                insertion_point = min(insertion_point, kept["new_index"])
+
+    console.print(f"[dim]Insertion point: position {insertion_point}[/dim]")
+
+    # Step 1: Shift existing segments to make room
+    # Work backwards to avoid conflicts
+    console.print("\n[bold]📁 Shifting segments to make room...[/bold]")
+    for i in range(current_count - 1, insertion_point - 1, -1):
+        src = segments_dir / f"segment-{i}"
+        dst = segments_dir / f"segment-{i + 1}"
+        if src.exists():
+            src.rename(dst)
+            console.print(f"   segment-{i} → segment-{i + 1}")
+
+    # Step 2: Restore the deleted segment
+    console.print("\n[bold]♻️  Restoring deleted segment...[/bold]")
+    src = selected["folder"]
+    dst = segments_dir / f"segment-{insertion_point}"
+    src.rename(dst)
+    console.print(f"   _deleted_segment-{orig_idx} → segment-{insertion_point}")
+
+    # Step 3: Update recording-meta.json
+    console.print("\n[bold]📝 Updating recording-meta.json...[/bold]")
+
+    # We need to reconstruct the segment metadata
+    # Try to get it from the restored folder's files
+    restored_seg_meta = _build_segment_meta(segments_dir, insertion_point)
+
+    # Shift indices in existing segment metadata
+    new_segments = []
+    for i, seg in enumerate(current_segments):
+        if i >= insertion_point:
+            # Update paths to reflect new index
+            new_segments.append(_update_segment_paths(seg, i + 1))
+        else:
+            new_segments.append(seg)
+
+    # Insert restored segment at the right position
+    new_segments.insert(insertion_point, restored_seg_meta)
+
+    meta["segments"] = new_segments
+
+    with open(meta_path, 'w') as f:
+        json.dump(meta, f, indent=2)
+
+    # Step 4: Delete project-config.json
+    if config_path.exists():
+        config_path.unlink()
+        console.print("[bold]🧹 Removed project-config.json[/bold] (Cap will regenerate)")
+
+    # Step 5: Update audit log to remove the restored segment
+    if audit_path.exists() and audit_data:
+        audit_data["deleted_segments"] = [
+            d for d in audit_data.get("deleted_segments", [])
+            if d["original_index"] != orig_idx
+        ]
+        # Update kept_segments to reflect new state
+        # Shift indices for segments after insertion point
+        new_kept = []
+        for kept in audit_data.get("kept_segments", []):
+            if kept["new_index"] >= insertion_point:
+                kept["new_index"] += 1
+            new_kept.append(kept)
+        # Add restored segment back
+        new_kept.append({
+            "original_index": orig_idx,
+            "new_index": insertion_point,
+            "restored_at": datetime.now().isoformat()
+        })
+        new_kept.sort(key=lambda x: x["new_index"])
+        audit_data["kept_segments"] = new_kept
+        audit_data["remaining_segment_count"] = len(new_segments)
+        audit_data["last_restore"] = datetime.now().isoformat()
+
+        with open(audit_path, 'w') as f:
+            json.dump(audit_data, f, indent=2)
+        console.print("[bold]💾 Updated audit log[/bold]")
+
+    console.print(f"\n[green]✓ Restored! Now {len(new_segments)} segments.[/green]")
+
+    # Open in Cap
+    open_in_cap_or_finder(cap_path)
+
+
+def _build_segment_meta(segments_dir: Path, index: int) -> dict:
+    """Build segment metadata by examining files in the segment folder."""
+    seg_dir = segments_dir / f"segment-{index}"
+
+    meta = {}
+
+    # Check for display video
+    for ext in [".mp4", ".webm"]:
+        display_path = seg_dir / f"display{ext}"
+        if display_path.exists():
+            meta["display"] = {
+                "path": f"content/segments/segment-{index}/display{ext}"
+            }
+            break
+
+    # Check for camera video
+    for ext in [".mp4", ".webm"]:
+        camera_path = seg_dir / f"camera{ext}"
+        if camera_path.exists():
+            meta["camera"] = {
+                "path": f"content/segments/segment-{index}/camera{ext}"
+            }
+            break
+
+    # Check for mic audio
+    for name in ["audio-input.ogg", "audio-input.mp3", "audio-input.wav"]:
+        mic_path = seg_dir / name
+        if mic_path.exists():
+            meta["mic"] = {
+                "path": f"content/segments/segment-{index}/{name}"
+            }
+            break
+
+    # Check for cursor data
+    cursor_path = seg_dir / "cursor.json"
+    if cursor_path.exists():
+        meta["cursor"] = f"content/segments/segment-{index}/cursor.json"
+
+    return meta
+
+
+def open_in_cap_or_finder(cap_path: Path) -> None:
+    """Open the cleaned recording in Cap (via file association)."""
+    try:
+        subprocess.run(["open", str(cap_path)], check=True)
+        console.print("[green]📺 Opened in Cap[/green]")
+    except Exception as e:
+        console.print(f"[yellow]Could not open: {e}[/yellow]")
+
+
 def save_audit_log(cap_path: Path, audit_data: dict, segments: list[dict]) -> None:
     """Save cleanup audit log to the recording directory."""
     audit_path = cap_path / "_clean_audit.json"
@@ -752,13 +1021,42 @@ def select_recording() -> Path | None:
     return None
 
 
-def main(triggers_only: bool = False, dry_run: bool = False):
+def main(triggers_only: bool = False, dry_run: bool = False, restore: bool = False):
     """Main entry point for kb clean.
 
     Args:
         triggers_only: If True, skip LLM analysis (only use trigger phrases)
         dry_run: If True, show what would be deleted but don't modify files
+        restore: If True, restore soft-deleted segments instead of cleaning
     """
+    # Parse sys.argv if called via kb CLI
+    import argparse
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("recording", nargs="?")
+    parser.add_argument("--triggers-only", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--restore", action="store_true")
+    args, _ = parser.parse_known_args()
+
+    # Override defaults with parsed args
+    if args.triggers_only:
+        triggers_only = True
+    if args.dry_run:
+        dry_run = True
+    if args.restore:
+        restore = True
+
+    # Handle restore mode
+    if restore:
+        console.print(Panel("[bold]Cap Recording Restore[/bold]", border_style="green"))
+        if args.recording:
+            cap_path = Path(args.recording)
+        else:
+            cap_path = select_recording()
+        if cap_path and cap_path.exists():
+            restore_segments(cap_path)
+        return
+
     console.print(Panel("[bold]Cap Recording Cleanup[/bold]", border_style="cyan"))
 
     # Check if Cap is running
@@ -830,7 +1128,9 @@ def main(triggers_only: bool = False, dry_run: bool = False):
     save_audit_log(cap_path, audit_data, segments)
 
     console.print(f"\n[green]✓ Done! {len(kept)} segments remain.[/green]")
-    console.print("[dim]Open in Cap to see the clean timeline.[/dim]")
+
+    # Open result in Cap or Finder
+    open_in_cap_or_finder(cap_path)
 
 
 if __name__ == "__main__":
@@ -854,8 +1154,28 @@ if __name__ == "__main__":
         action="store_true",
         help="Preview what would be deleted without making changes"
     )
+    parser.add_argument(
+        "--restore",
+        action="store_true",
+        help="Restore soft-deleted segments"
+    )
 
     args = parser.parse_args()
+
+    # Handle restore mode
+    if args.restore:
+        console.print(Panel("[bold]Cap Recording Restore[/bold]", border_style="green"))
+
+        if args.recording:
+            cap_path = Path(args.recording)
+        else:
+            cap_path = select_recording()
+
+        if cap_path and cap_path.exists():
+            restore_segments(cap_path)
+        else:
+            console.print("[red]No recording selected.[/red]")
+        sys.exit(0)
 
     # If recording path provided, use it directly instead of interactive selection
     if args.recording:
@@ -900,6 +1220,7 @@ if __name__ == "__main__":
                     audit_data = soft_delete_segments(cap_path, to_delete)
                     save_audit_log(cap_path, audit_data, segments)
                     console.print(f"\n[green]✓ Done! {len(kept)} segments remain.[/green]")
+                    open_in_cap_or_finder(cap_path)
             else:
                 console.print("\n[green]No segments to delete.[/green]")
     else:
