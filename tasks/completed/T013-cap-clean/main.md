@@ -4,7 +4,7 @@
 - **Task Name:** Cap Recording Auto-Clean
 - **Priority:** 1
 - **Number of Stories:** 5
-- **Current Status:** ACTIVE (implementation complete, needs testing)
+- **Current Status:** COMPLETED
 - **Dependencies:** kb.sources.cap, whisper.cpp models, Gemini API
 - **Rules Required:** task-documentation
 - **Acceptance Criteria:**
@@ -24,17 +24,17 @@ This is an 80/20 optimization: voice commands during recording + quick CLI revie
 
 ## 2. Overall Status
 
-ACTIVE - Implementation complete (S00-S04). Ready for user testing.
+COMPLETED - All stories implemented and user-tested (2025-01-29).
 
 ## 3. Stories Breakdown
 
 | Story ID | Story Name / Objective | Status | Deliverable |
 | :--- | :--- | :--- | :--- |
-| S00 | Core transcription refactor | Planned | Extract `transcribe_audio()` from core.py |
-| S01 | Per-segment transcription | Planned | Parallel transcription with progress |
-| S02 | Trigger phrase detection | Planned | Auto-mark segments with triggers |
-| S03 | LLM analysis & suggestions | Planned | Gemini identifies problematic segments |
-| S04 | Interactive review + soft-delete | Planned | CLI review, audio preview, soft-delete |
+| S00 | Core transcription refactor | Complete | Extract `transcribe_audio()` from core.py |
+| S01 | Per-segment transcription | Complete | Sequential transcription with progress |
+| S02 | Trigger phrase detection | Complete | Auto-mark segments with triggers |
+| S03 | LLM analysis & suggestions | Complete | Gemini identifies problematic segments |
+| S04 | Interactive review + soft-delete | Complete | CLI review, audio preview, soft-delete |
 
 ## 4. Story Details
 
