@@ -35,11 +35,13 @@ Build a web-based dashboard (`kb serve`) and automation system for the Knowledge
 - task-documentation
 
 ## Resources & References
-- Mockups: `/tmp/kb-serve-mockups/style4-action-queue.html` (primary)
-- Mockups: `/tmp/kb-serve-mockups/style4-browse-mode.html` (secondary)
+- **Mockups** (in /tmp, will be lost on reboot - CSS/JS patterns now in `kb/templates/action_queue.html`):
+  - `/tmp/kb-serve-mockups/style4-action-queue.html` (primary - implemented)
+  - `/tmp/kb-serve-mockups/style4-browse-mode.html` (secondary - Phase 5)
 - Existing dashboard: `kb/dashboard.py` (config visualization, can reuse patterns)
 - KB Core: `kb/core.py` (transcribe_to_kb, registry functions)
 - Analysis: `kb/analyze.py` (existing analysis runner)
+- **Implemented**: `kb/serve.py`, `kb/templates/action_queue.html`
 
 ## Design Decisions (Locked In)
 
@@ -120,7 +122,7 @@ POST /api/action/<id>/skip       # Mark skipped
 # Action state file: ~/.kb/action-state.json
 {
   "actions": {
-    "50.03.01-260128-alpha::skool_post": {
+    "50.03.01-260128-alpha--skool_post": {  # Note: -- separator (URL safe)
       "status": "pending",  # pending, copied, done, skipped
       "copied_count": 0,
       "created_at": "2026-01-29T14:00:00"
@@ -138,15 +140,15 @@ kb/
 ```
 
 **Acceptance Criteria**:
-- [ ] `kb serve` starts server on port 8765 (configurable via --port)
-- [ ] Ctrl+C cleanly shuts down
-- [ ] Scans KB for transcripts with actionable analyses on startup
-- [ ] `j`/`k` navigate, `c` copy, `d` done, `s` skip
-- [ ] Selected item shows preview in right pane
-- [ ] Toast on copy (disappears after 2s)
-- [ ] Completed items dimmed with strikethrough
-- [ ] Empty state when no pending actions
-- [ ] 5s polling updates queue
+- [x] `kb serve` starts server on port 8765 (configurable via --port)
+- [x] Ctrl+C cleanly shuts down
+- [x] Scans KB for transcripts with actionable analyses on startup
+- [x] `j`/`k` navigate, `c` copy, `d` done, `s` skip
+- [x] Selected item shows preview in right pane
+- [x] Toast on copy (disappears after 2s)
+- [x] Completed items dimmed with strikethrough
+- [x] Empty state when no pending actions
+- [x] 5s polling updates queue
 
 **Estimated Time**: 1-2 days
 
@@ -165,6 +167,40 @@ kb/
 - Modify `kb/analyze.py` to resolve dependencies
 - Run prerequisite analyses before compound analysis
 - Pass prerequisite outputs as context to compound prompt
+- Create `skool_post` analysis type as first compound example
+
+**Example Compound Analysis Type**:
+```json
+// ~/.config/kb/analysis_types/skool_post.json
+{
+  "name": "skool_post",
+  "description": "Community post formatted for Skool",
+  "requires": ["summary", "key_moments"],
+  "prompt": "You are creating a Skool community post based on a recorded session.\n\nHere is the summary:\n{{summary}}\n\nHere are the key moments:\n{{key_moments}}\n\nCreate an engaging Skool post that:\n- Starts with an attention-grabbing opener (can use 1-2 emojis)\n- Highlights 3-5 key takeaways as bullet points\n- Includes a memorable quote or insight\n- Ends with a discussion question\n- Keeps total length under 300 words\n\nWrite in a conversational but professional tone.",
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "post": { "type": "string" }
+    }
+  }
+}
+```
+
+**Dependency Resolution Logic**:
+```python
+def run_analysis_with_deps(transcript_path, analysis_type):
+    analysis_def = load_analysis_type(analysis_type)
+
+    # Check for required analyses
+    for req in analysis_def.get("requires", []):
+        if req not in transcript["analysis"]:
+            # Run prerequisite first
+            run_analysis(transcript_path, req)
+
+    # Now run the compound analysis with context
+    context = {req: transcript["analysis"][req] for req in analysis_def.get("requires", [])}
+    run_analysis(transcript_path, analysis_type, context=context)
+```
 
 **Estimated Time**: 0.5 days
 
@@ -173,22 +209,33 @@ kb/
 
 **Dependencies**: None (can be done in parallel with P1)
 
-### Phase 3: Actionable Output System
+### Phase 3: Actionable Output System (Config-Driven)
 **Status**: Not Started
 
 **Objectives**:
-- Define action mapping in config (analysis → destination label)
-- Track action state (pending, copied, done) in registry or separate state file
-- Filter analyses into "actionable" for queue display
-- Implement "mark done" functionality
+- Move action mapping from hardcoded `DEFAULT_ACTION_MAPPING` to `~/.config/kb/config.yaml`
+- Support `input_type.analysis_type` pattern for granular control
+- Add wildcard support (`*.skool_post` matches all input types)
+
+**Config Schema**:
+```yaml
+# ~/.config/kb/config.yaml
+serve:
+  action_mapping:
+    # Format: "analysis_type" or "input_type.analysis_type"
+    skool_post: "Skool"           # Any input type
+    linkedin_post: "LinkedIn"
+    meeting.student_guide: "Student"  # Only for meetings
+    "*.summary": "Review"         # Wildcard - all summaries
+```
 
 **Estimated Time**: 0.5 days
 
 **Resources Needed**:
-- Config schema update
-- State persistence (JSON file or SQLite)
+- Update `kb/serve.py` to load from config
+- Update `kb/__main__.py` config schema
 
-**Dependencies**: P1, P2
+**Dependencies**: P1
 
 ### Phase 4: File Inbox & Auto-Processing
 **Status**: Not Started
