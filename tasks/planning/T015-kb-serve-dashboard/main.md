@@ -3,6 +3,10 @@
 ## Task ID
 T015
 
+## Meta
+- **Status:** CODE_REVIEW
+- **Last Updated:** 2026-01-30
+
 ## Overview
 Build a web-based dashboard (`kb serve`) and automation system for the Knowledge Base workflow. The dashboard serves as an **action queue** (not a browsing tool) - surfacing outputs ready for the user to copy/share (Skool posts, LinkedIn posts, student guides, etc.). Includes automated transcription/analysis via file inbox and compound analysis types.
 
@@ -272,7 +276,7 @@ serve:
 **Dependencies**: P1
 
 ### Phase 6: Server Deployment & Access
-**Status**: Not Started
+**Status**: COMPLETE
 
 **Objectives**:
 - Systemd service or launchd plist for always-on server
@@ -295,6 +299,40 @@ serve:
 - Integration with actual posting (Skool API, LinkedIn API)
 
 ## Execution Log
+
+### Phase 6: Server Deployment & Access
+- **Status:** COMPLETE
+- **Started:** 2026-01-30
+- **Completed:** 2026-01-30
+- **Commits:** `66cdff8`
+- **Files Modified:**
+  - `deploy/kb-serve.service` - Systemd service file for running kb serve as daemon
+  - `deploy/deploy-kb-serve.sh` - Deployment script with install/status/logs/restart commands
+  - `scripts/raycast/open-kb-dashboard.sh` - Raycast script to open action queue
+  - `scripts/raycast/open-kb-browse.sh` - Raycast script to open browse mode
+  - `CLAUDE.md` - Added KB Server Deployment documentation section
+
+### Tasks Completed
+- [x] Created systemd service file (deploy/kb-serve.service)
+- [x] Created deployment script (deploy/deploy-kb-serve.sh)
+- [x] Registered port 8765 via ports CLI
+- [x] Created Raycast scripts for quick access from Mac
+- [x] Updated CLAUDE.md with deployment documentation
+
+### Acceptance Criteria
+- [x] Systemd service file created and documented - deploy/kb-serve.service with security hardening
+- [x] Deployment script works - deploy/deploy-kb-serve.sh with install/status/logs/restart/stop/uninstall commands
+- [x] Documentation explains local and server setup - CLAUDE.md updated with KB Server Deployment section
+- [x] Raycast scripts for quick access - scripts/raycast/open-kb-dashboard.sh and open-kb-browse.sh
+
+### Notes
+- Service binds to 0.0.0.0:8765 for Tailscale access
+- Security hardening: ProtectSystem=strict, ProtectHome=read-only, NoNewPrivileges
+- Restart on failure with 5s delay, rate limited to 5 attempts per 60s
+- Port 8765 registered in port-management.yml as "KB Serve Dashboard"
+- Cron instructions for inbox processing documented in CLAUDE.md
+
+---
 
 ### Phase 5: Browse Mode & Secondary Views
 - **Status:** COMPLETE
@@ -456,6 +494,14 @@ serve:
 - **Summary:** Implementation delivers on all acceptance criteria. File inbox scanning, processing, and archive/delete logic work correctly. Test coverage adequate for unit-level functions. Minor robustness issues identified (fragile path construction, no happy-path integration test) but nothing blocking progression.
 
 -> Details: `code-review-phase-4.md`
+
+### Phase 5
+- **Gate:** PASS
+- **Reviewed:** 2026-01-30
+- **Issues:** 0 critical, 2 major, 4 minor
+- **Summary:** Implementation delivers all acceptance criteria with solid test coverage. Browse mode provides intuitive three-pane navigation with proper input validation on API endpoints. XSS handling is partially addressed but has gaps in title/metadata fields - acceptable for local-only tool but should be fixed in Phase 6 hardening.
+
+-> Details: `code-review-phase-5.md`
 
 ---
 
