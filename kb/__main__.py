@@ -59,6 +59,15 @@ DEFAULTS = {
             "lead_magnet": "Marketing",
         },
     },
+    "inbox": {
+        "path": "~/.kb/inbox",
+        "archive_path": "~/.kb/archive",  # Set to null to delete after processing
+        "decimal_defaults": {
+            # Example configurations (user can override in config.yaml):
+            # "50.01.01": {"analyses": ["summary", "key_points", "skool_post"]},
+            # "50.03.01": {"analyses": ["summary", "key_points", "guide"]},
+        },
+    },
     "presets": {
         "alpha_session": {
             "label": "Alpha Cohort Session",
@@ -124,6 +133,14 @@ def load_config() -> dict:
                         **DEFAULTS["serve"]["action_mapping"],
                         **file_config["serve"]["action_mapping"]
                     }
+            if "inbox" in file_config:
+                config["inbox"] = {**DEFAULTS["inbox"], **file_config["inbox"]}
+                # Deep merge decimal_defaults
+                if "decimal_defaults" in file_config["inbox"]:
+                    config["inbox"]["decimal_defaults"] = {
+                        **DEFAULTS["inbox"]["decimal_defaults"],
+                        **file_config["inbox"]["decimal_defaults"]
+                    }
             if "presets" in file_config:
                 # Deep merge presets - user can override or add new presets
                 config["presets"] = {**DEFAULTS["presets"], **file_config["presets"]}
@@ -184,6 +201,11 @@ COMMANDS = {
         "label": "Serve",
         "description": "Start action queue dashboard web server",
         "module": "kb.serve",
+    },
+    "process-inbox": {
+        "label": "Process Inbox",
+        "description": "Process files dropped in inbox directories",
+        "module": "kb.inbox",
     },
     "dashboard": {
         "label": "Dashboard",
