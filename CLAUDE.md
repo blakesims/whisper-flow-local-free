@@ -30,6 +30,7 @@ Modular CLI for transcribing content to structured JSON knowledge base.
 - **Sources**: `file`, `cap`, `volume`, `zoom`, `paste` (handlers in `kb/sources/`)
 - **Shared utils**: `kb/core.py` (transcribe_to_kb, registry, format_timestamp)
 - **Analysis**: `kb analyze` for LLM analysis (Gemini API)
+- **Dashboard**: `kb serve` for action queue dashboard (see KB Server section below)
 - **Output**: `~/Obsidian/zen-ai/knowledge-base/transcripts/`
 
 ## Key Rules
@@ -132,3 +133,42 @@ The app now automatically optimizes CPU usage for transcription:
 - Intel/AMD: Uses physical core count (logical cores / 2) minus 2 for system
 - Can be manually configured via `transcription_cpu_threads` in config
 - Default behavior significantly improves transcription speed and CPU utilization
+
+## KB Server Deployment
+
+### Local Development
+```bash
+kb serve              # Start on localhost:8765
+kb serve --port 9000  # Custom port
+```
+
+### Server Deployment (zen)
+The KB dashboard runs on the Linux server (zen) as a systemd service, accessible via Tailscale.
+
+**Deploy/manage the service:**
+```bash
+./deploy/deploy-kb-serve.sh           # Install and start
+./deploy/deploy-kb-serve.sh status    # Check status
+./deploy/deploy-kb-serve.sh logs      # View logs
+./deploy/deploy-kb-serve.sh restart   # Restart service
+./deploy/deploy-kb-serve.sh stop      # Stop service
+```
+
+**Access from Mac via Tailscale:**
+- Action Queue: http://zen:8765
+- Browse Mode: http://zen:8765/browse
+
+### File Inbox Auto-Processing
+Set up cron for automatic processing of files dropped in `~/.kb/inbox/<decimal>/`:
+```bash
+# Show cron setup instructions
+kb process-inbox --cron
+
+# Recommended cron (every 15 minutes):
+*/15 * * * * /home/blake/repos/personal/whisper-transcribe-ui/.venv/bin/python -m kb process-inbox >> /home/blake/.kb/inbox.log 2>&1
+```
+
+### Raycast Quick Access (Mac)
+Install scripts from `scripts/raycast/` to Raycast for quick dashboard access:
+- `open-kb-dashboard.sh` - Opens action queue
+- `open-kb-browse.sh` - Opens browse mode

@@ -1,0 +1,35 @@
+[Unit]
+Description=KB Serve - Action Queue Dashboard
+Documentation=https://github.com/blake/whisper-transcribe-ui
+After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=blake
+Group=blake
+WorkingDirectory=/home/blake/repos/personal/whisper-transcribe-ui
+Environment="PATH=/home/blake/repos/personal/whisper-transcribe-ui/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+
+# Run kb serve on all interfaces for Tailscale access
+ExecStart=/home/blake/repos/personal/whisper-transcribe-ui/.venv/bin/python -m kb serve --host 0.0.0.0 --port 8765
+
+# Restart on failure
+Restart=on-failure
+RestartSec=5
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kb-serve
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/blake/.kb
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
