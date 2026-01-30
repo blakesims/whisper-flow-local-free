@@ -390,6 +390,12 @@
             font-size: 10px;
         }
 
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
         /* Toast notification */
         .toast {
             position: fixed;
@@ -499,6 +505,42 @@
             font-size: 10px;
             font-weight: 600;
         }
+
+        /* Mode toggle */
+        .mode-toggle {
+            display: flex;
+            gap: 4px;
+            background: var(--surface0);
+            padding: 2px;
+            border-radius: 4px;
+        }
+
+        .mode-btn {
+            padding: 4px 8px;
+            font-size: 11px;
+            border: none;
+            background: transparent;
+            color: var(--overlay0);
+            cursor: pointer;
+            border-radius: 2px;
+            font-family: inherit;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+        }
+
+        .mode-btn.active {
+            background: var(--green);
+            color: var(--crust);
+        }
+
+        .mode-btn:hover:not(.active) {
+            color: var(--text);
+        }
+
+        .mode-btn .key-hint {
+            background: rgba(0,0,0,0.2);
+        }
     </style>
 </head>
 <body>
@@ -507,7 +549,13 @@
         <div class="pane">
             <div class="pane-header">
                 <span><span class="pane-index">0:</span> action-queue</span>
-                <span id="connection-status" style="color: var(--green);">⬤ connected</span>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <div class="mode-toggle">
+                        <button class="mode-btn active"><span class="key-hint">q</span></button>
+                        <a href="/browse" class="mode-btn"><span class="key-hint">b</span></a>
+                    </div>
+                    <span id="connection-status" style="color: var(--green);">connected</span>
+                </div>
             </div>
             <div class="pane-body" id="queue-list">
                 <!-- Populated by JavaScript -->
@@ -546,6 +594,8 @@
                 <span id="status-completed">0 completed today</span>
             </div>
             <div class="status-section">
+                <span class="status-item"><span class="status-key">q</span> queue</span>
+                <span class="status-item"><span class="status-key">b</span> browse</span>
                 <span id="status-host">localhost:8765</span>
             </div>
         </div>
@@ -891,6 +941,12 @@
 
         // Keyboard navigation
         document.addEventListener('keydown', function(e) {
+            // Mode switching (always active)
+            if (e.key === 'b') {
+                window.location.href = '/browse';
+                return;
+            }
+
             if (queueData.pending.length === 0) return;
 
             if (e.key === 'j') {

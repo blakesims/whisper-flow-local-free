@@ -421,6 +421,220 @@ def skip_action(action_id: str):
     return jsonify({"success": True})
 
 
+# --- Browse Mode Routes ---
+
+@app.route('/browse')
+def browse():
+    """Browse mode HTML."""
+    return render_template('browse.html')
+
+
+@app.route('/api/categories')
+def get_categories():
+    """List decimals (categories) with transcript counts."""
+    categories = []
+
+    # Scan all decimal directories
+    for decimal_dir in KB_ROOT.iterdir():
+        if not decimal_dir.is_dir():
+            continue
+        if decimal_dir.name in ("config", "examples"):
+            continue
+
+        # Count JSON files (transcripts)
+        transcript_count = sum(1 for f in decimal_dir.glob("*.json"))
+
+        if transcript_count > 0:
+            categories.append({
+                "decimal": decimal_dir.name,
+                "count": transcript_count,
+            })
+
+    # Sort by decimal
+    categories.sort(key=lambda x: x["decimal"])
+
+    return jsonify({"categories": categories})
+
+
+@app.route('/api/transcripts/<decimal>')
+def get_transcripts(decimal: str):
+    """List transcripts in a category."""
+    # Validate decimal format (XX.XX.XX pattern)
+    if not re.match(r'^\d{2}\.\d{2}\.\d{2}$', decimal):
+        return jsonify({"error": "Invalid decimal format"}), 400
+
+    decimal_dir = KB_ROOT / decimal
+    if not decimal_dir.exists():
+        return jsonify({"error": "Category not found"}), 404
+
+    transcripts = []
+    for json_file in decimal_dir.glob("*.json"):
+        try:
+            with open(json_file) as f:
+                data = json.load(f)
+
+            # Get analysis types
+            analysis_types = list(data.get("analysis", {}).keys())
+
+            transcripts.append({
+                "id": data.get("id", json_file.stem),
+                "title": data.get("title", "Untitled"),
+                "date": data.get("metadata", {}).get("transcribed_at", ""),
+                "source_type": data.get("source", {}).get("type", "unknown"),
+                "word_count": data.get("metadata", {}).get("word_count", 0),
+                "analysis_types": analysis_types,
+                "file_path": str(json_file),
+            })
+        except (json.JSONDecodeError, KeyError, IOError):
+            continue
+
+    # Sort by date (newest first)
+    transcripts.sort(key=lambda x: x.get("date", ""), reverse=True)
+
+    return jsonify({"transcripts": transcripts, "decimal": decimal})
+
+
+@app.route('/api/transcript/<transcript_id>')
+def get_transcript(transcript_id: str):
+    """Get full transcript with all analyses."""
+    # Validate transcript ID format
+    if not re.match(r'^[\w\.\-]+$', transcript_id):
+        return jsonify({"error": "Invalid transcript ID format"}), 400
+
+    # Search for transcript by ID across all decimal directories
+    for decimal_dir in KB_ROOT.iterdir():
+        if not decimal_dir.is_dir():
+            continue
+        if decimal_dir.name in ("config", "examples"):
+            continue
+
+        for json_file in decimal_dir.glob("*.json"):
+            try:
+                with open(json_file) as f:
+                    data = json.load(f)
+
+                if data.get("id") == transcript_id:
+                    # Format analyses for display
+                    analyses = []
+                    for name, content in data.get("analysis", {}).items():
+                        if isinstance(content, dict):
+                            # Check for nested content (e.g., summary.summary)
+                            inner = content.get(name)
+                            analyzed_at = content.get("_analyzed_at", "")
+                            model = content.get("_model", "")
+
+                            if inner is not None:
+                                if isinstance(inner, str):
+                                    display_content = inner
+                                else:
+                                    display_content = json.dumps(inner, indent=2, ensure_ascii=False)
+                            else:
+                                # Filter out metadata keys for display
+                                display_data = {k: v for k, v in content.items() if not k.startswith("_")}
+                                display_content = json.dumps(display_data, indent=2, ensure_ascii=False)
+                        else:
+                            display_content = str(content)
+                            analyzed_at = ""
+                            model = ""
+
+                        analyses.append({
+                            "name": name,
+                            "content": display_content,
+                            "analyzed_at": analyzed_at,
+                            "relative_time": format_relative_time(analyzed_at),
+                            "model": model,
+                            "word_count": len(display_content.split()) if display_content else 0,
+                        })
+
+                    return jsonify({
+                        "id": data.get("id"),
+                        "title": data.get("title", "Untitled"),
+                        "decimal": data.get("decimal", ""),
+                        "transcript": data.get("transcript", ""),
+                        "transcript_word_count": data.get("metadata", {}).get("word_count", 0),
+                        "source_type": data.get("source", {}).get("type", "unknown"),
+                        "source_path": data.get("source", {}).get("path", ""),
+                        "transcribed_at": data.get("metadata", {}).get("transcribed_at", ""),
+                        "duration": data.get("metadata", {}).get("duration_seconds", 0),
+                        "analyses": analyses,
+                        "tags": data.get("tags", []),
+                    })
+
+            except (json.JSONDecodeError, KeyError, IOError):
+                continue
+
+    return jsonify({"error": "Transcript not found"}), 404
+
+
+@app.route('/api/search')
+def search_transcripts():
+    """Search transcripts by query term."""
+    query = request.args.get('q', '').lower().strip()
+    if not query or len(query) < 2:
+        return jsonify({"error": "Query must be at least 2 characters"}), 400
+
+    results = []
+    limit = 50  # Limit results
+
+    # Search across all decimal directories
+    for decimal_dir in KB_ROOT.iterdir():
+        if not decimal_dir.is_dir():
+            continue
+        if decimal_dir.name in ("config", "examples"):
+            continue
+
+        for json_file in decimal_dir.glob("*.json"):
+            if len(results) >= limit:
+                break
+
+            try:
+                with open(json_file) as f:
+                    data = json.load(f)
+
+                # Search in title
+                title = data.get("title", "")
+                title_match = query in title.lower()
+
+                # Search in transcript
+                transcript = data.get("transcript", "")
+                transcript_match = query in transcript.lower()
+
+                # Search in tags
+                tags = data.get("tags", [])
+                tag_match = any(query in tag.lower() for tag in tags)
+
+                if title_match or transcript_match or tag_match:
+                    # Find matching snippet if transcript match
+                    snippet = ""
+                    if transcript_match:
+                        # Get context around match
+                        idx = transcript.lower().find(query)
+                        start = max(0, idx - 50)
+                        end = min(len(transcript), idx + len(query) + 50)
+                        snippet = "..." + transcript[start:end] + "..."
+
+                    results.append({
+                        "id": data.get("id", json_file.stem),
+                        "title": title,
+                        "decimal": data.get("decimal", ""),
+                        "source_type": data.get("source", {}).get("type", "unknown"),
+                        "match_type": "title" if title_match else ("tag" if tag_match else "transcript"),
+                        "snippet": snippet,
+                        "date": data.get("metadata", {}).get("transcribed_at", ""),
+                    })
+
+            except (json.JSONDecodeError, KeyError, IOError):
+                continue
+
+        if len(results) >= limit:
+            break
+
+    # Sort by date (newest first)
+    results.sort(key=lambda x: x.get("date", ""), reverse=True)
+
+    return jsonify({"results": results, "query": query, "count": len(results)})
+
+
 # --- CLI Entry Point ---
 
 def main():

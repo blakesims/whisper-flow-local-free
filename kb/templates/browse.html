@@ -1,0 +1,1206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KB Browse - Knowledge Base Browser</title>
+    <style>
+        /* Catppuccin Mocha palette */
+        :root {
+            --base: #1e1e2e;
+            --mantle: #181825;
+            --crust: #11111b;
+            --surface0: #313244;
+            --surface1: #45475a;
+            --surface2: #585b70;
+            --overlay0: #6c7086;
+            --overlay1: #7f849c;
+            --text: #cdd6f4;
+            --subtext1: #bac2de;
+            --subtext0: #a6adc8;
+            --lavender: #b4befe;
+            --blue: #89b4fa;
+            --sapphire: #74c7ec;
+            --sky: #89dceb;
+            --teal: #94e2d5;
+            --green: #a6e3a1;
+            --yellow: #f9e2af;
+            --peach: #fab387;
+            --maroon: #eba0ac;
+            --red: #f38ba8;
+            --mauve: #cba6f7;
+            --pink: #f5c2e7;
+            --flamingo: #f2cdcd;
+            --rosewater: #f5e0dc;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: var(--crust);
+            color: var(--text);
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Three-column layout */
+        .browse-container {
+            display: grid;
+            grid-template-columns: 200px 280px 1fr;
+            grid-template-rows: 1fr auto;
+            height: 100vh;
+            gap: 1px;
+            background: var(--surface1);
+        }
+
+        .pane {
+            background: var(--base);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .pane-header {
+            background: var(--mantle);
+            padding: 8px 16px;
+            font-size: 11px;
+            color: var(--subtext0);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            border-bottom: 1px solid var(--surface0);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .pane-header .pane-index {
+            color: var(--mauve);
+        }
+
+        .pane-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0;
+        }
+
+        /* Search bar */
+        .search-bar {
+            padding: 12px;
+            background: var(--mantle);
+            border-bottom: 1px solid var(--surface0);
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 8px 12px;
+            background: var(--surface0);
+            border: 1px solid var(--surface1);
+            border-radius: 4px;
+            color: var(--text);
+            font-family: inherit;
+            font-size: 12px;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: var(--sapphire);
+        }
+
+        .search-input::placeholder {
+            color: var(--overlay0);
+        }
+
+        /* Category list */
+        .category-item {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--surface0);
+            cursor: pointer;
+            transition: background 0.1s;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .category-item:hover {
+            background: var(--mantle);
+        }
+
+        .category-item.selected {
+            background: var(--surface0);
+            border-left: 3px solid var(--mauve);
+        }
+
+        .category-decimal {
+            color: var(--mauve);
+            font-weight: 600;
+        }
+
+        .category-count {
+            background: var(--surface1);
+            color: var(--subtext0);
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+        }
+
+        /* Transcript list */
+        .transcript-item {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--surface0);
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+
+        .transcript-item:hover {
+            background: var(--mantle);
+        }
+
+        .transcript-item.selected {
+            background: var(--surface0);
+            border-left: 3px solid var(--sapphire);
+        }
+
+        .transcript-title {
+            color: var(--sapphire);
+            font-weight: 600;
+            font-size: 12px;
+            margin-bottom: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .transcript-meta {
+            display: flex;
+            gap: 12px;
+            font-size: 11px;
+            color: var(--overlay0);
+        }
+
+        .transcript-analyses {
+            margin-top: 6px;
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+        }
+
+        .analysis-tag {
+            background: var(--surface1);
+            color: var(--subtext0);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+        }
+
+        /* Detail pane */
+        .detail-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--overlay0);
+            text-align: center;
+            padding: 40px;
+        }
+
+        .detail-empty-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        .detail-content {
+            padding: 20px;
+            overflow-y: auto;
+            height: 100%;
+        }
+
+        .detail-header {
+            margin-bottom: 20px;
+        }
+
+        .detail-title {
+            color: var(--sapphire);
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .detail-meta {
+            display: flex;
+            gap: 16px;
+            color: var(--overlay0);
+            font-size: 12px;
+        }
+
+        .detail-meta-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .detail-meta-item .value {
+            color: var(--text);
+        }
+
+        .detail-meta-item .value.decimal {
+            color: var(--mauve);
+        }
+
+        .detail-tags {
+            margin-top: 12px;
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+
+        .tag {
+            background: var(--surface0);
+            color: var(--subtext1);
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid var(--surface0);
+            margin-bottom: 16px;
+        }
+
+        .tab {
+            padding: 10px 16px;
+            cursor: pointer;
+            color: var(--overlay0);
+            font-size: 12px;
+            border-bottom: 2px solid transparent;
+            transition: all 0.1s;
+        }
+
+        .tab:hover {
+            color: var(--text);
+        }
+
+        .tab.active {
+            color: var(--sapphire);
+            border-bottom-color: var(--sapphire);
+        }
+
+        /* Analysis sections */
+        .analysis-section {
+            margin-bottom: 24px;
+        }
+
+        .analysis-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .analysis-name {
+            color: var(--green);
+            font-weight: 600;
+            font-size: 14px;
+            text-transform: capitalize;
+        }
+
+        .analysis-meta {
+            font-size: 11px;
+            color: var(--overlay0);
+        }
+
+        .analysis-content {
+            background: var(--mantle);
+            padding: 16px;
+            border-radius: 6px;
+            font-size: 13px;
+            line-height: 1.7;
+            color: var(--text);
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .analysis-actions {
+            margin-top: 8px;
+            display: flex;
+            gap: 8px;
+        }
+
+        /* Transcript content */
+        .transcript-content {
+            background: var(--mantle);
+            padding: 16px;
+            border-radius: 6px;
+            font-size: 13px;
+            line-height: 1.8;
+            color: var(--text);
+            white-space: pre-wrap;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-family: inherit;
+            cursor: pointer;
+            border: none;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.1s;
+        }
+
+        .btn-primary {
+            background: var(--green);
+            color: var(--crust);
+            font-weight: 600;
+        }
+
+        .btn-primary:hover {
+            background: var(--teal);
+        }
+
+        .btn-secondary {
+            background: var(--surface0);
+            color: var(--text);
+        }
+
+        .btn-secondary:hover {
+            background: var(--surface1);
+        }
+
+        .btn .key {
+            background: rgba(0,0,0,0.2);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+        }
+
+        /* Status bar */
+        .status-bar {
+            grid-column: 1 / -1;
+            background: var(--sapphire);
+            color: var(--crust);
+            padding: 4px 16px;
+            font-size: 11px;
+            display: flex;
+            justify-content: space-between;
+            font-weight: 500;
+        }
+
+        .status-section {
+            display: flex;
+            gap: 24px;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-key {
+            background: rgba(0,0,0,0.2);
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+        }
+
+        /* Mode toggle */
+        .mode-toggle {
+            display: flex;
+            gap: 4px;
+            background: var(--surface0);
+            padding: 2px;
+            border-radius: 4px;
+        }
+
+        .mode-btn {
+            padding: 4px 12px;
+            font-size: 11px;
+            border: none;
+            background: transparent;
+            color: var(--overlay0);
+            cursor: pointer;
+            border-radius: 2px;
+            font-family: inherit;
+        }
+
+        .mode-btn.active {
+            background: var(--sapphire);
+            color: var(--crust);
+        }
+
+        .mode-btn:hover:not(.active) {
+            color: var(--text);
+        }
+
+        /* Toast notification */
+        .toast {
+            position: fixed;
+            bottom: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--surface0);
+            color: var(--text);
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 13px;
+            display: none;
+            align-items: center;
+            gap: 10px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            border: 1px solid var(--surface1);
+            z-index: 1000;
+        }
+
+        .toast.show {
+            display: flex;
+            animation: slideUp 0.3s ease;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateX(-50%) translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(-50%) translateY(0);
+            }
+        }
+
+        .toast-icon {
+            color: var(--green);
+            font-size: 16px;
+        }
+
+        /* Empty state */
+        .empty-state {
+            padding: 40px 20px;
+            text-align: center;
+            color: var(--overlay0);
+        }
+
+        .empty-state-icon {
+            font-size: 32px;
+            margin-bottom: 12px;
+            opacity: 0.5;
+        }
+
+        .empty-state-text {
+            font-size: 12px;
+        }
+
+        /* Search results */
+        .search-results {
+            padding: 0;
+        }
+
+        .search-result-item {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--surface0);
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+
+        .search-result-item:hover {
+            background: var(--mantle);
+        }
+
+        .search-result-title {
+            color: var(--sapphire);
+            font-weight: 600;
+            font-size: 12px;
+            margin-bottom: 4px;
+        }
+
+        .search-result-meta {
+            font-size: 11px;
+            color: var(--overlay0);
+            margin-bottom: 6px;
+        }
+
+        .search-result-snippet {
+            font-size: 11px;
+            color: var(--subtext0);
+            background: var(--mantle);
+            padding: 6px 8px;
+            border-radius: 4px;
+        }
+
+        .match-highlight {
+            background: var(--yellow);
+            color: var(--crust);
+            padding: 1px 2px;
+            border-radius: 2px;
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--mantle);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--surface1);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--surface2);
+        }
+
+        /* Shortcut hints */
+        .shortcut-bar {
+            background: var(--mantle);
+            padding: 8px 16px;
+            font-size: 11px;
+            color: var(--subtext0);
+            display: flex;
+            gap: 20px;
+            border-top: 1px solid var(--surface0);
+        }
+
+        .shortcut {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .key-hint {
+            background: var(--surface0);
+            color: var(--sapphire);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="browse-container">
+        <!-- Left Pane: Categories -->
+        <div class="pane">
+            <div class="pane-header">
+                <span><span class="pane-index">0:</span> categories</span>
+                <div class="mode-toggle">
+                    <a href="/" class="mode-btn" id="mode-queue"><span class="key-hint">q</span></a>
+                    <button class="mode-btn active" id="mode-browse"><span class="key-hint">b</span></button>
+                </div>
+            </div>
+            <div class="search-bar">
+                <input type="text" class="search-input" id="search-input" placeholder="Search transcripts... (/)" autocomplete="off">
+            </div>
+            <div class="pane-body" id="category-list">
+                <!-- Populated by JavaScript -->
+            </div>
+        </div>
+
+        <!-- Middle Pane: Transcripts -->
+        <div class="pane">
+            <div class="pane-header">
+                <span><span class="pane-index">1:</span> transcripts</span>
+                <span id="transcript-count" style="color: var(--overlay0);"></span>
+            </div>
+            <div class="pane-body" id="transcript-list">
+                <div class="empty-state">
+                    <div class="empty-state-icon">...</div>
+                    <div class="empty-state-text">Select a category</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Pane: Detail -->
+        <div class="pane">
+            <div class="pane-header">
+                <span><span class="pane-index">2:</span> detail</span>
+                <span id="detail-type-label" style="color: var(--green);"></span>
+            </div>
+            <div class="pane-body" id="detail-pane">
+                <div class="detail-empty">
+                    <div class="detail-empty-icon">...</div>
+                    <div>Select a transcript to view</div>
+                </div>
+            </div>
+            <div class="shortcut-bar">
+                <span class="shortcut"><span class="key-hint">j/k</span> navigate</span>
+                <span class="shortcut"><span class="key-hint">Enter</span> select</span>
+                <span class="shortcut"><span class="key-hint">Esc</span> back</span>
+                <span class="shortcut"><span class="key-hint">c</span> copy</span>
+            </div>
+        </div>
+
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <div class="status-section">
+                <span>[kb-browse]</span>
+                <span id="status-categories">0 categories</span>
+                <span id="status-transcripts">0 transcripts</span>
+            </div>
+            <div class="status-section">
+                <span class="status-item"><span class="status-key">q</span> queue</span>
+                <span class="status-item"><span class="status-key">b</span> browse</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast notification -->
+    <div class="toast" id="toast">
+        <span class="toast-icon">...</span>
+        <span id="toast-message">Copied to clipboard!</span>
+    </div>
+
+    <script>
+        // State
+        let categories = [];
+        let transcripts = [];
+        let searchResults = [];
+        let selectedCategory = null;
+        let selectedTranscript = null;
+        let selectedAnalysis = null;
+        let categoryIndex = 0;
+        let transcriptIndex = 0;
+        let analysisIndex = 0;
+        let focusPane = 0;  // 0=categories, 1=transcripts, 2=detail
+        let activeTab = 'analyses';  // 'analyses' or 'transcript'
+        let isSearchMode = false;
+        let searchDebounce = null;
+
+        // Fetch categories
+        async function fetchCategories() {
+            try {
+                const response = await fetch('/api/categories');
+                const data = await response.json();
+                categories = data.categories;
+                renderCategories();
+                updateStatusBar();
+            } catch (error) {
+                console.error('Failed to fetch categories:', error);
+            }
+        }
+
+        // Render category list
+        function renderCategories() {
+            const categoryList = document.getElementById('category-list');
+            categoryList.innerHTML = '';
+
+            if (categories.length === 0) {
+                categoryList.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">...</div>
+                        <div class="empty-state-text">No categories found</div>
+                    </div>
+                `;
+                return;
+            }
+
+            categories.forEach((cat, index) => {
+                const div = document.createElement('div');
+                div.className = 'category-item';
+                if (index === categoryIndex && focusPane === 0 && !isSearchMode) {
+                    div.classList.add('selected');
+                }
+
+                div.innerHTML = `
+                    <span class="category-decimal">${cat.decimal}</span>
+                    <span class="category-count">${cat.count}</span>
+                `;
+
+                div.addEventListener('click', () => selectCategory(index));
+                categoryList.appendChild(div);
+            });
+        }
+
+        // Select category
+        async function selectCategory(index) {
+            if (index < 0 || index >= categories.length) return;
+
+            categoryIndex = index;
+            selectedCategory = categories[index];
+            focusPane = 0;
+            isSearchMode = false;
+            document.getElementById('search-input').value = '';
+
+            renderCategories();
+            await fetchTranscripts(selectedCategory.decimal);
+        }
+
+        // Fetch transcripts for category
+        async function fetchTranscripts(decimal) {
+            try {
+                const response = await fetch(`/api/transcripts/${decimal}`);
+                const data = await response.json();
+                transcripts = data.transcripts;
+                transcriptIndex = 0;
+                selectedTranscript = null;
+                renderTranscripts();
+                updateStatusBar();
+
+                // Clear detail pane
+                renderEmptyDetail();
+            } catch (error) {
+                console.error('Failed to fetch transcripts:', error);
+            }
+        }
+
+        // Render transcript list
+        function renderTranscripts() {
+            const transcriptList = document.getElementById('transcript-list');
+            const countLabel = document.getElementById('transcript-count');
+
+            countLabel.textContent = `${transcripts.length} files`;
+
+            if (transcripts.length === 0) {
+                transcriptList.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">...</div>
+                        <div class="empty-state-text">No transcripts in this category</div>
+                    </div>
+                `;
+                return;
+            }
+
+            transcriptList.innerHTML = '';
+            transcripts.forEach((t, index) => {
+                const div = document.createElement('div');
+                div.className = 'transcript-item';
+                if (index === transcriptIndex && focusPane === 1) {
+                    div.classList.add('selected');
+                }
+
+                const date = t.date ? new Date(t.date).toLocaleDateString() : '';
+
+                div.innerHTML = `
+                    <div class="transcript-title">${t.title}</div>
+                    <div class="transcript-meta">
+                        <span>${t.source_type}</span>
+                        <span>${date}</span>
+                        ${t.word_count ? `<span>${t.word_count} words</span>` : ''}
+                    </div>
+                    <div class="transcript-analyses">
+                        ${t.analysis_types.map(a => `<span class="analysis-tag">${a}</span>`).join('')}
+                    </div>
+                `;
+
+                div.addEventListener('click', () => selectTranscript(index));
+                transcriptList.appendChild(div);
+            });
+        }
+
+        // Select transcript
+        async function selectTranscript(index) {
+            if (index < 0 || index >= transcripts.length) return;
+
+            transcriptIndex = index;
+            focusPane = 1;
+
+            renderTranscripts();
+            await loadTranscriptDetail(transcripts[index].id);
+        }
+
+        // Load transcript detail
+        async function loadTranscriptDetail(transcriptId) {
+            try {
+                const response = await fetch(`/api/transcript/${transcriptId}`);
+                if (!response.ok) {
+                    renderEmptyDetail();
+                    return;
+                }
+
+                selectedTranscript = await response.json();
+                analysisIndex = 0;
+                renderDetail();
+            } catch (error) {
+                console.error('Failed to load transcript:', error);
+                renderEmptyDetail();
+            }
+        }
+
+        // Render detail pane
+        function renderDetail() {
+            if (!selectedTranscript) {
+                renderEmptyDetail();
+                return;
+            }
+
+            const detailPane = document.getElementById('detail-pane');
+            const typeLabel = document.getElementById('detail-type-label');
+
+            typeLabel.textContent = selectedTranscript.source_type;
+
+            const duration = selectedTranscript.duration
+                ? `${Math.floor(selectedTranscript.duration / 60)}m ${selectedTranscript.duration % 60}s`
+                : '';
+
+            let tagsHtml = '';
+            if (selectedTranscript.tags && selectedTranscript.tags.length > 0) {
+                tagsHtml = `
+                    <div class="detail-tags">
+                        ${selectedTranscript.tags.map(t => `<span class="tag">${t}</span>`).join('')}
+                    </div>
+                `;
+            }
+
+            let tabsHtml = `
+                <div class="tabs">
+                    <div class="tab ${activeTab === 'analyses' ? 'active' : ''}" onclick="switchTab('analyses')">
+                        Analyses (${selectedTranscript.analyses.length})
+                    </div>
+                    <div class="tab ${activeTab === 'transcript' ? 'active' : ''}" onclick="switchTab('transcript')">
+                        Transcript
+                    </div>
+                </div>
+            `;
+
+            let contentHtml = '';
+            if (activeTab === 'analyses') {
+                if (selectedTranscript.analyses.length === 0) {
+                    contentHtml = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">...</div>
+                            <div class="empty-state-text">No analyses available</div>
+                        </div>
+                    `;
+                } else {
+                    contentHtml = selectedTranscript.analyses.map((a, idx) => `
+                        <div class="analysis-section" data-index="${idx}">
+                            <div class="analysis-header">
+                                <span class="analysis-name">${formatName(a.name)}</span>
+                                <span class="analysis-meta">${a.relative_time} | ~${a.word_count} words</span>
+                            </div>
+                            <div class="analysis-content">${escapeHtml(a.content)}</div>
+                            <div class="analysis-actions">
+                                <button class="btn btn-primary" onclick="copyAnalysis(${idx})">
+                                    Copy <span class="key">c</span>
+                                </button>
+                            </div>
+                        </div>
+                    `).join('');
+                }
+            } else {
+                contentHtml = `
+                    <div class="analysis-section">
+                        <div class="analysis-header">
+                            <span class="analysis-name">Full Transcript</span>
+                            <span class="analysis-meta">~${selectedTranscript.transcript_word_count} words</span>
+                        </div>
+                        <div class="transcript-content">${escapeHtml(selectedTranscript.transcript)}</div>
+                        <div class="analysis-actions">
+                            <button class="btn btn-primary" onclick="copyTranscript()">
+                                Copy Transcript <span class="key">c</span>
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
+
+            detailPane.innerHTML = `
+                <div class="detail-content">
+                    <div class="detail-header">
+                        <div class="detail-title">${selectedTranscript.title}</div>
+                        <div class="detail-meta">
+                            <span class="detail-meta-item">
+                                <span class="value decimal">${selectedTranscript.decimal}</span>
+                            </span>
+                            ${duration ? `<span class="detail-meta-item"><span class="value">${duration}</span></span>` : ''}
+                            <span class="detail-meta-item">
+                                <span class="value">${selectedTranscript.source_type}</span>
+                            </span>
+                        </div>
+                        ${tagsHtml}
+                    </div>
+                    ${tabsHtml}
+                    ${contentHtml}
+                </div>
+            `;
+        }
+
+        // Render empty detail pane
+        function renderEmptyDetail() {
+            const detailPane = document.getElementById('detail-pane');
+            const typeLabel = document.getElementById('detail-type-label');
+            typeLabel.textContent = '';
+
+            detailPane.innerHTML = `
+                <div class="detail-empty">
+                    <div class="detail-empty-icon">...</div>
+                    <div>Select a transcript to view</div>
+                </div>
+            `;
+        }
+
+        // Switch tabs
+        function switchTab(tab) {
+            activeTab = tab;
+            renderDetail();
+        }
+
+        // Search functionality
+        async function performSearch(query) {
+            if (!query || query.length < 2) {
+                isSearchMode = false;
+                renderCategories();
+                return;
+            }
+
+            isSearchMode = true;
+
+            try {
+                const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+                const data = await response.json();
+                searchResults = data.results;
+                renderSearchResults();
+            } catch (error) {
+                console.error('Search failed:', error);
+            }
+        }
+
+        // Render search results
+        function renderSearchResults() {
+            const categoryList = document.getElementById('category-list');
+
+            if (searchResults.length === 0) {
+                categoryList.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">...</div>
+                        <div class="empty-state-text">No results found</div>
+                    </div>
+                `;
+                return;
+            }
+
+            categoryList.innerHTML = '';
+            searchResults.forEach((r, index) => {
+                const div = document.createElement('div');
+                div.className = 'search-result-item';
+
+                div.innerHTML = `
+                    <div class="search-result-title">${r.title}</div>
+                    <div class="search-result-meta">
+                        <span style="color: var(--mauve)">${r.decimal}</span> |
+                        ${r.match_type} match
+                    </div>
+                    ${r.snippet ? `<div class="search-result-snippet">${escapeHtml(r.snippet)}</div>` : ''}
+                `;
+
+                div.addEventListener('click', async () => {
+                    isSearchMode = false;
+                    document.getElementById('search-input').value = '';
+
+                    // Find and select the category
+                    const catIndex = categories.findIndex(c => c.decimal === r.decimal);
+                    if (catIndex >= 0) {
+                        categoryIndex = catIndex;
+                        selectedCategory = categories[catIndex];
+                        renderCategories();
+                    }
+
+                    // Fetch transcripts and select the right one
+                    await fetchTranscripts(r.decimal);
+                    const tIndex = transcripts.findIndex(t => t.id === r.id);
+                    if (tIndex >= 0) {
+                        await selectTranscript(tIndex);
+                    }
+                });
+
+                categoryList.appendChild(div);
+            });
+        }
+
+        // Copy analysis to clipboard
+        async function copyAnalysis(index) {
+            if (!selectedTranscript || !selectedTranscript.analyses[index]) return;
+
+            const content = selectedTranscript.analyses[index].content;
+            try {
+                await navigator.clipboard.writeText(content);
+                showToast(`Copied ${formatName(selectedTranscript.analyses[index].name)} to clipboard!`);
+            } catch (error) {
+                console.error('Copy failed:', error);
+                showToast('Copy failed - please try manually');
+            }
+        }
+
+        // Copy transcript to clipboard
+        async function copyTranscript() {
+            if (!selectedTranscript) return;
+
+            try {
+                await navigator.clipboard.writeText(selectedTranscript.transcript);
+                showToast('Copied transcript to clipboard!');
+            } catch (error) {
+                console.error('Copy failed:', error);
+                showToast('Copy failed - please try manually');
+            }
+        }
+
+        // Update status bar
+        function updateStatusBar() {
+            document.getElementById('status-categories').textContent = `${categories.length} categories`;
+            const totalTranscripts = categories.reduce((sum, c) => sum + c.count, 0);
+            document.getElementById('status-transcripts').textContent = `${totalTranscripts} transcripts`;
+        }
+
+        // Show toast notification
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            const toastMessage = document.getElementById('toast-message');
+            toastMessage.textContent = message;
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 2000);
+        }
+
+        // Format name for display
+        function formatName(name) {
+            return name.split('_').map(word =>
+                word.charAt(0).toUpperCase() + word.slice(1)
+            ).join(' ');
+        }
+
+        // Escape HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Keyboard navigation
+        document.addEventListener('keydown', function(e) {
+            // Check if search input is focused
+            const searchInput = document.getElementById('search-input');
+            const isSearchFocused = document.activeElement === searchInput;
+
+            // Global shortcuts
+            if (e.key === 'q' && !isSearchFocused) {
+                window.location.href = '/';
+                return;
+            }
+
+            if (e.key === '/' && !isSearchFocused) {
+                e.preventDefault();
+                searchInput.focus();
+                return;
+            }
+
+            if (e.key === 'Escape') {
+                if (isSearchFocused) {
+                    searchInput.blur();
+                    searchInput.value = '';
+                    isSearchMode = false;
+                    renderCategories();
+                } else if (focusPane > 0) {
+                    focusPane--;
+                    if (focusPane === 0) {
+                        renderCategories();
+                        renderTranscripts();
+                    } else if (focusPane === 1) {
+                        renderTranscripts();
+                    }
+                }
+                return;
+            }
+
+            if (isSearchFocused) return;
+
+            if (e.key === 'j') {
+                // Move down
+                if (focusPane === 0 && !isSearchMode) {
+                    categoryIndex = Math.min(categoryIndex + 1, categories.length - 1);
+                    renderCategories();
+                } else if (focusPane === 1) {
+                    transcriptIndex = Math.min(transcriptIndex + 1, transcripts.length - 1);
+                    renderTranscripts();
+                }
+            } else if (e.key === 'k') {
+                // Move up
+                if (focusPane === 0 && !isSearchMode) {
+                    categoryIndex = Math.max(categoryIndex - 1, 0);
+                    renderCategories();
+                } else if (focusPane === 1) {
+                    transcriptIndex = Math.max(transcriptIndex - 1, 0);
+                    renderTranscripts();
+                }
+            } else if (e.key === 'Enter') {
+                // Select
+                if (focusPane === 0 && !isSearchMode && categories.length > 0) {
+                    selectCategory(categoryIndex);
+                    focusPane = 1;
+                } else if (focusPane === 1 && transcripts.length > 0) {
+                    selectTranscript(transcriptIndex);
+                    focusPane = 2;
+                }
+            } else if (e.key === 'l' || e.key === 'ArrowRight') {
+                // Move right
+                if (focusPane < 2) {
+                    if (focusPane === 0 && selectedCategory) {
+                        focusPane = 1;
+                        renderCategories();
+                        renderTranscripts();
+                    } else if (focusPane === 1 && selectedTranscript) {
+                        focusPane = 2;
+                        renderTranscripts();
+                    }
+                }
+            } else if (e.key === 'h' || e.key === 'ArrowLeft') {
+                // Move left
+                if (focusPane > 0) {
+                    focusPane--;
+                    if (focusPane === 0) {
+                        renderCategories();
+                        renderTranscripts();
+                    } else if (focusPane === 1) {
+                        renderTranscripts();
+                    }
+                }
+            } else if (e.key === 'c') {
+                // Copy
+                if (focusPane === 2 && selectedTranscript) {
+                    if (activeTab === 'analyses' && selectedTranscript.analyses.length > 0) {
+                        copyAnalysis(0);  // Copy first analysis
+                    } else if (activeTab === 'transcript') {
+                        copyTranscript();
+                    }
+                }
+            } else if (e.key === 'Tab') {
+                // Toggle tab in detail view
+                e.preventDefault();
+                if (focusPane === 2 && selectedTranscript) {
+                    activeTab = activeTab === 'analyses' ? 'transcript' : 'analyses';
+                    renderDetail();
+                }
+            }
+        });
+
+        // Search input handler
+        document.getElementById('search-input').addEventListener('input', function(e) {
+            clearTimeout(searchDebounce);
+            searchDebounce = setTimeout(() => {
+                performSearch(e.target.value);
+            }, 300);
+        });
+
+        // Initialize
+        fetchCategories();
+    </script>
+</body>
+</html>
