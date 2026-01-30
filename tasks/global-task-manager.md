@@ -15,8 +15,8 @@
 - For ongoing tasks without distinct phases, use "Ongoing" in the "Phases" column
 
 ## Recently Completed (2026-01-30)
-- T015: KB Serve - Action Queue Dashboard - 6 phases: core server, compound analysis, config-driven actions, file inbox, browse mode, server deployment
-- T013: Cap Recording Auto-Clean - `kb clean` command with LLM analysis, trigger phrases, interactive review, soft-delete
+- T015: KB Serve - Action Queue Dashboard - 6 phases: core server, compound analysis, config-driven actions, file inbox, browse mode, server deployment ([main.md](completed/T015-kb-serve-dashboard/main.md))
+- T013: Cap Recording Auto-Clean - `kb clean` command with LLM analysis, trigger phrases, interactive review, soft-delete ([main.md](completed/T013-cap-clean/main.md))
 
 ## Recently Archived (2025-01-16)
 - T002: UI Implementation
