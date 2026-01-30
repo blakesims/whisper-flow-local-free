@@ -48,6 +48,17 @@ DEFAULTS = {
             "Fathom",
         ],
     },
+    "serve": {
+        "action_mapping": {
+            # Compound outputs
+            "skool_post": "Skool",
+            "linkedin_post": "LinkedIn",
+            # Existing analysis types
+            "summary": "Review",
+            "guide": "Student",
+            "lead_magnet": "Marketing",
+        },
+    },
     "presets": {
         "alpha_session": {
             "label": "Alpha Cohort Session",
@@ -105,6 +116,14 @@ def load_config() -> dict:
                 config["defaults"] = {**DEFAULTS["defaults"], **file_config["defaults"]}
             if "zoom" in file_config:
                 config["zoom"] = {**DEFAULTS["zoom"], **file_config["zoom"]}
+            if "serve" in file_config:
+                config["serve"] = {**DEFAULTS["serve"], **file_config["serve"]}
+                # Deep merge action_mapping to allow partial overrides
+                if "action_mapping" in file_config["serve"]:
+                    config["serve"]["action_mapping"] = {
+                        **DEFAULTS["serve"]["action_mapping"],
+                        **file_config["serve"]["action_mapping"]
+                    }
             if "presets" in file_config:
                 # Deep merge presets - user can override or add new presets
                 config["presets"] = {**DEFAULTS["presets"], **file_config["presets"]}

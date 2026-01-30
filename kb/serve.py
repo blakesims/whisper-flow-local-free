@@ -42,17 +42,61 @@ KB_ROOT = _paths["kb_output"]
 CONFIG_DIR = _paths["config_dir"]
 ACTION_STATE_PATH = Path.home() / ".kb" / "action-state.json"
 
-# Default action mapping (until we add it to config)
-# TODO: Phase 3 - load from config.yaml instead of hardcoding
-DEFAULT_ACTION_MAPPING = {
-    # Compound outputs (Phase 2 - to be created)
-    "skool_post": "Skool",
-    "linkedin_post": "LinkedIn",
-    # Existing analysis types that are actionable
-    "summary": "Review",
-    "guide": "Student",
-    "lead_magnet": "Marketing",
-}
+def get_action_mapping() -> dict:
+    """Load action mapping from config with pattern support.
+
+    Supports three pattern types:
+    - Plain: "skool_post" matches any input type
+    - Typed: "meeting.student_guide" matches only meeting input type
+    - Wildcard: "*.summary" matches all input types
+
+    Returns dict mapping (input_type, analysis_type) tuples to destination labels.
+    """
+    serve_config = _config.get("serve", {})
+    raw_mapping = serve_config.get("action_mapping", {})
+
+    # Store as structured mapping for efficient lookup
+    # Keys are tuples: (input_type or None, analysis_type)
+    # Wildcard patterns stored with input_type="*"
+    structured = {}
+
+    for pattern, destination in raw_mapping.items():
+        if "." in pattern:
+            # Either typed (meeting.guide) or wildcard (*.summary)
+            parts = pattern.split(".", 1)
+            input_type, analysis_type = parts[0], parts[1]
+            structured[(input_type, analysis_type)] = destination
+        else:
+            # Plain pattern - matches any input type
+            structured[(None, pattern)] = destination
+
+    return structured
+
+
+def get_destination_for_action(input_type: str, analysis_type: str, mapping: dict) -> Optional[str]:
+    """Get destination label for an (input_type, analysis_type) pair.
+
+    Priority:
+    1. Exact match: (input_type, analysis_type)
+    2. Wildcard match: ("*", analysis_type)
+    3. Plain match: (None, analysis_type)
+    """
+    # Try exact match first
+    key = (input_type, analysis_type)
+    if key in mapping:
+        return mapping[key]
+
+    # Try wildcard
+    wildcard_key = ("*", analysis_type)
+    if wildcard_key in mapping:
+        return mapping[wildcard_key]
+
+    # Try plain (any input type)
+    plain_key = (None, analysis_type)
+    if plain_key in mapping:
+        return mapping[plain_key]
+
+    return None
 
 app = Flask(__name__, template_folder=str(Path(__file__).parent / "templates"))
 
@@ -101,7 +145,7 @@ def scan_actionable_items() -> list[dict]:
 
     Returns list of action items with metadata.
     """
-    action_mapping = DEFAULT_ACTION_MAPPING  # TODO: load from config
+    action_mapping = get_action_mapping()
     action_items = []
 
     # Scan all decimal directories
@@ -117,57 +161,63 @@ def scan_actionable_items() -> list[dict]:
                 with open(json_file) as f:
                     data = json.load(f)
 
+                # Get input_type for pattern matching
+                input_type = data.get("source", {}).get("type", "unknown")
+
                 # Check for actionable analyses
                 analysis = data.get("analysis", {})
-                for analysis_name, destination in action_mapping.items():
-                    if analysis_name in analysis:
-                        analysis_data = analysis[analysis_name]
+                for analysis_name in analysis.keys():
+                    destination = get_destination_for_action(input_type, analysis_name, action_mapping)
+                    if destination is None:
+                        continue  # Not actionable
 
-                        # Generate action ID: transcript_id--analysis_name
-                        action_id = f"{data.get('id', json_file.stem)}{ACTION_ID_SEP}{analysis_name}"
+                    analysis_data = analysis[analysis_name]
 
-                        # Get content (handle various formats)
-                        analyzed_at = ""
-                        model = ""
+                    # Generate action ID: transcript_id--analysis_name
+                    action_id = f"{data.get('id', json_file.stem)}{ACTION_ID_SEP}{analysis_name}"
 
-                        if isinstance(analysis_data, dict):
-                            # Try to get the inner content (e.g., guide.guide or summary.summary)
-                            inner = analysis_data.get(analysis_name)
-                            analyzed_at = analysis_data.get("_analyzed_at", "")
-                            model = analysis_data.get("_model", "")
+                    # Get content (handle various formats)
+                    analyzed_at = ""
+                    model = ""
 
-                            if inner is None:
-                                # No nested key, use the whole dict as content
-                                content = json.dumps(analysis_data, indent=2, ensure_ascii=False)
-                            elif isinstance(inner, str):
-                                content = inner
-                            elif isinstance(inner, dict):
-                                # Structured output (like guide with title, steps, etc.)
-                                content = json.dumps(inner, indent=2, ensure_ascii=False)
-                            else:
-                                content = str(inner)
+                    if isinstance(analysis_data, dict):
+                        # Try to get the inner content (e.g., guide.guide or summary.summary)
+                        inner = analysis_data.get(analysis_name)
+                        analyzed_at = analysis_data.get("_analyzed_at", "")
+                        model = analysis_data.get("_model", "")
+
+                        if inner is None:
+                            # No nested key, use the whole dict as content
+                            content = json.dumps(analysis_data, indent=2, ensure_ascii=False)
+                        elif isinstance(inner, str):
+                            content = inner
+                        elif isinstance(inner, dict):
+                            # Structured output (like guide with title, steps, etc.)
+                            content = json.dumps(inner, indent=2, ensure_ascii=False)
                         else:
-                            content = str(analysis_data)
+                            content = str(inner)
+                    else:
+                        content = str(analysis_data)
 
-                        # Calculate word count (handle both string and fallback)
-                        if isinstance(content, str):
-                            word_count = len(content.split()) if content else 0
-                        else:
-                            content = str(content)
-                            word_count = len(content.split())
+                    # Calculate word count (handle both string and fallback)
+                    if isinstance(content, str):
+                        word_count = len(content.split()) if content else 0
+                    else:
+                        content = str(content)
+                        word_count = len(content.split())
 
-                        action_items.append({
-                            "id": action_id,
-                            "type": analysis_name,
-                            "destination": destination,
-                            "source_title": data.get("title", "Untitled"),
-                            "source_decimal": data.get("decimal", ""),
-                            "content": content,
-                            "word_count": word_count,
-                            "analyzed_at": analyzed_at,
-                            "model": model,
-                            "transcript_path": str(json_file),
-                        })
+                    action_items.append({
+                        "id": action_id,
+                        "type": analysis_name,
+                        "destination": destination,
+                        "source_title": data.get("title", "Untitled"),
+                        "source_decimal": data.get("decimal", ""),
+                        "content": content,
+                        "word_count": word_count,
+                        "analyzed_at": analyzed_at,
+                        "model": model,
+                        "transcript_path": str(json_file),
+                    })
 
             except (json.JSONDecodeError, KeyError, IOError) as e:
                 # Skip malformed files
