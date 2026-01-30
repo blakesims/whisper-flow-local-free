@@ -8,15 +8,14 @@
 | T011 | Knowledge Base Capture System | 1 | 6/6 | ACTIVE | - | - | [main.md](active/T011-knowledge-base-capture/main.md) |
 | T012 | KB Transcription Architecture + Zoom | 2 | 2/3 | ACTIVE | - | task-documentation | [main.md](active/T012-kb-zoom-meetings/main.md) |
 | T014 | Cap AI Markers for Intra-Segment Editing | 3 | 0/4 | PLANNING | T013 | - | [main.md](planning/T014-cap-ai-markers/main.md) |
-| T015 | KB Serve - Action Queue Dashboard | 1 | 1/6 | ACTIVE | T011, T012 | task-documentation | [main.md](planning/T015-kb-serve-dashboard/main.md) |
-
 ## Notes
 - Priority: 1=Highest, 5=Lowest
 - For dependencies, use format: `T00X` or `T00X#PY` for phase-specific dependencies
 - Status values: PLANNING, ACTIVE, ONGOING, BLOCKED, PAUSED
 - For ongoing tasks without distinct phases, use "Ongoing" in the "Phases" column
 
-## Recently Completed (2025-01-29)
+## Recently Completed (2026-01-30)
+- T015: KB Serve - Action Queue Dashboard - 6 phases: core server, compound analysis, config-driven actions, file inbox, browse mode, server deployment
 - T013: Cap Recording Auto-Clean - `kb clean` command with LLM analysis, trigger phrases, interactive review, soft-delete
 
 ## Recently Archived (2025-01-16)
