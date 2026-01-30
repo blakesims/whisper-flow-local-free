@@ -238,7 +238,7 @@ serve:
 **Dependencies**: P1
 
 ### Phase 4: File Inbox & Auto-Processing
-**Status**: Not Started
+**Status**: COMPLETE
 
 **Objectives**:
 - Create inbox directory structure (`~/.kb/inbox/<decimal>/`)
@@ -295,6 +295,43 @@ serve:
 - Integration with actual posting (Skool API, LinkedIn API)
 
 ## Execution Log
+
+### Phase 4: File Inbox & Auto-Processing
+- **Status:** COMPLETE
+- **Started:** 2026-01-30
+- **Completed:** 2026-01-30
+- **Commits:** `7c9ab51`
+- **Files Modified:**
+  - `kb/inbox.py` - New module with inbox processing logic (450 lines)
+  - `kb/__main__.py` - Added process-inbox command and inbox config to DEFAULTS
+  - `kb/tests/test_inbox.py` - New test file with 16 unit tests
+
+### Tasks Completed
+- [x] Created `kb/inbox.py` module with inbox processing logic
+- [x] Added `kb process-inbox` subcommand (update `kb/__main__.py`)
+- [x] Scan `~/.kb/inbox/<decimal>/` directories for media files
+- [x] Call transcription using existing `transcribe_to_kb()`
+- [x] Run default analyses for decimal category (via config)
+- [x] Move processed files to archive or delete (configurable)
+- [x] Config option for default analyses per decimal in DEFAULTS
+- [x] Cron job example via `--cron` flag
+
+### Acceptance Criteria
+- [x] `kb process-inbox` scans and processes files - implemented with scan_inbox() and process_file()
+- [x] Respects decimal from directory structure - path parsing extracts decimal from ~/.kb/inbox/<decimal>/
+- [x] Runs configured analyses per decimal - get_analyses_for_decimal() with prefix matching
+- [x] Archives or deletes processed files - configurable via archive_path (null = delete)
+- [x] Logs what was processed - rich console output with file counts and status
+- [x] Provides cron setup instructions - `kb process-inbox --cron` shows examples
+
+### Notes
+- Added `--status` flag to show inbox status and pending files
+- Added `--init` flag to create inbox directories for all registered decimals
+- Added `--dry-run` flag to preview what would be processed
+- Config supports prefix matching (e.g., "50.01" matches "50.01.01", "50.01.02", etc.)
+- All 37 tests pass (21 existing + 16 new)
+
+---
 
 ### Phase 3: Actionable Output System (Config-Driven)
 - **Status:** COMPLETE
@@ -371,10 +408,10 @@ serve:
 -> Details: `code-review-phase-2.md`
 
 ### Phase 3
-- **Gate:** PENDING
-- **Reviewed:** -
-- **Issues:** -
-- **Summary:** -
+- **Gate:** PASS
+- **Reviewed:** 2026-01-30
+- **Issues:** 0 critical, 0 major, 4 minor
+- **Summary:** Solid implementation of config-driven action mapping. All AC met, pattern matching logic correct and well-tested. Minor issues (config not hot-reloadable, missing wildcard integration test) do not block.
 
 -> Details: `code-review-phase-3.md`
 
@@ -394,3 +431,5 @@ serve:
   - Load action_mapping from config in Phase 3 instead of hardcoded
   - Large content truncation may be needed in frontend
 - 2026-01-30: Phase 2 complete. Compound analysis support added.
+- 2026-01-30: Phase 3 complete. Config-driven action mapping.
+- 2026-01-30: Phase 4 complete. File inbox and auto-processing.
