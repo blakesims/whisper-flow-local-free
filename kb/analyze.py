@@ -246,15 +246,82 @@ def select_analysis_types_interactive(
     return selected or []
 
 
+def format_prerequisite_output(analysis_result: dict) -> str:
+    """
+    Format an analysis result for injection into a compound prompt.
+
+    Handles various output structures by extracting the main content.
+    Returns a clean string representation.
+    """
+    if not analysis_result:
+        return ""
+
+    # Filter out metadata keys (those starting with _)
+    content = {k: v for k, v in analysis_result.items() if not k.startswith("_")}
+
+    # If there's a single key with a string value, return that directly
+    if len(content) == 1:
+        value = list(content.values())[0]
+        if isinstance(value, str):
+            return value
+        elif isinstance(value, list):
+            # Format list items nicely (e.g., key_points)
+            formatted_items = []
+            for item in value:
+                if isinstance(item, dict):
+                    # Format dict items (e.g., {"quote": "...", "insight": "..."})
+                    parts = [f"- {v}" if k in ("quote", "insight") else f"  {k}: {v}"
+                             for k, v in item.items()]
+                    formatted_items.append("\n".join(parts))
+                else:
+                    formatted_items.append(f"- {item}")
+            return "\n\n".join(formatted_items)
+
+    # Multiple keys - return JSON representation
+    return json.dumps(content, indent=2, ensure_ascii=False)
+
+
+def substitute_template_vars(prompt: str, context: dict) -> str:
+    """
+    Replace {{variable}} placeholders in a prompt with context values.
+
+    Args:
+        prompt: The prompt template with {{variable}} placeholders
+        context: Dict mapping variable names to their formatted values
+
+    Returns:
+        The prompt with placeholders substituted
+    """
+    import re
+
+    def replacer(match):
+        var_name = match.group(1)
+        if var_name in context:
+            return context[var_name]
+        # Leave unmatched placeholders as-is (for debugging)
+        return match.group(0)
+
+    return re.sub(r'\{\{(\w+)\}\}', replacer, prompt)
+
+
 def analyze_transcript(
     transcript_text: str,
     analysis_type: str,
     title: str = "",
     model: str = DEFAULT_MODEL,
-    max_retries: int = 3
+    max_retries: int = 3,
+    prerequisite_context: dict | None = None
 ) -> dict:
     """
     Run a single analysis type on a transcript.
+
+    Args:
+        transcript_text: The transcript text to analyze
+        analysis_type: Name of the analysis type to run
+        title: Optional title for context
+        model: Gemini model to use
+        max_retries: Number of retries on transient failures
+        prerequisite_context: Dict of {analysis_name: formatted_output} for compound analyses
 
     Returns the structured analysis result.
     """
@@ -279,13 +346,18 @@ def analyze_transcript(
     # Load analysis type config
     config = load_analysis_type(analysis_type)
 
+    # Get the prompt and substitute any prerequisite context
+    prompt_template = config['prompt']
+    if prerequisite_context:
+        prompt_template = substitute_template_vars(prompt_template, prerequisite_context)
+
     # Build the prompt with schema instruction
-    context = f"Title: {title}\n\n" if title else ""
+    title_context = f"Title: {title}\n\n" if title else ""
     schema_json = json.dumps(config['output_schema'], indent=2)
 
-    full_prompt = f"""{config['prompt']}
+    full_prompt = f"""{prompt_template}
 
-{context}TRANSCRIPT:
+{title_context}TRANSCRIPT:
 {transcript_text}
 
 ---
@@ -340,6 +412,72 @@ Output ONLY the JSON, no markdown code blocks or explanation."""
             raise ValueError(f"Failed to get valid JSON response: {e}")
 
     raise RuntimeError("Max retries exceeded")
+
+
+def run_analysis_with_deps(
+    transcript_data: dict,
+    analysis_type: str,
+    model: str = DEFAULT_MODEL,
+    existing_analysis: dict | None = None
+) -> tuple[dict, list[str]]:
+    """
+    Run an analysis type, automatically running any required prerequisites first.
+
+    Args:
+        transcript_data: Full transcript data dict (with 'transcript', 'title', 'analysis')
+        analysis_type: Name of the analysis type to run
+        model: Gemini model to use
+        existing_analysis: Existing analysis results (updated in-place with prerequisites)
+
+    Returns:
+        Tuple of (result_dict, list_of_prerequisites_run)
+    """
+    if existing_analysis is None:
+        existing_analysis = transcript_data.get("analysis", {})
+
+    # Load the analysis type definition
+    analysis_def = load_analysis_type(analysis_type)
+    required = analysis_def.get("requires", [])
+    prerequisites_run = []
+
+    # Check and run any missing prerequisites
+    for req in required:
+        if req not in existing_analysis:
+            console.print(f"[dim]Running prerequisite: {req}[/dim]")
+            # Recursively handle prerequisites (they might have their own deps)
+            req_result, req_prereqs = run_analysis_with_deps(
+                transcript_data=transcript_data,
+                analysis_type=req,
+                model=model,
+                existing_analysis=existing_analysis
+            )
+            if "error" not in req_result:
+                # Add metadata
+                req_result["_model"] = model
+                req_result["_analyzed_at"] = datetime.now().isoformat()
+                existing_analysis[req] = req_result
+                prerequisites_run.append(req)
+                prerequisites_run.extend(req_prereqs)
+            else:
+                # Prerequisite failed - can't continue
+                raise ValueError(f"Prerequisite '{req}' failed: {req_result.get('error')}")
+
+    # Build prerequisite context for compound prompts
+    prerequisite_context = {}
+    for req in required:
+        if req in existing_analysis:
+            prerequisite_context[req] = format_prerequisite_output(existing_analysis[req])
+
+    # Run the actual analysis
+    result = analyze_transcript(
+        transcript_text=transcript_data.get("transcript", ""),
+        analysis_type=analysis_type,
+        title=transcript_data.get("title", ""),
+        model=model,
+        prerequisite_context=prerequisite_context if prerequisite_context else None
+    )
+
+    return result, prerequisites_run
 
 
 def analyze_transcript_file(
@@ -404,6 +542,9 @@ def analyze_transcript_file(
 
     results = {}
 
+    # Track prerequisites that were auto-run
+    all_prerequisites_run = []
+
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -413,18 +554,32 @@ def analyze_transcript_file(
             task = progress.add_task(f"Analyzing: {analysis_type}...", total=None)
 
             try:
-                result = analyze_transcript(
-                    transcript_text=transcript_text,
+                # Use run_analysis_with_deps to handle compound analyses
+                result, prerequisites_run = run_analysis_with_deps(
+                    transcript_data=transcript_data,
                     analysis_type=analysis_type,
-                    title=title,
-                    model=model
+                    model=model,
+                    existing_analysis=existing_analysis
                 )
                 results[analysis_type] = result
+                all_prerequisites_run.extend(prerequisites_run)
+
+                # Update existing_analysis so later analyses see new results
+                if "error" not in result:
+                    result["_model"] = model
+                    result["_analyzed_at"] = datetime.now().isoformat()
+                    existing_analysis[analysis_type] = result
+
                 progress.update(task, description=f"[green]done[/green] {analysis_type}")
 
             except Exception as e:
                 progress.update(task, description=f"[red]x[/red] {analysis_type}: {e}")
                 results[analysis_type] = {"error": str(e)}
+
+    # Include auto-run prerequisites in results
+    for prereq in all_prerequisites_run:
+        if prereq in existing_analysis and prereq not in results:
+            results[prereq] = existing_analysis[prereq]
 
     # Save results back to transcript file
     if save and results:
@@ -433,9 +588,7 @@ def analyze_transcript_file(
 
         for name, result in results.items():
             if "error" not in result:
-                # Add metadata to the result
-                result["_model"] = model
-                result["_analyzed_at"] = datetime.now().isoformat()
+                # Metadata already added during run_analysis_with_deps
                 transcript_data["analysis"][name] = result
 
         with open(transcript_path, 'w') as f:
