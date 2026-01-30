@@ -160,7 +160,7 @@ kb/
 **Dependencies**: None
 
 ### Phase 2: Compound Analysis Types
-**Status**: Not Started
+**Status**: COMPLETE
 
 **Objectives**:
 - Extend analysis type JSON schema with `requires` field
@@ -294,6 +294,41 @@ serve:
 - Mobile-friendly responsive design
 - Integration with actual posting (Skool API, LinkedIn API)
 
+## Execution Log
+
+### Phase 2: Compound Analysis Types
+- **Status:** COMPLETE
+- **Started:** 2026-01-30
+- **Completed:** 2026-01-30
+- **Commits:** `b8bd2e8`
+- **Files Modified:**
+  - `kb/analyze.py` - Added dependency resolution logic, template substitution
+  - `kb/tests/__init__.py` - New test package
+  - `kb/tests/test_compound_analysis.py` - Unit tests for compound analysis
+  - `~/.../analysis_types/skool_post.json` - New compound analysis type (in KB)
+
+### Tasks Completed
+- [x] Added `format_prerequisite_output()` - formats analysis results for prompt injection
+- [x] Added `substitute_template_vars()` - replaces {{variable}} placeholders in prompts
+- [x] Added `run_analysis_with_deps()` - recursive dependency resolution
+- [x] Updated `analyze_transcript()` - accepts prerequisite_context parameter
+- [x] Updated `analyze_transcript_file()` - uses run_analysis_with_deps for all analyses
+- [x] Created `skool_post.json` analysis type with requires: ["summary", "key_points"]
+- [x] Added 10 unit tests covering template substitution, formatting, and dependency resolution
+
+### Acceptance Criteria
+- [x] `requires` field is parsed from analysis type definitions - verified via tests
+- [x] Prerequisites are automatically run if missing - verified via test_runs_prerequisites_when_missing
+- [x] Prerequisite outputs injected via template substitution - verified via template tests
+- [x] `skool_post` analysis type created and working - file created in KB analysis_types dir
+
+### Notes
+- Plan referenced `key_moments` but existing analysis type is `key_points` - used correct name
+- skool_post.json created in synced Obsidian KB at `/home/blake/lem/mac-sync/Obsidian/zen-ai/knowledge-base/transcripts/config/analysis_types/`
+- KB path on server differs from Mac - tests use mocked paths for portability
+
+---
+
 ## Notes & Updates
 - 2026-01-29: Task created from design session. Mockups at `/tmp/kb-serve-mockups/`.
 - Design decision: Action queue is primary view, not transcript browser.
@@ -307,3 +342,4 @@ serve:
   - Consider caching for scan_actionable_items() if performance becomes an issue
   - Load action_mapping from config in Phase 3 instead of hardcoded
   - Large content truncation may be needed in frontend
+- 2026-01-30: Phase 2 complete. Compound analysis support added.
