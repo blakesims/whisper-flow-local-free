@@ -210,7 +210,7 @@ def run_analysis_with_deps(transcript_path, analysis_type):
 **Dependencies**: None (can be done in parallel with P1)
 
 ### Phase 3: Actionable Output System (Config-Driven)
-**Status**: Not Started
+**Status**: COMPLETE
 
 **Objectives**:
 - Move action mapping from hardcoded `DEFAULT_ACTION_MAPPING` to `~/.config/kb/config.yaml`
@@ -296,6 +296,37 @@ serve:
 
 ## Execution Log
 
+### Phase 3: Actionable Output System (Config-Driven)
+- **Status:** COMPLETE
+- **Started:** 2026-01-30
+- **Completed:** 2026-01-30
+- **Commits:** `f0f6807`
+- **Files Modified:**
+  - `kb/__main__.py` - Added serve.action_mapping to DEFAULTS, added merge logic in load_config()
+  - `kb/serve.py` - Replaced DEFAULT_ACTION_MAPPING with get_action_mapping() and get_destination_for_action()
+  - `kb/tests/test_action_mapping.py` - New test file with 11 unit tests
+
+### Tasks Completed
+- [x] Added serve.action_mapping to DEFAULTS in kb/__main__.py
+- [x] Added deep merge for serve config in load_config()
+- [x] Created get_action_mapping() to parse config patterns
+- [x] Created get_destination_for_action() with priority-based pattern matching
+- [x] Updated scan_actionable_items() to use config-driven mapping
+- [x] Added 11 unit tests covering all pattern types
+
+### Acceptance Criteria
+- [x] Action mapping loaded from config file - defaults in DEFAULTS, user can override via config.yaml
+- [x] Supports plain, typed, and wildcard patterns - all three implemented with priority
+- [x] Falls back to sensible defaults if no config - DEFAULTS dict provides fallback
+- [x] Works with existing `kb serve` functionality - all 21 tests pass
+
+### Notes
+- Fixed indentation issue introduced during refactor (continue statement had wrong block structure)
+- Config uses deep merge so user can add new mappings without losing defaults
+- Pattern priority: exact typed match > wildcard > plain (matches any input type)
+
+---
+
 ### Phase 2: Compound Analysis Types
 - **Status:** COMPLETE
 - **Started:** 2026-01-30
@@ -326,6 +357,26 @@ serve:
 - Plan referenced `key_moments` but existing analysis type is `key_points` - used correct name
 - skool_post.json created in synced Obsidian KB at `/home/blake/lem/mac-sync/Obsidian/zen-ai/knowledge-base/transcripts/config/analysis_types/`
 - KB path on server differs from Mac - tests use mocked paths for portability
+
+---
+
+## Code Review Log
+
+### Phase 2
+- **Gate:** PASS
+- **Reviewed:** 2026-01-30
+- **Issues:** 0 critical, 2 major, 4 minor
+- **Summary:** Solid implementation of compound analysis with dependency resolution. Core functionality works correctly. Minor issues identified (no circular dependency detection, missing nested dependency test) but nothing that blocks the feature.
+
+-> Details: `code-review-phase-2.md`
+
+### Phase 3
+- **Gate:** PENDING
+- **Reviewed:** -
+- **Issues:** -
+- **Summary:** -
+
+-> Details: `code-review-phase-3.md`
 
 ---
 
