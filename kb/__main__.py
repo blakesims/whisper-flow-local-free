@@ -68,6 +68,17 @@ DEFAULTS = {
             # "50.03.01": {"analyses": ["summary", "key_points", "guide"]},
         },
     },
+    "video_sources": [
+        {
+            "path": "/Volumes/BackupArchive/skool-videos",
+            "label": "Skool Videos",
+        },
+        {
+            "path": "/Volumes/BackupArchive/cap-exports",
+            "label": "Cap Exports",
+        },
+    ],
+    "video_target": "/Volumes/BackupArchive/kb-videos",
     "presets": {
         "alpha_session": {
             "label": "Alpha Cohort Session",
@@ -144,6 +155,10 @@ def load_config() -> dict:
             if "presets" in file_config:
                 # Deep merge presets - user can override or add new presets
                 config["presets"] = {**DEFAULTS["presets"], **file_config["presets"]}
+            if "video_sources" in file_config:
+                config["video_sources"] = file_config["video_sources"]
+            if "video_target" in file_config:
+                config["video_target"] = file_config["video_target"]
         except Exception as e:
             console.print(f"[yellow]Warning: Could not load config: {e}[/yellow]")
 
@@ -211,6 +226,11 @@ COMMANDS = {
         "label": "Dashboard",
         "description": "Open visual overview of KB configuration in browser",
         "module": "kb.dashboard",
+    },
+    "scan-videos": {
+        "label": "Scan Videos",
+        "description": "Scan video sources and link to transcripts",
+        "module": "kb.videos",
     },
 }
 

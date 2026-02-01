@@ -1,0 +1,1417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KB Videos - Video Pipeline Dashboard</title>
+    <style>
+        /* Catppuccin Mocha palette */
+        :root {
+            --base: #1e1e2e;
+            --mantle: #181825;
+            --crust: #11111b;
+            --surface0: #313244;
+            --surface1: #45475a;
+            --surface2: #585b70;
+            --overlay0: #6c7086;
+            --overlay1: #7f849c;
+            --text: #cdd6f4;
+            --subtext1: #bac2de;
+            --subtext0: #a6adc8;
+            --lavender: #b4befe;
+            --blue: #89b4fa;
+            --sapphire: #74c7ec;
+            --sky: #89dceb;
+            --teal: #94e2d5;
+            --green: #a6e3a1;
+            --yellow: #f9e2af;
+            --peach: #fab387;
+            --maroon: #eba0ac;
+            --red: #f38ba8;
+            --mauve: #cba6f7;
+            --pink: #f5c2e7;
+            --flamingo: #f2cdcd;
+            --rosewater: #f5e0dc;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: var(--crust);
+            color: var(--text);
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Three-column layout */
+        .videos-container {
+            display: grid;
+            grid-template-columns: 200px 320px 1fr;
+            grid-template-rows: 1fr auto;
+            height: 100vh;
+            gap: 1px;
+            background: var(--surface1);
+        }
+
+        .pane {
+            background: var(--base);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .pane-header {
+            background: var(--mantle);
+            padding: 8px 16px;
+            font-size: 11px;
+            color: var(--subtext0);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            border-bottom: 1px solid var(--surface0);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .pane-header .pane-index {
+            color: var(--mauve);
+        }
+
+        .pane-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0;
+        }
+
+        /* Mode toggle */
+        .mode-toggle {
+            display: flex;
+            gap: 4px;
+            background: var(--surface0);
+            padding: 2px;
+            border-radius: 4px;
+        }
+
+        .mode-btn {
+            padding: 4px 8px;
+            font-size: 11px;
+            border: none;
+            background: transparent;
+            color: var(--overlay0);
+            cursor: pointer;
+            border-radius: 2px;
+            font-family: inherit;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+        }
+
+        .mode-btn.active {
+            background: var(--peach);
+            color: var(--crust);
+        }
+
+        .mode-btn:hover:not(.active) {
+            color: var(--text);
+        }
+
+        .key-hint {
+            background: var(--surface0);
+            color: var(--sapphire);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        .mode-btn .key-hint {
+            background: rgba(0,0,0,0.2);
+        }
+
+        /* Filter tabs */
+        .filter-tabs {
+            display: flex;
+            background: var(--mantle);
+            border-bottom: 1px solid var(--surface0);
+            padding: 0 8px;
+        }
+
+        .filter-tab {
+            padding: 10px 12px;
+            cursor: pointer;
+            color: var(--overlay0);
+            font-size: 11px;
+            border-bottom: 2px solid transparent;
+            transition: all 0.1s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .filter-tab:hover {
+            color: var(--text);
+        }
+
+        .filter-tab.active {
+            color: var(--peach);
+            border-bottom-color: var(--peach);
+        }
+
+        .filter-count {
+            background: var(--surface1);
+            color: var(--subtext0);
+            padding: 1px 6px;
+            border-radius: 8px;
+            font-size: 10px;
+        }
+
+        .filter-tab.active .filter-count {
+            background: var(--peach);
+            color: var(--crust);
+        }
+
+        /* Source/decimal list */
+        .source-item {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--surface0);
+            cursor: pointer;
+            transition: background 0.1s;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .source-item:hover {
+            background: var(--mantle);
+        }
+
+        .source-item.selected {
+            background: var(--surface0);
+            border-left: 3px solid var(--peach);
+        }
+
+        .source-label {
+            color: var(--text);
+            font-weight: 500;
+        }
+
+        .source-count {
+            background: var(--surface1);
+            color: var(--subtext0);
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+        }
+
+        /* Video list */
+        .video-item {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--surface0);
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+
+        .video-item:hover {
+            background: var(--mantle);
+        }
+
+        .video-item.selected {
+            background: var(--surface0);
+            border-left: 3px solid var(--peach);
+        }
+
+        .video-title {
+            color: var(--text);
+            font-weight: 600;
+            font-size: 12px;
+            margin-bottom: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .video-meta {
+            display: flex;
+            gap: 12px;
+            font-size: 11px;
+            color: var(--overlay0);
+        }
+
+        .video-status {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            margin-top: 6px;
+        }
+
+        .status-badge {
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        .status-badge.linked {
+            background: var(--green);
+            color: var(--crust);
+        }
+
+        .status-badge.unlinked {
+            background: var(--yellow);
+            color: var(--crust);
+        }
+
+        .status-badge.processing {
+            background: var(--blue);
+            color: var(--crust);
+        }
+
+        .status-badge.missing {
+            background: var(--red);
+            color: var(--crust);
+        }
+
+        /* Detail pane */
+        .detail-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--overlay0);
+            text-align: center;
+            padding: 40px;
+        }
+
+        .detail-empty-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        .detail-content {
+            padding: 20px;
+            overflow-y: auto;
+            height: 100%;
+        }
+
+        .detail-header {
+            margin-bottom: 20px;
+        }
+
+        .detail-title {
+            color: var(--peach);
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            word-break: break-word;
+        }
+
+        .detail-meta {
+            display: flex;
+            gap: 16px;
+            color: var(--overlay0);
+            font-size: 12px;
+            flex-wrap: wrap;
+        }
+
+        .detail-meta-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .detail-meta-item .value {
+            color: var(--text);
+        }
+
+        .detail-meta-item .value.decimal {
+            color: var(--mauve);
+        }
+
+        .detail-section {
+            margin-bottom: 20px;
+        }
+
+        .detail-section-title {
+            color: var(--overlay0);
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 8px;
+        }
+
+        .detail-path {
+            background: var(--mantle);
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 11px;
+            color: var(--subtext0);
+            word-break: break-all;
+        }
+
+        .detail-transcript-preview {
+            background: var(--mantle);
+            padding: 16px;
+            border-radius: 6px;
+            font-size: 12px;
+            line-height: 1.7;
+            color: var(--text);
+            max-height: 200px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+
+        .detail-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 8px 14px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-family: inherit;
+            cursor: pointer;
+            border: none;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.1s;
+        }
+
+        .btn-primary {
+            background: var(--peach);
+            color: var(--crust);
+            font-weight: 600;
+        }
+
+        .btn-primary:hover {
+            background: var(--yellow);
+        }
+
+        .btn-secondary {
+            background: var(--surface0);
+            color: var(--text);
+        }
+
+        .btn-secondary:hover {
+            background: var(--surface1);
+        }
+
+        .btn-danger {
+            background: var(--red);
+            color: var(--crust);
+            font-weight: 600;
+        }
+
+        .btn-danger:hover {
+            background: var(--maroon);
+        }
+
+        .btn .key {
+            background: rgba(0,0,0,0.2);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+        }
+
+        /* Status bar */
+        .status-bar {
+            grid-column: 1 / -1;
+            background: var(--peach);
+            color: var(--crust);
+            padding: 4px 16px;
+            font-size: 11px;
+            display: flex;
+            justify-content: space-between;
+            font-weight: 500;
+        }
+
+        .status-section {
+            display: flex;
+            gap: 24px;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-key {
+            background: rgba(0,0,0,0.2);
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+        }
+
+        /* Toast notification */
+        .toast {
+            position: fixed;
+            bottom: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--surface0);
+            color: var(--text);
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 13px;
+            display: none;
+            align-items: center;
+            gap: 10px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            border: 1px solid var(--surface1);
+            z-index: 1000;
+        }
+
+        .toast.show {
+            display: flex;
+            animation: slideUp 0.3s ease;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateX(-50%) translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(-50%) translateY(0);
+            }
+        }
+
+        .toast-icon {
+            color: var(--green);
+            font-size: 16px;
+        }
+
+        /* Empty state */
+        .empty-state {
+            padding: 40px 20px;
+            text-align: center;
+            color: var(--overlay0);
+        }
+
+        .empty-state-icon {
+            font-size: 32px;
+            margin-bottom: 12px;
+            opacity: 0.5;
+        }
+
+        .empty-state-text {
+            font-size: 12px;
+        }
+
+        /* Shortcut bar */
+        .shortcut-bar {
+            background: var(--mantle);
+            padding: 8px 16px;
+            font-size: 11px;
+            color: var(--subtext0);
+            display: flex;
+            gap: 20px;
+            border-top: 1px solid var(--surface0);
+        }
+
+        .shortcut {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--mantle);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--surface1);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--surface2);
+        }
+
+        /* Link transcript modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.7);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .modal-overlay.show {
+            display: flex;
+        }
+
+        .modal {
+            background: var(--base);
+            border-radius: 8px;
+            padding: 20px;
+            width: 400px;
+            max-height: 80vh;
+            overflow-y: auto;
+            border: 1px solid var(--surface1);
+        }
+
+        .modal-title {
+            color: var(--text);
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+
+        .modal-input {
+            width: 100%;
+            padding: 10px 12px;
+            background: var(--surface0);
+            border: 1px solid var(--surface1);
+            border-radius: 4px;
+            color: var(--text);
+            font-family: inherit;
+            font-size: 12px;
+            margin-bottom: 16px;
+        }
+
+        .modal-input:focus {
+            outline: none;
+            border-color: var(--peach);
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+    </style>
+</head>
+<body>
+    <div class="videos-container">
+        <!-- Left Pane: Sources / Decimals -->
+        <div class="pane">
+            <div class="pane-header">
+                <span><span class="pane-index">0:</span> sources</span>
+                <div class="mode-toggle">
+                    <a href="/" class="mode-btn"><span class="key-hint">q</span></a>
+                    <a href="/browse" class="mode-btn"><span class="key-hint">b</span></a>
+                    <button class="mode-btn active"><span class="key-hint">v</span></button>
+                </div>
+            </div>
+            <div class="filter-tabs">
+                <div class="filter-tab active" data-filter="source">
+                    Sources
+                </div>
+                <div class="filter-tab" data-filter="decimal">
+                    Decimals
+                </div>
+            </div>
+            <div class="pane-body" id="source-list">
+                <!-- Populated by JavaScript -->
+            </div>
+        </div>
+
+        <!-- Middle Pane: Video List -->
+        <div class="pane">
+            <div class="pane-header">
+                <span><span class="pane-index">1:</span> videos</span>
+                <span id="video-count" style="color: var(--overlay0);"></span>
+            </div>
+            <div class="filter-tabs">
+                <div class="filter-tab active" data-status="all">
+                    All <span class="filter-count" id="count-all">0</span>
+                </div>
+                <div class="filter-tab" data-status="linked">
+                    Linked <span class="filter-count" id="count-linked">0</span>
+                </div>
+                <div class="filter-tab" data-status="unlinked">
+                    Unlinked <span class="filter-count" id="count-unlinked">0</span>
+                </div>
+            </div>
+            <div class="pane-body" id="video-list">
+                <div class="empty-state">
+                    <div class="empty-state-icon">...</div>
+                    <div class="empty-state-text">Loading videos...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Pane: Detail -->
+        <div class="pane">
+            <div class="pane-header">
+                <span><span class="pane-index">2:</span> detail</span>
+                <button class="btn btn-secondary" id="rescan-btn" style="padding: 4px 10px;">
+                    Rescan
+                </button>
+            </div>
+            <div class="pane-body" id="detail-pane">
+                <div class="detail-empty">
+                    <div class="detail-empty-icon">...</div>
+                    <div>Select a video to view details</div>
+                </div>
+            </div>
+            <div class="shortcut-bar">
+                <span class="shortcut"><span class="key-hint">j/k</span> navigate</span>
+                <span class="shortcut"><span class="key-hint">Enter</span> select</span>
+                <span class="shortcut"><span class="key-hint">r</span> rescan</span>
+            </div>
+        </div>
+
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <div class="status-section">
+                <span>[kb-videos]</span>
+                <span id="status-linked">0 linked</span>
+                <span id="status-unlinked">0 unlinked</span>
+                <span id="status-last-scan">never scanned</span>
+            </div>
+            <div class="status-section">
+                <span class="status-item"><span class="status-key">q</span> queue</span>
+                <span class="status-item"><span class="status-key">b</span> browse</span>
+                <span class="status-item"><span class="status-key">v</span> videos</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast notification -->
+    <div class="toast" id="toast">
+        <span class="toast-icon">...</span>
+        <span id="toast-message">Action completed!</span>
+    </div>
+
+    <!-- Link Modal -->
+    <div class="modal-overlay" id="link-modal">
+        <div class="modal">
+            <div class="modal-title">Link to Transcript</div>
+            <input type="text" class="modal-input" id="link-transcript-id" placeholder="Enter transcript ID (e.g., 50.01.01-260130-example)">
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeLinkModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="submitLink()">Link</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Transcribe Modal -->
+    <div class="modal-overlay" id="transcribe-modal">
+        <div class="modal" style="width: 480px;">
+            <div class="modal-title">Transcribe Video</div>
+            <div style="margin-bottom: 16px; color: var(--subtext0); font-size: 12px;">
+                <span id="transcribe-filename"></span>
+            </div>
+
+            <!-- Preset Selection -->
+            <div style="margin-bottom: 16px;">
+                <label style="display: block; color: var(--overlay0); font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">
+                    Quick Preset
+                </label>
+                <select class="modal-input" id="transcribe-preset" style="margin-bottom: 0;">
+                    <option value="">-- Select a preset or configure manually --</option>
+                </select>
+            </div>
+
+            <!-- Decimal Selection -->
+            <div style="margin-bottom: 16px;">
+                <label style="display: block; color: var(--overlay0); font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">
+                    Category (Decimal) <span style="color: var(--red);">*</span>
+                </label>
+                <select class="modal-input" id="transcribe-decimal" style="margin-bottom: 0;" required>
+                    <option value="">-- Select category --</option>
+                </select>
+            </div>
+
+            <!-- Title -->
+            <div style="margin-bottom: 16px;">
+                <label style="display: block; color: var(--overlay0); font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">
+                    Title <span style="color: var(--red);">*</span>
+                </label>
+                <input type="text" class="modal-input" id="transcribe-title" placeholder="Enter title for transcript" style="margin-bottom: 0;" required>
+            </div>
+
+            <!-- Tags -->
+            <div style="margin-bottom: 16px;">
+                <label style="display: block; color: var(--overlay0); font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">
+                    Tags (comma-separated)
+                </label>
+                <input type="text" class="modal-input" id="transcribe-tags" placeholder="e.g., meeting, project-x" style="margin-bottom: 0;">
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeTranscribeModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="submitTranscribe()">
+                    Queue Transcription
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // State
+        let inventory = { videos: [], by_source: {}, by_decimal: {}, counts: {} };
+        let selectedSource = null;
+        let selectedVideo = null;
+        let filterMode = 'source';  // 'source' or 'decimal'
+        let statusFilter = 'all';   // 'all', 'linked', 'unlinked'
+        let sourceIndex = 0;
+        let videoIndex = 0;
+        let focusPane = 0;  // 0=sources, 1=videos, 2=detail
+
+        // Status icons
+        const STATUS_ICONS = {
+            'linked': '...',
+            'unlinked': '?',
+            'processing': '...',
+            'missing': '...',
+        };
+
+        // Fetch inventory
+        async function fetchInventory() {
+            try {
+                const response = await fetch('/api/video-inventory');
+                inventory = await response.json();
+                renderSources();
+                renderVideos();
+                updateStatusBar();
+                updateFilterCounts();
+            } catch (error) {
+                console.error('Failed to fetch inventory:', error);
+            }
+        }
+
+        // Render sources/decimals list
+        function renderSources() {
+            const sourceList = document.getElementById('source-list');
+            sourceList.innerHTML = '';
+
+            const data = filterMode === 'source' ? inventory.by_source : inventory.by_decimal;
+
+            if (!data || Object.keys(data).length === 0) {
+                sourceList.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">...</div>
+                        <div class="empty-state-text">No ${filterMode}s found</div>
+                    </div>
+                `;
+                return;
+            }
+
+            // Sort keys
+            const keys = Object.keys(data).sort();
+
+            keys.forEach((key, index) => {
+                const div = document.createElement('div');
+                div.className = 'source-item';
+                if (selectedSource === key) {
+                    div.classList.add('selected');
+                }
+
+                div.innerHTML = `
+                    <span class="source-label">${escapeHtml(key)}</span>
+                    <span class="source-count">${data[key].length}</span>
+                `;
+
+                div.addEventListener('click', () => selectSource(key));
+                sourceList.appendChild(div);
+            });
+        }
+
+        // Select source/decimal
+        function selectSource(key) {
+            selectedSource = key;
+            sourceIndex = Object.keys(filterMode === 'source' ? inventory.by_source : inventory.by_decimal).sort().indexOf(key);
+            videoIndex = 0;
+            selectedVideo = null;
+            renderSources();
+            renderVideos();
+            renderEmptyDetail();
+        }
+
+        // Render video list
+        function renderVideos() {
+            const videoList = document.getElementById('video-list');
+            const countLabel = document.getElementById('video-count');
+
+            // Get videos based on filter
+            let videos = [];
+            if (selectedSource) {
+                const data = filterMode === 'source' ? inventory.by_source : inventory.by_decimal;
+                videos = data[selectedSource] || [];
+            } else {
+                videos = inventory.videos || [];
+            }
+
+            // Apply status filter
+            if (statusFilter !== 'all') {
+                videos = videos.filter(v => v.status === statusFilter);
+            }
+
+            countLabel.textContent = `${videos.length} files`;
+
+            if (videos.length === 0) {
+                videoList.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">...</div>
+                        <div class="empty-state-text">No videos${selectedSource ? ' in ' + escapeHtml(selectedSource) : ''}</div>
+                    </div>
+                `;
+                return;
+            }
+
+            videoList.innerHTML = '';
+            videos.forEach((v, index) => {
+                const div = document.createElement('div');
+                div.className = 'video-item';
+                if (v.id === selectedVideo?.id) {
+                    div.classList.add('selected');
+                }
+
+                const duration = v.duration_seconds
+                    ? `${Math.floor(v.duration_seconds / 60)}m ${Math.floor(v.duration_seconds % 60)}s`
+                    : '';
+
+                const statusIcon = STATUS_ICONS[v.status] || '?';
+
+                div.innerHTML = `
+                    <div class="video-title">${escapeHtml(v.filename)}</div>
+                    <div class="video-meta">
+                        <span>${v.size_mb} MB</span>
+                        ${duration ? `<span>${duration}</span>` : ''}
+                    </div>
+                    <div class="video-status">
+                        <span class="status-badge ${escapeHtml(v.status)}">${statusIcon} ${escapeHtml(v.status)}</span>
+                        ${v.transcript_id ? `<span style="color: var(--mauve); font-size: 10px;">${escapeHtml(v.transcript_id.split('-')[0])}</span>` : ''}
+                    </div>
+                `;
+
+                div.addEventListener('click', () => selectVideo(v, index));
+                videoList.appendChild(div);
+            });
+        }
+
+        // Select video
+        async function selectVideo(video, index) {
+            videoIndex = index;
+            selectedVideo = video;
+            focusPane = 1;
+            renderVideos();
+            await loadVideoDetail(video.id);
+        }
+
+        // Load video detail
+        async function loadVideoDetail(videoId) {
+            try {
+                const response = await fetch(`/api/video/${videoId}`);
+                if (!response.ok) {
+                    renderEmptyDetail();
+                    return;
+                }
+
+                const video = await response.json();
+                renderDetail(video);
+            } catch (error) {
+                console.error('Failed to load video:', error);
+                renderEmptyDetail();
+            }
+        }
+
+        // Render detail pane
+        function renderDetail(video) {
+            const detailPane = document.getElementById('detail-pane');
+
+            const duration = video.duration_seconds
+                ? `${Math.floor(video.duration_seconds / 60)}m ${Math.floor(video.duration_seconds % 60)}s`
+                : 'Unknown';
+
+            const confidence = video.match_confidence
+                ? `${Math.round(video.match_confidence * 100)}%`
+                : '';
+
+            let transcriptSection = '';
+            if (video.status === 'linked' && video.transcript_id) {
+                transcriptSection = `
+                    <div class="detail-section">
+                        <div class="detail-section-title">Linked Transcript</div>
+                        <div class="detail-meta" style="margin-bottom: 8px;">
+                            <span class="detail-meta-item">
+                                <span class="value decimal">${escapeHtml(video.transcript_id)}</span>
+                            </span>
+                            ${confidence ? `<span class="detail-meta-item">Confidence: <span class="value">${confidence}</span></span>` : ''}
+                        </div>
+                        ${video.transcript_preview ? `<div class="detail-transcript-preview">${escapeHtml(video.transcript_preview)}</div>` : ''}
+                    </div>
+                `;
+            }
+
+            let actionsHtml = '';
+            const safeVideoId = escapeHtml(video.id);
+            const safeFilename = escapeHtml(video.filename);
+            if (video.status === 'linked') {
+                actionsHtml = `
+                    <button class="btn btn-danger" onclick="unlinkVideo('${safeVideoId}')">
+                        Unlink
+                    </button>
+                    <button class="btn btn-secondary" onclick="window.open('/browse', '_blank')">
+                        View Transcript
+                    </button>
+                `;
+            } else if (video.status === 'unlinked') {
+                actionsHtml = `
+                    <button class="btn btn-primary" onclick="openTranscribeModal('${safeVideoId}', '${safeFilename}')">
+                        Transcribe
+                    </button>
+                    <button class="btn btn-secondary" onclick="openLinkModal('${safeVideoId}')">
+                        Link Existing
+                    </button>
+                `;
+            } else if (video.status === 'processing') {
+                actionsHtml = `
+                    <span style="color: var(--blue); font-size: 12px;">
+                        ⏳ Transcription in progress...
+                    </span>
+                `;
+            }
+
+            detailPane.innerHTML = `
+                <div class="detail-content">
+                    <div class="detail-header">
+                        <div class="detail-title">${escapeHtml(video.filename)}</div>
+                        <div class="detail-meta">
+                            <span class="detail-meta-item">
+                                <span class="status-badge ${escapeHtml(video.status)}">${STATUS_ICONS[video.status] || '?'} ${escapeHtml(video.status)}</span>
+                            </span>
+                            <span class="detail-meta-item">
+                                <span class="value">${video.size_mb} MB</span>
+                            </span>
+                            <span class="detail-meta-item">
+                                <span class="value">${duration}</span>
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="detail-section">
+                        <div class="detail-section-title">Source</div>
+                        <div class="detail-path">${escapeHtml(video.source_label)}</div>
+                    </div>
+
+                    <div class="detail-section">
+                        <div class="detail-section-title">Current Path</div>
+                        <div class="detail-path">${escapeHtml(video.current_path)}</div>
+                    </div>
+
+                    ${video.original_path !== video.current_path ? `
+                        <div class="detail-section">
+                            <div class="detail-section-title">Original Path</div>
+                            <div class="detail-path">${escapeHtml(video.original_path)}</div>
+                        </div>
+                    ` : ''}
+
+                    ${transcriptSection}
+
+                    <div class="detail-actions">
+                        ${actionsHtml}
+                    </div>
+                </div>
+            `;
+        }
+
+        // Render empty detail
+        function renderEmptyDetail() {
+            const detailPane = document.getElementById('detail-pane');
+            detailPane.innerHTML = `
+                <div class="detail-empty">
+                    <div class="detail-empty-icon">...</div>
+                    <div>Select a video to view details</div>
+                </div>
+            `;
+        }
+
+        // Update status bar
+        function updateStatusBar() {
+            const counts = inventory.counts || {};
+            document.getElementById('status-linked').textContent = `${counts.linked || 0} linked`;
+            document.getElementById('status-unlinked').textContent = `${counts.unlinked || 0} unlinked`;
+
+            if (inventory.last_scan) {
+                const lastScan = new Date(inventory.last_scan);
+                const ago = formatRelativeTime(inventory.last_scan);
+                document.getElementById('status-last-scan').textContent = `scanned ${ago}`;
+            }
+        }
+
+        // Update filter counts
+        function updateFilterCounts() {
+            const counts = inventory.counts || {};
+            document.getElementById('count-all').textContent = counts.total || 0;
+            document.getElementById('count-linked').textContent = counts.linked || 0;
+            document.getElementById('count-unlinked').textContent = counts.unlinked || 0;
+        }
+
+        // Format relative time
+        function formatRelativeTime(isoString) {
+            if (!isoString) return 'unknown';
+            const date = new Date(isoString);
+            const now = new Date();
+            const seconds = Math.floor((now - date) / 1000);
+
+            if (seconds < 60) return 'just now';
+            if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+            if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+            return `${Math.floor(seconds / 86400)}d ago`;
+        }
+
+        // Show toast
+        function showToast(message, icon = '...') {
+            const toast = document.getElementById('toast');
+            const toastMessage = document.getElementById('toast-message');
+            document.querySelector('.toast-icon').textContent = icon;
+            toastMessage.textContent = message;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 2000);
+        }
+
+        // Escape HTML - includes quotes for safe use in attributes/onclick handlers
+        function escapeHtml(text) {
+            if (text == null) return '';
+            return String(text)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        // Rescan videos
+        async function rescanVideos() {
+            const btn = document.getElementById('rescan-btn');
+            btn.disabled = true;
+            btn.textContent = 'Scanning...';
+
+            try {
+                const response = await fetch('/api/video-rescan', { method: 'POST' });
+                const data = await response.json();
+
+                if (data.success) {
+                    showToast(`Scan complete: ${data.result.found} videos found`, '...');
+                    await fetchInventory();
+                } else {
+                    showToast('Scan failed: ' + (data.error || 'Unknown error'), '...');
+                }
+            } catch (error) {
+                showToast('Scan failed: ' + error.message, '...');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Rescan';
+            }
+        }
+
+        // Unlink video
+        async function unlinkVideo(videoId) {
+            try {
+                const response = await fetch(`/api/video/${videoId}/unlink`, { method: 'POST' });
+                const data = await response.json();
+
+                if (data.success) {
+                    showToast('Video unlinked', '...');
+                    await fetchInventory();
+                    if (selectedVideo && selectedVideo.id === videoId) {
+                        await loadVideoDetail(videoId);
+                    }
+                } else {
+                    showToast('Unlink failed: ' + (data.error || 'Unknown error'), '...');
+                }
+            } catch (error) {
+                showToast('Unlink failed: ' + error.message, '...');
+            }
+        }
+
+        // Link modal
+        let linkVideoId = null;
+
+        function openLinkModal(videoId) {
+            linkVideoId = videoId;
+            document.getElementById('link-transcript-id').value = '';
+            document.getElementById('link-modal').classList.add('show');
+            document.getElementById('link-transcript-id').focus();
+        }
+
+        function closeLinkModal() {
+            linkVideoId = null;
+            document.getElementById('link-modal').classList.remove('show');
+        }
+
+        async function submitLink() {
+            if (!linkVideoId) return;
+
+            const transcriptId = document.getElementById('link-transcript-id').value.trim();
+            if (!transcriptId) {
+                showToast('Please enter a transcript ID', '...');
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/video/${linkVideoId}/link`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ transcript_id: transcriptId }),
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    showToast('Video linked!', '...');
+                    closeLinkModal();
+                    await fetchInventory();
+                    if (selectedVideo && selectedVideo.id === linkVideoId) {
+                        await loadVideoDetail(linkVideoId);
+                    }
+                } else {
+                    showToast('Link failed: ' + (data.error || 'Unknown error'), '...');
+                }
+            } catch (error) {
+                showToast('Link failed: ' + error.message, '...');
+            }
+        }
+
+        // Transcribe modal
+        let transcribeVideoId = null;
+        let decimals = [];
+        let presets = [];
+
+        async function loadTranscribeOptions() {
+            // Fetch decimals and presets if not loaded
+            if (decimals.length === 0) {
+                try {
+                    const response = await fetch('/api/decimals');
+                    const data = await response.json();
+                    decimals = data.decimals || [];
+
+                    const decimalSelect = document.getElementById('transcribe-decimal');
+                    decimalSelect.innerHTML = '<option value="">-- Select category --</option>';
+                    decimals.forEach(d => {
+                        const option = document.createElement('option');
+                        option.value = d.decimal;
+                        option.textContent = `${d.decimal} - ${d.label}`;
+                        decimalSelect.appendChild(option);
+                    });
+                } catch (error) {
+                    console.error('Failed to load decimals:', error);
+                }
+            }
+
+            if (presets.length === 0) {
+                try {
+                    const response = await fetch('/api/presets');
+                    const data = await response.json();
+                    presets = data.presets || [];
+
+                    const presetSelect = document.getElementById('transcribe-preset');
+                    presetSelect.innerHTML = '<option value="">-- Select a preset or configure manually --</option>';
+                    presets.forEach(p => {
+                        const option = document.createElement('option');
+                        option.value = p.id;
+                        option.textContent = `${p.label} (${p.decimal})`;
+                        presetSelect.appendChild(option);
+                    });
+                } catch (error) {
+                    console.error('Failed to load presets:', error);
+                }
+            }
+        }
+
+        async function openTranscribeModal(videoId, filename) {
+            transcribeVideoId = videoId;
+            document.getElementById('transcribe-filename').textContent = filename;
+            document.getElementById('transcribe-decimal').value = '';
+            document.getElementById('transcribe-title').value = filename.replace(/\.[^.]+$/, '');  // Remove extension
+            document.getElementById('transcribe-tags').value = '';
+            document.getElementById('transcribe-preset').value = '';
+
+            await loadTranscribeOptions();
+
+            document.getElementById('transcribe-modal').classList.add('show');
+            document.getElementById('transcribe-title').focus();
+        }
+
+        function closeTranscribeModal() {
+            transcribeVideoId = null;
+            document.getElementById('transcribe-modal').classList.remove('show');
+        }
+
+        // Handle preset selection
+        document.getElementById('transcribe-preset').addEventListener('change', function() {
+            const presetId = this.value;
+            if (!presetId) return;
+
+            const preset = presets.find(p => p.id === presetId);
+            if (preset) {
+                document.getElementById('transcribe-decimal').value = preset.decimal;
+                if (preset.tags && preset.tags.length > 0) {
+                    document.getElementById('transcribe-tags').value = preset.tags.join(', ');
+                }
+            }
+        });
+
+        async function submitTranscribe() {
+            if (!transcribeVideoId) return;
+
+            const decimal = document.getElementById('transcribe-decimal').value.trim();
+            const title = document.getElementById('transcribe-title').value.trim();
+            const tagsStr = document.getElementById('transcribe-tags').value.trim();
+            const tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(t => t) : [];
+
+            if (!decimal) {
+                showToast('Please select a category', '!');
+                return;
+            }
+
+            if (!title) {
+                showToast('Please enter a title', '!');
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/video/${transcribeVideoId}/transcribe`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ decimal, title, tags }),
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    showToast('Queued for transcription!', '⏳');
+                    closeTranscribeModal();
+                    await fetchInventory();
+                    if (selectedVideo && selectedVideo.id === transcribeVideoId) {
+                        await loadVideoDetail(transcribeVideoId);
+                    }
+                } else {
+                    showToast('Queue failed: ' + (data.error || 'Unknown error'), '!');
+                }
+            } catch (error) {
+                showToast('Queue failed: ' + error.message, '!');
+            }
+        }
+
+        // Filter tab handlers
+        document.querySelectorAll('.filter-tab[data-filter]').forEach(tab => {
+            tab.addEventListener('click', () => {
+                filterMode = tab.dataset.filter;
+                document.querySelectorAll('.filter-tab[data-filter]').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                selectedSource = null;
+                sourceIndex = 0;
+                renderSources();
+                renderVideos();
+            });
+        });
+
+        document.querySelectorAll('.filter-tab[data-status]').forEach(tab => {
+            tab.addEventListener('click', () => {
+                statusFilter = tab.dataset.status;
+                document.querySelectorAll('.filter-tab[data-status]').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                videoIndex = 0;
+                renderVideos();
+            });
+        });
+
+        // Rescan button
+        document.getElementById('rescan-btn').addEventListener('click', rescanVideos);
+
+        // Keyboard navigation
+        document.addEventListener('keydown', function(e) {
+            // Mode switching
+            if (e.key === 'q') {
+                window.location.href = '/';
+                return;
+            }
+            if (e.key === 'b') {
+                window.location.href = '/browse';
+                return;
+            }
+
+            // Rescan
+            if (e.key === 'r') {
+                rescanVideos();
+                return;
+            }
+
+            // Escape to close modal
+            if (e.key === 'Escape') {
+                if (document.getElementById('transcribe-modal').classList.contains('show')) {
+                    closeTranscribeModal();
+                    return;
+                }
+                if (document.getElementById('link-modal').classList.contains('show')) {
+                    closeLinkModal();
+                    return;
+                }
+            }
+
+            // Navigation
+            const sourceKeys = Object.keys(filterMode === 'source' ? inventory.by_source : inventory.by_decimal).sort();
+            let videos = selectedSource
+                ? (filterMode === 'source' ? inventory.by_source : inventory.by_decimal)[selectedSource] || []
+                : inventory.videos || [];
+            if (statusFilter !== 'all') {
+                videos = videos.filter(v => v.status === statusFilter);
+            }
+
+            if (e.key === 'j') {
+                if (focusPane === 0 && sourceKeys.length > 0) {
+                    sourceIndex = Math.min(sourceIndex + 1, sourceKeys.length - 1);
+                    selectSource(sourceKeys[sourceIndex]);
+                } else if (focusPane === 1 && videos.length > 0) {
+                    videoIndex = Math.min(videoIndex + 1, videos.length - 1);
+                    selectVideo(videos[videoIndex], videoIndex);
+                }
+            } else if (e.key === 'k') {
+                if (focusPane === 0 && sourceKeys.length > 0) {
+                    sourceIndex = Math.max(sourceIndex - 1, 0);
+                    selectSource(sourceKeys[sourceIndex]);
+                } else if (focusPane === 1 && videos.length > 0) {
+                    videoIndex = Math.max(videoIndex - 1, 0);
+                    selectVideo(videos[videoIndex], videoIndex);
+                }
+            } else if (e.key === 'Enter' || e.key === 'l') {
+                if (focusPane === 0 && selectedSource) {
+                    focusPane = 1;
+                    if (videos.length > 0) {
+                        selectVideo(videos[0], 0);
+                    }
+                }
+            } else if (e.key === 'h') {
+                if (focusPane > 0) {
+                    focusPane = 0;
+                    renderVideos();
+                }
+            }
+        });
+
+        // Initialize
+        fetchInventory();
+
+        // Poll for updates every 30 seconds
+        setInterval(fetchInventory, 30000);
+    </script>
+</body>
+</html>

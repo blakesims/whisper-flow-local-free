@@ -553,6 +553,7 @@
                     <div class="mode-toggle">
                         <button class="mode-btn active"><span class="key-hint">q</span></button>
                         <a href="/browse" class="mode-btn"><span class="key-hint">b</span></a>
+                        <a href="/videos" class="mode-btn"><span class="key-hint">v</span></a>
                     </div>
                     <span id="connection-status" style="color: var(--green);">connected</span>
                 </div>
@@ -596,6 +597,7 @@
             <div class="status-section">
                 <span class="status-item"><span class="status-key">q</span> queue</span>
                 <span class="status-item"><span class="status-key">b</span> browse</span>
+                <span class="status-item"><span class="status-key">v</span> videos</span>
                 <span id="status-host">localhost:8765</span>
             </div>
         </div>
@@ -944,6 +946,10 @@
             // Mode switching (always active)
             if (e.key === 'b') {
                 window.location.href = '/browse';
+                return;
+            }
+            if (e.key === 'v') {
+                window.location.href = '/videos';
                 return;
             }
 

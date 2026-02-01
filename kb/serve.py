@@ -24,6 +24,11 @@ from typing import Optional
 from flask import Flask, render_template, jsonify, request
 import pyperclip
 
+from kb.videos import (
+    load_inventory, save_inventory, scan_videos, INVENTORY_PATH,
+    queue_transcription, get_queue_status, start_worker, load_queue
+)
+
 # Action ID separator (using -- to avoid URL encoding issues with ::)
 ACTION_ID_SEP = "--"
 # Regex for validating action IDs: transcript_id--analysis_name
@@ -635,6 +640,263 @@ def search_transcripts():
     return jsonify({"results": results, "query": query, "count": len(results)})
 
 
+# --- Videos Tab Routes ---
+
+@app.route('/videos')
+def videos():
+    """Videos tab HTML."""
+    return render_template('videos.html')
+
+
+@app.route('/api/video-inventory')
+def get_video_inventory():
+    """Get full video inventory."""
+    inventory = load_inventory()
+    videos = inventory.get("videos", {})
+    last_scan = inventory.get("last_scan")
+
+    # Group by status and decimal
+    by_status = {"linked": [], "unlinked": [], "processing": [], "missing": []}
+    by_decimal = {}
+    by_source = {}
+
+    for video_id, video in videos.items():
+        status = video.get("status", "unlinked")
+        if status in by_status:
+            by_status[status].append(video)
+
+        # Group by decimal for linked videos
+        if status == "linked" and video.get("transcript_id"):
+            decimal = video["transcript_id"].split("-")[0]
+            if decimal not in by_decimal:
+                by_decimal[decimal] = []
+            by_decimal[decimal].append(video)
+
+        # Group by source label
+        source = video.get("source_label", "Unknown")
+        if source not in by_source:
+            by_source[source] = []
+        by_source[source].append(video)
+
+    return jsonify({
+        "videos": list(videos.values()),
+        "by_status": by_status,
+        "by_decimal": by_decimal,
+        "by_source": by_source,
+        "last_scan": last_scan,
+        "counts": {
+            "total": len(videos),
+            "linked": len(by_status["linked"]),
+            "unlinked": len(by_status["unlinked"]),
+            "processing": len(by_status["processing"]),
+            "missing": len(by_status["missing"]),
+        }
+    })
+
+
+@app.route('/api/video/<video_id>')
+def get_video(video_id: str):
+    """Get single video details."""
+    if not re.match(r'^[a-f0-9]{12}\Z', video_id):
+        return jsonify({"error": "Invalid video ID format"}), 400
+
+    inventory = load_inventory()
+    video = inventory.get("videos", {}).get(video_id)
+
+    if not video:
+        return jsonify({"error": "Video not found"}), 404
+
+    # If linked, get transcript preview
+    transcript_preview = None
+    if video.get("status") == "linked" and video.get("transcript_id"):
+        transcript_id = video["transcript_id"]
+        # Find transcript file
+        for decimal_dir in KB_ROOT.iterdir():
+            if not decimal_dir.is_dir():
+                continue
+            for json_file in decimal_dir.glob("*.json"):
+                try:
+                    with open(json_file) as f:
+                        data = json.load(f)
+                    if data.get("id") == transcript_id:
+                        transcript_text = data.get("transcript", "")
+                        transcript_preview = transcript_text[:500] + "..." if len(transcript_text) > 500 else transcript_text
+                        break
+                except Exception:
+                    continue
+            if transcript_preview:
+                break
+
+    return jsonify({
+        **video,
+        "transcript_preview": transcript_preview,
+    })
+
+
+@app.route('/api/video/<video_id>/link', methods=['POST'])
+def link_video(video_id: str):
+    """Manually link video to transcript."""
+    if not re.match(r'^[a-f0-9]{12}\Z', video_id):
+        return jsonify({"error": "Invalid video ID format"}), 400
+
+    data = request.get_json()
+    transcript_id = data.get("transcript_id")
+
+    if not transcript_id:
+        return jsonify({"error": "transcript_id required"}), 400
+
+    if not re.match(r'^[\w\.\-]+$', transcript_id):
+        return jsonify({"error": "Invalid transcript ID format"}), 400
+
+    inventory = load_inventory()
+    if video_id not in inventory.get("videos", {}):
+        return jsonify({"error": "Video not found"}), 404
+
+    inventory["videos"][video_id]["status"] = "linked"
+    inventory["videos"][video_id]["transcript_id"] = transcript_id
+    inventory["videos"][video_id]["match_confidence"] = 1.0  # Manual link = full confidence
+    inventory["videos"][video_id]["linked_at"] = datetime.now().isoformat()
+
+    save_inventory(inventory)
+
+    return jsonify({"success": True, "video": inventory["videos"][video_id]})
+
+
+@app.route('/api/video/<video_id>/unlink', methods=['POST'])
+def unlink_video(video_id: str):
+    """Remove link between video and transcript."""
+    if not re.match(r'^[a-f0-9]{12}\Z', video_id):
+        return jsonify({"error": "Invalid video ID format"}), 400
+
+    inventory = load_inventory()
+    if video_id not in inventory.get("videos", {}):
+        return jsonify({"error": "Video not found"}), 404
+
+    inventory["videos"][video_id]["status"] = "unlinked"
+    inventory["videos"][video_id]["transcript_id"] = None
+    inventory["videos"][video_id]["match_confidence"] = None
+    inventory["videos"][video_id]["linked_at"] = None
+
+    save_inventory(inventory)
+
+    return jsonify({"success": True, "video": inventory["videos"][video_id]})
+
+
+@app.route('/api/video-rescan', methods=['POST'])
+def rescan_videos():
+    """Trigger a video rescan."""
+    try:
+        # Run quick scan (no smart matching) for speed
+        result = scan_videos(quick=True, reorganize=False, yes=True, cron=True)
+        return jsonify({
+            "success": True,
+            "result": result,
+        })
+    except Exception as e:
+        return jsonify({"error": "Scan failed"}), 500
+
+
+@app.route('/api/video/<video_id>/transcribe', methods=['POST'])
+def transcribe_video(video_id: str):
+    """Queue a video for transcription."""
+    if not re.match(r'^[a-f0-9]{12}\Z', video_id):
+        return jsonify({"error": "Invalid video ID format"}), 400
+
+    data = request.get_json() or {}
+    decimal = data.get("decimal")
+    title = data.get("title")
+    tags = data.get("tags", [])
+
+    if not decimal:
+        return jsonify({"error": "decimal required"}), 400
+
+    if not title:
+        return jsonify({"error": "title required"}), 400
+
+    # Validate decimal format (XX.XX.XX pattern)
+    if not re.match(r'^\d{2}\.\d{2}\.\d{2}$', decimal):
+        return jsonify({"error": "Invalid decimal format (expected XX.XX.XX)"}), 400
+
+    try:
+        job = queue_transcription(
+            video_id=video_id,
+            decimal=decimal,
+            title=title,
+            tags=tags,
+        )
+        return jsonify({
+            "success": True,
+            "job": job,
+        })
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": "Failed to queue transcription"}), 500
+
+
+@app.route('/api/transcription-queue')
+def get_transcription_queue():
+    """Get transcription queue status."""
+    status = get_queue_status()
+    return jsonify(status)
+
+
+@app.route('/api/decimals')
+def get_decimals():
+    """Get available decimal categories from registry."""
+    from kb.core import load_registry
+    registry = load_registry()
+    decimals = registry.get("decimals", {})
+
+    # Format for frontend
+    result = [
+        {"decimal": k, "label": v}
+        for k, v in sorted(decimals.items())
+    ]
+    return jsonify({"decimals": result})
+
+
+@app.route('/api/presets')
+def get_presets():
+    """Get available presets from config."""
+    presets = _config.get("presets", {})
+
+    # Format for frontend
+    result = [
+        {
+            "id": k,
+            "label": v.get("label", k),
+            "decimal": v.get("decimal", ""),
+            "tags": v.get("tags", []),
+            "sources": v.get("sources", []),
+        }
+        for k, v in presets.items()
+    ]
+    return jsonify({"presets": result})
+
+
+def check_and_auto_scan():
+    """Check if inventory is stale and run auto-scan if needed."""
+    inventory = load_inventory()
+    last_scan = inventory.get("last_scan")
+
+    if not last_scan:
+        # Never scanned - run initial scan
+        print("[KB Serve] No video inventory found, running initial scan...")
+        scan_videos(quick=True, reorganize=False, yes=True, cron=True)
+        return
+
+    try:
+        last_scan_dt = datetime.fromisoformat(last_scan)
+        age_hours = (datetime.now() - last_scan_dt).total_seconds() / 3600
+
+        if age_hours > 1:
+            print(f"[KB Serve] Video inventory is {age_hours:.1f}h old, running auto-scan...")
+            scan_videos(quick=True, reorganize=False, yes=True, cron=True)
+    except (ValueError, TypeError):
+        pass
+
+
 # --- CLI Entry Point ---
 
 def main():
@@ -648,7 +910,11 @@ def main():
     print(f"[KB Serve] Starting action queue dashboard on http://{args.host}:{args.port}")
     print(f"[KB Serve] KB Root: {KB_ROOT}")
     print(f"[KB Serve] Action State: {ACTION_STATE_PATH}")
+    print(f"[KB Serve] Video Inventory: {INVENTORY_PATH}")
     print(f"[KB Serve] Press Ctrl+C to stop")
+
+    # Auto-scan videos if inventory is stale (>1hr)
+    check_and_auto_scan()
 
     try:
         app.run(host=args.host, port=args.port, debug=False)

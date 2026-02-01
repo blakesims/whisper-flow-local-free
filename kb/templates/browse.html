@@ -604,6 +604,7 @@
                 <div class="mode-toggle">
                     <a href="/" class="mode-btn" id="mode-queue"><span class="key-hint">q</span></a>
                     <button class="mode-btn active" id="mode-browse"><span class="key-hint">b</span></button>
+                    <a href="/videos" class="mode-btn" id="mode-videos"><span class="key-hint">v</span></a>
                 </div>
             </div>
             <div class="search-bar">
@@ -658,6 +659,7 @@
             <div class="status-section">
                 <span class="status-item"><span class="status-key">q</span> queue</span>
                 <span class="status-item"><span class="status-key">b</span> browse</span>
+                <span class="status-item"><span class="status-key">v</span> videos</span>
             </div>
         </div>
     </div>
@@ -1093,6 +1095,10 @@
             // Global shortcuts
             if (e.key === 'q' && !isSearchFocused) {
                 window.location.href = '/';
+                return;
+            }
+            if (e.key === 'v' && !isSearchFocused) {
+                window.location.href = '/videos';
                 return;
             }
 
