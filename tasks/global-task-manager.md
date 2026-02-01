@@ -14,7 +14,11 @@
 - Status values: PLANNING, ACTIVE, ONGOING, BLOCKED, PAUSED
 - For ongoing tasks without distinct phases, use "Ongoing" in the "Phases" column
 
-## Recently Completed (2026-01-30)
+## Recently Completed (2026-02-01)
+- T017: KB Decimal & Analysis Configuration UI - 4 phases: decimal list/view, add decimal, edit decimal, polish & CLI flags ([main.md](completed/T017-kb-decimal-config/main.md))
+
+## Completed (2026-01-31)
+- T016: KB Video Pipeline Integration - 4 phases: video discovery with smart matching, file reorganization, dashboard videos tab, async transcription queue ([main.md](completed/T016-kb-video-pipeline/main.md))
 - T015: KB Serve - Action Queue Dashboard - 6 phases: core server, compound analysis, config-driven actions, file inbox, browse mode, server deployment ([main.md](completed/T015-kb-serve-dashboard/main.md))
 - T013: Cap Recording Auto-Clean - `kb clean` command with LLM analysis, trigger phrases, interactive review, soft-delete ([main.md](completed/T013-cap-clean/main.md))
 

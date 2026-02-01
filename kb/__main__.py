@@ -364,31 +364,45 @@ def show_config():
     else:
         console.print("  [yellow]No analysis types configured[/yellow]")
 
-    # Config file hint and edit option
+    # Config submenu
     console.print()
 
     editor = os.environ.get("EDITOR", "nvim")
     editor_name = os.path.basename(editor)
 
-    edit_choice = questionary.select(
-        "",
-        choices=[
-            questionary.Choice(title="← Back to menu", value="back"),
-            questionary.Choice(title=f"Edit config in {editor_name}", value="edit"),
-        ],
-        style=custom_style,
-        instruction="",
-    ).ask()
+    while True:
+        edit_choice = questionary.select(
+            "",
+            choices=[
+                questionary.Choice(title="← Back to menu", value="back"),
+                questionary.Choice(title=f"Edit config in {editor_name}", value="edit"),
+                questionary.Choice(title="Manage decimals", value="decimals"),
+                questionary.Choice(title="View analysis types", value="analysis"),
+            ],
+            style=custom_style,
+            instruction="(↑/↓ navigate, Enter select)",
+        ).ask()
 
-    if edit_choice == "edit":
-        import subprocess
-        config_path = CONFIG_FILE.resolve() if CONFIG_FILE.is_symlink() else CONFIG_FILE
+        if edit_choice == "back" or edit_choice is None:
+            return
 
-        # Ensure config file exists with starter template
-        if not config_path.exists():
-            config_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(config_path, 'w') as f:
-                f.write("""# KB Workflow Configuration
+        if edit_choice == "decimals":
+            manage_decimals()
+            continue
+
+        if edit_choice == "analysis":
+            view_analysis_types()
+            continue
+
+        if edit_choice == "edit":
+            import subprocess
+            config_path = CONFIG_FILE.resolve() if CONFIG_FILE.is_symlink() else CONFIG_FILE
+
+            # Ensure config file exists with starter template
+            if not config_path.exists():
+                config_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(config_path, 'w') as f:
+                    f.write("""# KB Workflow Configuration
 # See defaults in kb/__main__.py
 
 # Uncomment and modify to customize:
@@ -406,8 +420,472 @@ def show_config():
 #     - "Otter"
 """)
 
-        console.print(f"[dim]Opening {shorten_path(config_path)}...[/dim]")
-        subprocess.run([editor, str(config_path)])
+            console.print(f"[dim]Opening {shorten_path(config_path)}...[/dim]")
+            subprocess.run([editor, str(config_path)])
+            return
+
+
+def manage_decimals():
+    """Interactive decimal category management."""
+    import json
+    from kb.core import load_registry
+
+    registry = load_registry()
+    decimals = registry.get("decimals", {})
+
+    console.print(Panel("[bold]Manage Decimal Categories[/bold]", border_style="cyan"))
+
+    if not decimals:
+        console.print("\n[yellow]No decimal categories defined yet.[/yellow]")
+        console.print("[dim]Add your first decimal to get started.[/dim]\n")
+    else:
+        # Display existing decimals as a table
+        console.print("\n[bold cyan]Existing Decimals[/bold cyan]\n")
+
+        table = Table(show_header=True, header_style="bold cyan", box=None)
+        table.add_column("Decimal", style="cyan")
+        table.add_column("Name")
+        table.add_column("Description", style="dim", max_width=40)
+        table.add_column("Default Analyses", style="green")
+
+        for decimal_code in sorted(decimals.keys()):
+            info = decimals[decimal_code]
+            name = info.get("name", "") if isinstance(info, dict) else info
+            description = info.get("description", "") if isinstance(info, dict) else ""
+            analyses = info.get("default_analyses", []) if isinstance(info, dict) else []
+
+            # Truncate description if too long
+            if len(description) > 40:
+                description = description[:37] + "..."
+
+            analyses_str = ", ".join(analyses) if analyses else "[dim]none[/dim]"
+
+            table.add_row(decimal_code, name, description, analyses_str)
+
+        console.print(table)
+        console.print()
+
+    # Submenu for decimal management
+    action = questionary.select(
+        "",
+        choices=[
+            questionary.Choice(title="← Back", value="back"),
+            questionary.Choice(title="Add new decimal", value="add"),
+            questionary.Choice(title="Edit existing decimal", value="edit"),
+        ],
+        style=custom_style,
+        instruction="(↑/↓ navigate, Enter select)",
+    ).ask()
+
+    if action == "back" or action is None:
+        return
+
+    if action == "add":
+        add_decimal()
+        return
+
+    if action == "edit":
+        edit_decimal()
+        return
+
+
+def add_decimal():
+    """Interactive flow to add a new decimal category."""
+    import re
+    import json
+    from kb.core import load_registry, save_registry
+    from kb.analyze import list_analysis_types
+
+    console.print(Panel("[bold]Add New Decimal Category[/bold]", border_style="cyan"))
+
+    registry = load_registry()
+    decimals = registry.get("decimals", {})
+
+    # Get available analysis types for multi-select
+    analysis_types = list_analysis_types()
+    analysis_choices = [
+        questionary.Choice(
+            title=f"{t['name']}: {t['description'][:50]}{'...' if len(t['description']) > 50 else ''}",
+            value=t["name"],
+            checked=False
+        )
+        for t in analysis_types
+    ]
+
+    # Validation function for decimal format
+    def validate_decimal(text: str) -> bool | str:
+        if not text:
+            return "Decimal code is required"
+        if not re.match(r'^\d+(\.\d+)*$', text):
+            return "Invalid format. Use digits separated by dots (e.g., 50.01.01)"
+        if text in decimals:
+            return f"Decimal '{text}' already exists"
+        return True
+
+    # Prompt for decimal code
+    console.print("\n[dim]Format: digits separated by dots (e.g., 50.01.01, 60.02)[/dim]\n")
+
+    decimal_code = questionary.text(
+        "Decimal code:",
+        validate=validate_decimal,
+        style=custom_style,
+    ).ask()
+
+    if not decimal_code:
+        console.print("[dim]Cancelled[/dim]")
+        return
+
+    # Prompt for name
+    name = questionary.text(
+        "Name:",
+        validate=lambda x: True if x.strip() else "Name is required",
+        style=custom_style,
+    ).ask()
+
+    if not name:
+        console.print("[dim]Cancelled[/dim]")
+        return
+
+    name = name.strip()
+
+    # Prompt for description (optional)
+    description = questionary.text(
+        "Description (optional):",
+        default="",
+        style=custom_style,
+    ).ask()
+
+    if description is None:
+        console.print("[dim]Cancelled[/dim]")
+        return
+
+    description = description.strip()
+
+    # Prompt for default analyses (multi-select)
+    console.print("\n[dim]Select default analyses to run on new transcripts:[/dim]")
+
+    if analysis_choices:
+        default_analyses = questionary.checkbox(
+            "Default analyses:",
+            choices=analysis_choices,
+            style=custom_style,
+            instruction="(space to select, enter to confirm)",
+        ).ask()
+
+        if default_analyses is None:
+            console.print("[dim]Cancelled[/dim]")
+            return
+    else:
+        console.print("[yellow]No analysis types available yet.[/yellow]")
+        default_analyses = []
+
+    # Show summary and confirm
+    console.print("\n[bold cyan]Summary[/bold cyan]")
+    console.print(f"  Decimal: [cyan]{decimal_code}[/cyan]")
+    console.print(f"  Name: {name}")
+    if description:
+        console.print(f"  Description: [dim]{description}[/dim]")
+    if default_analyses:
+        console.print(f"  Default analyses: [green]{', '.join(default_analyses)}[/green]")
+    else:
+        console.print("  Default analyses: [dim]none[/dim]")
+
+    confirm = questionary.confirm(
+        "\nSave this decimal?",
+        default=True,
+        style=custom_style,
+    ).ask()
+
+    if not confirm:
+        console.print("[dim]Cancelled[/dim]")
+        return
+
+    # Save to registry
+    if "decimals" not in registry:
+        registry["decimals"] = {}
+
+    registry["decimals"][decimal_code] = {
+        "name": name,
+        "description": description,
+        "default_analyses": default_analyses,
+    }
+
+    if save_registry(registry):
+        console.print(f"\n[green]✓ Decimal '{decimal_code}' added successfully![/green]\n")
+    else:
+        console.print(f"\n[red]✗ Failed to save decimal. Check file permissions.[/red]\n")
+
+
+def edit_decimal():
+    """Interactive flow to edit an existing decimal category."""
+    import json
+    from kb.core import load_registry, save_registry
+    from kb.analyze import list_analysis_types
+
+    registry = load_registry()
+    decimals = registry.get("decimals", {})
+
+    if not decimals:
+        console.print("\n[yellow]No decimal categories to edit.[/yellow]")
+        console.print("[dim]Add a decimal first.[/dim]\n")
+        return
+
+    console.print(Panel("[bold]Edit Decimal Category[/bold]", border_style="cyan"))
+
+    # Build choices for decimal selection
+    decimal_choices = [
+        questionary.Choice(
+            title=f"{code}: {info.get('name', info) if isinstance(info, dict) else info}",
+            value=code
+        )
+        for code, info in sorted(decimals.items())
+    ]
+    decimal_choices.insert(0, questionary.Choice(title="← Cancel", value=None))
+
+    # Select decimal to edit
+    decimal_code = questionary.select(
+        "Select decimal to edit:",
+        choices=decimal_choices,
+        style=custom_style,
+    ).ask()
+
+    if not decimal_code:
+        return
+
+    # Get current values
+    current = decimals[decimal_code]
+    if isinstance(current, str):
+        # Legacy format: just a name string
+        current = {"name": current, "description": "", "default_analyses": []}
+
+    current_name = current.get("name", "")
+    current_description = current.get("description", "")
+    current_analyses = current.get("default_analyses", [])
+
+    # Show current values
+    console.print(f"\n[bold cyan]Current Values[/bold cyan]")
+    console.print(f"  Decimal: [cyan]{decimal_code}[/cyan]")
+    console.print(f"  Name: {current_name}")
+    console.print(f"  Description: [dim]{current_description or '(none)'}[/dim]")
+    console.print(f"  Default analyses: [green]{', '.join(current_analyses) if current_analyses else '(none)'}[/green]")
+
+    # Submenu for what to edit
+    edit_action = questionary.select(
+        "\nWhat would you like to do?",
+        choices=[
+            questionary.Choice(title="← Cancel", value="cancel"),
+            questionary.Choice(title="Edit name", value="name"),
+            questionary.Choice(title="Edit description", value="description"),
+            questionary.Choice(title="Edit default analyses", value="analyses"),
+            questionary.Choice(title="Edit all fields", value="all"),
+            questionary.Choice(title="Delete this decimal", value="delete"),
+        ],
+        style=custom_style,
+    ).ask()
+
+    if edit_action == "cancel" or edit_action is None:
+        return
+
+    if edit_action == "delete":
+        delete_decimal(decimal_code, registry)
+        return
+
+    # Get available analysis types for multi-select
+    analysis_types = list_analysis_types()
+    analysis_choices = [
+        questionary.Choice(
+            title=f"{t['name']}: {t['description'][:50]}{'...' if len(t['description']) > 50 else ''}",
+            value=t["name"],
+            checked=(t["name"] in current_analyses)
+        )
+        for t in analysis_types
+    ]
+
+    new_name = current_name
+    new_description = current_description
+    new_analyses = current_analyses
+
+    # Edit based on selection
+    if edit_action in ("name", "all"):
+        result = questionary.text(
+            "Name:",
+            default=current_name,
+            validate=lambda x: True if x.strip() else "Name is required",
+            style=custom_style,
+        ).ask()
+        if result is None:
+            console.print("[dim]Cancelled[/dim]")
+            return
+        new_name = result.strip()
+
+    if edit_action in ("description", "all"):
+        result = questionary.text(
+            "Description:",
+            default=current_description,
+            style=custom_style,
+        ).ask()
+        if result is None:
+            console.print("[dim]Cancelled[/dim]")
+            return
+        new_description = result.strip()
+
+    if edit_action in ("analyses", "all"):
+        if analysis_choices:
+            result = questionary.checkbox(
+                "Default analyses:",
+                choices=analysis_choices,
+                style=custom_style,
+                instruction="(space to select, enter to confirm)",
+            ).ask()
+            if result is None:
+                console.print("[dim]Cancelled[/dim]")
+                return
+            new_analyses = result
+        else:
+            console.print("[yellow]No analysis types available.[/yellow]")
+
+    # Check if anything changed
+    changed = (new_name != current_name or
+               new_description != current_description or
+               set(new_analyses) != set(current_analyses))
+
+    if not changed:
+        console.print("\n[dim]No changes made.[/dim]\n")
+        return
+
+    # Show summary of changes
+    console.print("\n[bold cyan]Changes[/bold cyan]")
+    if new_name != current_name:
+        console.print(f"  Name: [dim]{current_name}[/dim] → [green]{new_name}[/green]")
+    if new_description != current_description:
+        old_desc = current_description or "(none)"
+        new_desc = new_description or "(none)"
+        console.print(f"  Description: [dim]{old_desc}[/dim] → [green]{new_desc}[/green]")
+    if set(new_analyses) != set(current_analyses):
+        old_analyses = ", ".join(current_analyses) if current_analyses else "(none)"
+        new_analyses_str = ", ".join(new_analyses) if new_analyses else "(none)"
+        console.print(f"  Analyses: [dim]{old_analyses}[/dim] → [green]{new_analyses_str}[/green]")
+
+    confirm = questionary.confirm(
+        "\nSave changes?",
+        default=True,
+        style=custom_style,
+    ).ask()
+
+    if not confirm:
+        console.print("[dim]Cancelled[/dim]")
+        return
+
+    # Save to registry
+    registry["decimals"][decimal_code] = {
+        "name": new_name,
+        "description": new_description,
+        "default_analyses": new_analyses,
+    }
+
+    if save_registry(registry):
+        console.print(f"\n[green]✓ Decimal '{decimal_code}' updated successfully![/green]\n")
+    else:
+        console.print(f"\n[red]✗ Failed to save changes. Check file permissions.[/red]\n")
+
+
+def delete_decimal(decimal_code: str, registry: dict):
+    """Delete a decimal category with safety checks."""
+    from kb.core import save_registry
+
+    # Check if any transcripts use this decimal
+    # We could scan the transcripts directory, but for now we'll just warn
+    console.print(f"\n[yellow]Warning:[/yellow] Deleting decimal [cyan]{decimal_code}[/cyan]")
+    console.print("[dim]Existing transcripts using this decimal will not be affected,[/dim]")
+    console.print("[dim]but new transcripts won't be able to use it.[/dim]\n")
+
+    confirm = questionary.confirm(
+        f"Delete decimal '{decimal_code}'?",
+        default=False,
+        style=custom_style,
+    ).ask()
+
+    if not confirm:
+        console.print("[dim]Cancelled[/dim]")
+        return
+
+    # Double confirm for safety
+    confirm2 = questionary.text(
+        f"Type '{decimal_code}' to confirm deletion:",
+        style=custom_style,
+    ).ask()
+
+    if confirm2 != decimal_code:
+        console.print("[dim]Cancelled (confirmation did not match)[/dim]")
+        return
+
+    # Delete from registry
+    del registry["decimals"][decimal_code]
+    if save_registry(registry):
+        console.print(f"\n[green]✓ Decimal '{decimal_code}' deleted.[/green]\n")
+    else:
+        console.print(f"\n[red]✗ Failed to delete. Check file permissions.[/red]\n")
+
+
+def view_analysis_types():
+    """Display available analysis types from config directory."""
+    import json
+
+    paths = get_paths(load_config())
+    analysis_dir = paths["config_dir"] / "analysis_types"
+
+    console.print(Panel("[bold]Available Analysis Types[/bold]", border_style="cyan"))
+
+    if not analysis_dir.exists():
+        console.print(f"\n[yellow]Analysis types directory not found:[/yellow]")
+        console.print(f"[dim]{shorten_path(analysis_dir)}/[/dim]\n")
+        console.print("[dim]Create JSON files in this directory to define analysis types.[/dim]\n")
+        return
+
+    analysis_files = list(analysis_dir.glob("*.json"))
+    if not analysis_files:
+        console.print(f"\n[yellow]No analysis types defined yet.[/yellow]")
+        console.print(f"[dim]Add .json files to: {shorten_path(analysis_dir)}/[/dim]\n")
+        return
+
+    # Build table of analysis types
+    console.print("\n")
+    table = Table(show_header=True, header_style="bold cyan", box=None)
+    table.add_column("Name", style="cyan")
+    table.add_column("Description")
+    table.add_column("Output Type", style="dim")
+
+    for analysis_file in sorted(analysis_files):
+        try:
+            with open(analysis_file) as f:
+                data = json.load(f)
+
+            name = data.get("name", analysis_file.stem)
+            description = data.get("description", "")
+
+            # Determine output type from schema
+            schema = data.get("output_schema", {})
+            props = schema.get("properties", {})
+            if props:
+                first_key = list(props.keys())[0]
+                first_prop = props[first_key]
+                output_type = first_prop.get("type", "unknown")
+                if output_type == "object":
+                    output_type = "structured"
+            else:
+                output_type = "text"
+
+            table.add_row(name, description, output_type)
+
+        except (json.JSONDecodeError, IOError) as e:
+            table.add_row(
+                analysis_file.stem,
+                f"[red]Error loading: {e}[/red]",
+                ""
+            )
+
+    console.print(table)
+    console.print(f"\n[dim]Location: {shorten_path(analysis_dir)}/[/dim]\n")
 
 
 def prompt_for_file() -> str | None:
@@ -485,10 +963,24 @@ def main():
         run_command(args[0], args[1:], interactive=False)
         return
 
+    # Direct access flags for config features
+    if args and args[0] in ("--decimals", "--manage-decimals"):
+        manage_decimals()
+        return
+
+    if args and args[0] in ("--analysis-types", "--analyses"):
+        view_analysis_types()
+        return
+
+    if args and args[0] == "--config":
+        show_config()
+        return
+
     # If args provided but not a known command, show help
     if args and args[0] not in ["--help", "-h"]:
         console.print(f"[red]Unknown command: {args[0]}[/red]\n")
         console.print("Available commands: " + ", ".join(COMMANDS.keys()))
+        console.print("Direct access: --decimals, --analysis-types, --config")
         console.print("Run [bold]kb[/bold] without arguments for interactive menu.")
         sys.exit(1)
 

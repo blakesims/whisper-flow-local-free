@@ -57,21 +57,39 @@ def print_status(msg: str):
 
 def load_registry() -> dict:
     """Load the registry.json file."""
-    if REGISTRY_PATH.exists():
-        with open(REGISTRY_PATH, 'r') as f:
-            return json.load(f)
-    return {
+    default = {
         "decimals": {},
         "tags": [],
         "transcribed_files": [],
         "transcribed_zoom_meetings": []
     }
+    if REGISTRY_PATH.exists():
+        try:
+            with open(REGISTRY_PATH, 'r') as f:
+                data = json.load(f)
+                # Ensure required keys exist (merge with defaults)
+                for key in default:
+                    if key not in data:
+                        data[key] = default[key]
+                return data
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"[KB] Warning: Could not load registry.json: {e}")
+            print(f"[KB] Using defaults. Fix or remove: {REGISTRY_PATH}")
+            return default
+    return default
 
 
-def save_registry(registry: dict):
-    """Save the registry.json file."""
-    with open(REGISTRY_PATH, 'w') as f:
-        json.dump(registry, f, indent=2)
+def save_registry(registry: dict) -> bool:
+    """Save the registry.json file. Returns True on success, False on error."""
+    try:
+        # Ensure config directory exists
+        REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(REGISTRY_PATH, 'w') as f:
+            json.dump(registry, f, indent=2)
+        return True
+    except (IOError, OSError) as e:
+        print(f"[KB] Error: Could not save registry.json: {e}")
+        return False
 
 
 # --- Transcription Utilities ---
