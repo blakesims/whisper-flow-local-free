@@ -463,9 +463,17 @@ def scan_videos(
 
             # Smart matching via partial transcription (unless quick mode)
             if not quick:
-                progress.update(task, description=f"Transcribing sample: {video['filename'][:30]}...")
+                # Check for cached sample_text from previous scan
+                existing = existing_videos.get(video_id, {})
+                cached_sample = existing.get("sample_text")
+                cached_mtime = existing.get("scanned_mtime")
 
-                sample_text = transcribe_sample(video["current_path"])
+                # Use cache if sample exists and mtime hasn't changed
+                if cached_sample and cached_mtime == video.get("mtime"):
+                    sample_text = cached_sample
+                else:
+                    progress.update(task, description=f"Transcribing sample: {video['filename'][:30]}...")
+                    sample_text = transcribe_sample(video["current_path"])
 
                 if sample_text:
                     match_result = find_matching_transcript(sample_text, transcripts)
@@ -481,11 +489,15 @@ def scan_videos(
                         progress.advance(task)
                         continue
 
-            # No match found
+            # No match found - cache sample_text for next scan
             video["status"] = "unlinked"
             video["transcript_id"] = None
             video["match_confidence"] = None
             video["linked_at"] = None
+            if not quick:
+                if sample_text:
+                    video["sample_text"] = sample_text
+                    video["scanned_mtime"] = video.get("mtime")
             unlinked += 1
             progress.advance(task)
 
