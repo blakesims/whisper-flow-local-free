@@ -689,10 +689,15 @@ def soft_delete_segments(cap_path: Path, indices_to_delete: set[int]) -> dict:
     with open(meta_path, 'w') as f:
         json.dump(meta, f, indent=2)
 
-    # Step 5: Delete project-config.json (Cap will regenerate)
+    # Step 5: Backup project-config.json (contains timeline edits)
+    # TODO: Properly update segment references instead of deleting
     if config_path.exists():
+        backup_path = cap_path / "_backup_project-config.json"
+        import shutil
+        shutil.copy2(config_path, backup_path)
         config_path.unlink()
-        console.print("[bold]🧹 Removed project-config.json[/bold] (Cap will regenerate)")
+        console.print(f"[bold]💾 Backed up project-config.json[/bold] → {backup_path.name}")
+        console.print("[yellow]⚠️  Timeline edits saved to backup. Cap will regenerate fresh config.[/yellow]")
 
     audit_data["remaining_segment_count"] = len(new_segments)
 
@@ -865,10 +870,15 @@ def restore_segments(cap_path: Path) -> None:
     with open(meta_path, 'w') as f:
         json.dump(meta, f, indent=2)
 
-    # Step 4: Delete project-config.json
+    # Step 4: Backup project-config.json (contains timeline edits)
+    # TODO: Properly update segment references instead of deleting
     if config_path.exists():
+        backup_path = cap_path / "_backup_project-config.json"
+        import shutil
+        shutil.copy2(config_path, backup_path)
         config_path.unlink()
-        console.print("[bold]🧹 Removed project-config.json[/bold] (Cap will regenerate)")
+        console.print(f"[bold]💾 Backed up project-config.json[/bold] → {backup_path.name}")
+        console.print("[yellow]⚠️  Timeline edits saved to backup. Cap will regenerate fresh config.[/yellow]")
 
     # Step 5: Update audit log to remove the restored segment
     if audit_path.exists() and audit_data:
