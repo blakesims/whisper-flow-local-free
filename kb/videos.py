@@ -1235,6 +1235,37 @@ def categorize_unlinked_videos():
         console.print(f"  [dim]or: kb scan-videos -p[/dim]")
 
 
+def reset_stuck_jobs():
+    """Reset stuck 'processing' jobs back to 'pending' so they can be retried."""
+    queue = load_queue()
+    jobs = queue.get("jobs", {})
+    inventory = load_inventory()
+
+    reset_count = 0
+    for job_id, job in jobs.items():
+        if job.get("status") == "processing":
+            # Reset job to pending
+            job["status"] = "pending"
+            job["started_at"] = None
+            job["error"] = None
+            reset_count += 1
+
+            # Also reset video inventory status to queued (not processing)
+            if job_id in inventory.get("videos", {}):
+                inventory["videos"][job_id]["status"] = "queued"
+
+            console.print(f"  Reset: {job.get('filename', job_id)}")
+
+    if reset_count > 0:
+        save_queue(queue)
+        save_inventory(inventory)
+        console.print(f"\n[green]Reset {reset_count} stuck job(s) to pending[/green]")
+    else:
+        console.print("[dim]No stuck jobs found[/dim]")
+
+    return reset_count
+
+
 def show_queue_status():
     """Display transcription queue status."""
     from rich.table import Table
@@ -1337,8 +1368,16 @@ def main():
     parser.add_argument("--categorize", "-c", action="store_true", help="After scan, interactively categorize unlinked videos")
     parser.add_argument("--queue", "-q", action="store_true", help="Show transcription queue status (no scan)")
     parser.add_argument("--process", "-p", action="store_true", help="Process queued transcriptions (no scan)")
+    parser.add_argument("--reset", action="store_true", help="Reset stuck 'processing' jobs to 'pending'")
 
     args = parser.parse_args()
+
+    # Reset stuck jobs mode
+    if args.reset:
+        console.print("\n[bold cyan]Resetting Stuck Jobs[/bold cyan]\n")
+        reset_stuck_jobs()
+        show_queue_status()
+        return
 
     # Process queue mode - run transcriptions
     if args.process:
