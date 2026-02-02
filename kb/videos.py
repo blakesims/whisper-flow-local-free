@@ -740,9 +740,12 @@ def get_queue_status() -> dict:
     }
 
 
-def process_next_job() -> bool:
+def process_next_job(quiet: bool = False) -> bool:
     """
     Process the next pending job in the queue.
+
+    Args:
+        quiet: If True, suppress all output (for background processing)
 
     Returns True if a job was processed, False if queue is empty.
     """
@@ -762,6 +765,11 @@ def process_next_job() -> bool:
     job["started_at"] = datetime.now().isoformat()
     save_queue(queue)
 
+    # Log file for background output
+    log_dir = Path.home() / ".kb" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / f"transcription-{job_id}.log"
+
     try:
         # Import transcribe_to_kb here to avoid circular imports
         from kb.core import transcribe_to_kb
@@ -770,16 +778,34 @@ def process_next_job() -> bool:
         if not video_path or not os.path.exists(video_path):
             raise FileNotFoundError(f"Video file not found: {video_path}")
 
-        console.print(f"[cyan]Transcribing: {job['filename']}[/cyan]")
-
-        # Transcribe and save to KB
-        result = transcribe_to_kb(
-            file_path=video_path,
-            decimal=job["decimal"],
-            title=job["title"],
-            tags=job["tags"],
-            source_type="video",
-        )
+        if quiet:
+            # Redirect stdout/stderr to log file for background processing
+            import sys
+            original_stdout = sys.stdout
+            original_stderr = sys.stderr
+            with open(log_file, 'w') as log_f:
+                sys.stdout = log_f
+                sys.stderr = log_f
+                try:
+                    result = transcribe_to_kb(
+                        file_path=video_path,
+                        decimal=job["decimal"],
+                        title=job["title"],
+                        tags=job["tags"],
+                        source_type="video",
+                    )
+                finally:
+                    sys.stdout = original_stdout
+                    sys.stderr = original_stderr
+        else:
+            console.print(f"[cyan]Transcribing: {job['filename']}[/cyan]")
+            result = transcribe_to_kb(
+                file_path=video_path,
+                decimal=job["decimal"],
+                title=job["title"],
+                tags=job["tags"],
+                source_type="video",
+            )
 
         transcript_id = result.get("id")
 
@@ -787,6 +813,7 @@ def process_next_job() -> bool:
         job["status"] = "completed"
         job["completed_at"] = datetime.now().isoformat()
         job["transcript_id"] = transcript_id
+        job["log_file"] = str(log_file) if quiet else None
 
         # Move to completed list
         queue["completed"].append(job)
@@ -802,7 +829,8 @@ def process_next_job() -> bool:
             inventory["videos"][job_id]["linked_at"] = datetime.now().isoformat()
             save_inventory(inventory)
 
-        console.print(f"[green]✓ Completed: {job['filename']} → {transcript_id}[/green]")
+        if not quiet:
+            console.print(f"[green]✓ Completed: {job['filename']} → {transcript_id}[/green]")
         return True
 
     except Exception as e:
@@ -810,6 +838,7 @@ def process_next_job() -> bool:
         job["status"] = "failed"
         job["error"] = str(e)
         job["completed_at"] = datetime.now().isoformat()
+        job["log_file"] = str(log_file) if quiet else None
         save_queue(queue)
 
         # Revert video status to unlinked
@@ -818,7 +847,8 @@ def process_next_job() -> bool:
             inventory["videos"][job_id]["status"] = "unlinked"
             save_inventory(inventory)
 
-        console.print(f"[red]✗ Failed: {job['filename']} - {e}[/red]")
+        if not quiet:
+            console.print(f"[red]✗ Failed: {job['filename']} - {e}[/red]")
         return True
 
 
@@ -829,8 +859,8 @@ def worker_loop():
     _worker_running = True
     try:
         while True:
-            # Process jobs until queue is empty
-            if not process_next_job():
+            # Process jobs until queue is empty (quiet mode for background)
+            if not process_next_job(quiet=True):
                 break
             # Small delay between jobs
             import time
@@ -1024,8 +1054,8 @@ def categorize_unlinked_videos():
                     title=title,
                     tags=tags,
                 )
-                console.print(f"[green]✓ Queued for transcription![/green]")
-                console.print(f"[dim]Job will process in background. Check queue status with 'kb serve'[/dim]")
+                console.print(f"[green]✓ Queued![/green] Processing in background.")
+                console.print(f"[dim]Logs: ~/.kb/logs/transcription-{selected}.log[/dim]")
             except Exception as e:
                 console.print(f"[red]Failed to queue: {e}[/red]")
 
@@ -1036,7 +1066,66 @@ def categorize_unlinked_videos():
         console.print(f"  Pending: {queue_status['pending']}")
         console.print(f"  Processing: {queue_status['processing']}")
         console.print(f"  Completed: {queue_status['completed']}")
-        console.print(f"\n[dim]Background worker is running. View progress at kb serve dashboard.[/dim]")
+        console.print(f"\n[dim]Check progress: kb scan-videos --queue[/dim]")
+        console.print(f"[dim]View logs: ls ~/.kb/logs/[/dim]")
+
+
+def show_queue_status():
+    """Display transcription queue status."""
+    from rich.table import Table
+
+    status = get_queue_status()
+    queue = load_queue()
+
+    console.print("\n[bold cyan]Transcription Queue[/bold cyan]\n")
+
+    # Summary
+    console.print(f"  Worker: {'[green]running[/green]' if status['worker_running'] else '[dim]idle[/dim]'}")
+    console.print(f"  Pending: {status['pending']}")
+    console.print(f"  Processing: {status['processing']}")
+    console.print(f"  Failed: {status['failed']}")
+    console.print(f"  Completed: {status['completed']}")
+
+    # Show active jobs
+    jobs = status.get("jobs", {})
+    active_jobs = [j for j in jobs.values() if j.get("status") in ("pending", "processing")]
+
+    if active_jobs:
+        console.print("\n[bold]Active Jobs[/bold]")
+        table = Table(show_header=True, header_style="bold", box=None)
+        table.add_column("Status", style="cyan")
+        table.add_column("File")
+        table.add_column("Category")
+        table.add_column("Queued")
+
+        for job in sorted(active_jobs, key=lambda j: j.get("queued_at", "")):
+            status_str = "[yellow]pending[/yellow]" if job["status"] == "pending" else "[green]processing[/green]"
+            queued = job.get("queued_at", "")[:16].replace("T", " ")
+            table.add_row(
+                status_str,
+                job.get("filename", "")[:40],
+                job.get("decimal", ""),
+                queued
+            )
+        console.print(table)
+
+    # Show failed jobs
+    failed_jobs = [j for j in jobs.values() if j.get("status") == "failed"]
+    if failed_jobs:
+        console.print("\n[bold red]Failed Jobs[/bold red]")
+        for job in failed_jobs:
+            console.print(f"  {job.get('filename')}: {job.get('error', 'Unknown error')}")
+            if job.get("log_file"):
+                console.print(f"    [dim]Log: {job['log_file']}[/dim]")
+
+    # Show recent completions
+    completed = queue.get("completed", [])[-5:]  # Last 5
+    if completed:
+        console.print("\n[bold green]Recent Completions[/bold green]")
+        for job in reversed(completed):
+            console.print(f"  ✓ {job.get('filename')} → {job.get('transcript_id')}")
+
+    console.print()
 
 
 def main():
@@ -1049,8 +1138,14 @@ def main():
     parser.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompts")
     parser.add_argument("--cron", action="store_true", help="Silent mode for cron jobs")
     parser.add_argument("--categorize", "-c", action="store_true", help="After scan, interactively categorize unlinked videos")
+    parser.add_argument("--queue", "-q", action="store_true", help="Show transcription queue status (no scan)")
 
     args = parser.parse_args()
+
+    # Queue status mode - skip scanning
+    if args.queue:
+        show_queue_status()
+        return
 
     result = scan_videos(
         quick=args.quick,
