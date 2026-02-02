@@ -929,6 +929,107 @@ def start_worker():
         _worker_thread.start()
 
 
+def batch_categorize_videos(videos_list: list, decimal_choices: list, registry: dict, style):
+    """
+    Batch categorize multiple videos with same decimal and tags.
+
+    Args:
+        videos_list: List of video dicts to choose from
+        decimal_choices: Pre-built questionary choices for decimals
+        registry: KB registry dict
+        style: questionary Style object
+    """
+    import questionary
+    from kb.cli import select_tags
+
+    console.print("\n[bold cyan]Batch Categorization[/bold cyan]")
+    console.print("[dim]Select multiple videos, then assign shared decimal and tags.[/dim]\n")
+
+    # Build checkbox choices for videos
+    video_checkbox_choices = []
+    for v in videos_list:
+        filename = v.get("filename", "Unknown")
+        source = v.get("source_label", "")
+        duration = v.get("duration_seconds", 0)
+        duration_str = f"{int(duration // 60)}m" if duration else ""
+
+        title = f"{filename[:50]} [{source}] {duration_str}"
+        video_checkbox_choices.append(questionary.Choice(title=title, value=v["id"]))
+
+    # Multi-select videos
+    selected_ids = questionary.checkbox(
+        "Select videos (space to toggle, enter to confirm):",
+        choices=video_checkbox_choices,
+        style=style,
+    ).ask()
+
+    if not selected_ids:
+        console.print("[dim]No videos selected.[/dim]")
+        return
+
+    console.print(f"\n[green]Selected {len(selected_ids)} video(s)[/green]\n")
+
+    # Select decimal (applies to all)
+    decimal = questionary.select(
+        "Category for ALL selected videos:",
+        choices=decimal_choices,
+        style=style,
+    ).ask()
+
+    if decimal is None:
+        return
+
+    # Select tags (applies to all)
+    console.print("\n[dim]These tags will be applied to all selected videos:[/dim]")
+    tags = select_tags(registry)
+
+    # Build lookup for videos
+    videos_by_id = {v["id"]: v for v in videos_list}
+
+    # Confirm titles for each video
+    console.print("\n[bold cyan]Confirm titles for each video:[/bold cyan]")
+    console.print("[dim]Press Enter to accept default, or type a new title[/dim]\n")
+
+    queued_count = 0
+    for video_id in selected_ids:
+        video = videos_by_id.get(video_id)
+        if not video:
+            continue
+
+        filename = video.get("filename", "")
+        default_title = Path(filename).stem.replace("_", " ").replace("-", " ")
+
+        console.print(f"[dim]{filename}[/dim]")
+        title = questionary.text(
+            "Title:",
+            default=default_title,
+            style=style,
+        ).ask()
+
+        if title is None:
+            console.print("[yellow]Skipped[/yellow]")
+            continue
+
+        title = title.strip()
+        if not title:
+            title = default_title
+
+        # Queue it
+        try:
+            queue_transcription(
+                video_id=video_id,
+                decimal=decimal,
+                title=title,
+                tags=tags,
+            )
+            console.print(f"[green]✓ Queued[/green]")
+            queued_count += 1
+        except Exception as e:
+            console.print(f"[red]Failed: {e}[/red]")
+
+    console.print(f"\n[bold green]Queued {queued_count} video(s)[/bold green]")
+
+
 def categorize_unlinked_videos():
     """
     Interactive loop to categorize unlinked videos.
@@ -1019,6 +1120,7 @@ def categorize_unlinked_videos():
             ))
 
         video_choices.insert(0, questionary.Choice(title="← Done categorizing", value="exit"))
+        video_choices.insert(1, questionary.Choice(title="⊡ Batch select (same decimal/tags)", value="batch"))
 
         # Select video
         selected = questionary.select(
@@ -1030,6 +1132,11 @@ def categorize_unlinked_videos():
 
         if selected == "exit" or selected is None:
             break
+
+        # Batch mode
+        if selected == "batch":
+            batch_categorize_videos(unlinked[:20], decimal_choices, registry, custom_style)
+            continue
 
         # Get the selected video
         video = videos.get(selected)
