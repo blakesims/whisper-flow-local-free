@@ -212,6 +212,11 @@ COMMANDS = {
         "description": "Run LLM analysis on existing transcript",
         "module": "kb.analyze",
     },
+    "missing": {
+        "label": "Missing",
+        "description": "Show transcripts missing their decimal's default analyses",
+        "module": "kb.analyze",
+    },
     "serve": {
         "label": "Serve",
         "description": "Start action queue dashboard web server",

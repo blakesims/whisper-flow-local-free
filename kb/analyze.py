@@ -181,6 +181,83 @@ def scan_missing_by_decimal() -> dict[str, list[dict]]:
     return results
 
 
+def show_missing_analyses(detailed: bool = False) -> None:
+    """
+    Display summary of transcripts missing their decimal's default analyses.
+
+    Args:
+        detailed: If True, show per-transcript breakdown under each decimal
+    """
+    console.print(Panel("[bold]Missing Default Analyses[/bold]", border_style="cyan"))
+
+    # Scan for missing analyses
+    missing_by_decimal = scan_missing_by_decimal()
+
+    if not missing_by_decimal:
+        console.print("\n[green]✓ All transcripts have their default analyses![/green]\n")
+        return
+
+    # Load registry for decimal names
+    registry = load_registry()
+    decimals_info = registry.get("decimals", {})
+
+    # Build summary table
+    table = Table(show_header=True, header_style="bold cyan", box=None)
+    table.add_column("Decimal", style="cyan")
+    table.add_column("Name")
+    table.add_column("Transcripts", justify="right")
+    table.add_column("Missing Types", style="yellow")
+
+    total_transcripts = 0
+    total_missing_count = 0
+
+    for decimal in sorted(missing_by_decimal.keys()):
+        transcripts = missing_by_decimal[decimal]
+        total_transcripts += len(transcripts)
+
+        # Get decimal name
+        decimal_data = decimals_info.get(decimal, {})
+        name = decimal_data.get("name", "") if isinstance(decimal_data, dict) else decimal_data
+
+        # Collect unique missing types across all transcripts in this decimal
+        all_missing_types = set()
+        for t in transcripts:
+            all_missing_types.update(t["missing"])
+            total_missing_count += len(t["missing"])
+
+        missing_str = ", ".join(sorted(all_missing_types))
+
+        table.add_row(
+            decimal,
+            name[:30] if name else "[dim]unnamed[/dim]",
+            str(len(transcripts)),
+            missing_str
+        )
+
+    console.print("\n")
+    console.print(table)
+    console.print(f"\n[bold]Total:[/bold] {total_transcripts} transcripts missing {total_missing_count} analyses across {len(missing_by_decimal)} decimals\n")
+
+    # Detailed per-transcript breakdown
+    if detailed:
+        console.print("[bold cyan]Detailed Breakdown:[/bold cyan]\n")
+
+        for decimal in sorted(missing_by_decimal.keys()):
+            transcripts = missing_by_decimal[decimal]
+            decimal_data = decimals_info.get(decimal, {})
+            name = decimal_data.get("name", "") if isinstance(decimal_data, dict) else decimal_data
+
+            console.print(f"[bold cyan]{decimal}[/bold cyan] - {name}")
+
+            for t in transcripts:
+                missing_str = ", ".join(t["missing"])
+                title_short = t["title"][:50] + "..." if len(t["title"]) > 50 else t["title"]
+                console.print(f"  [dim]•[/dim] {title_short}")
+                console.print(f"    [yellow]Missing:[/yellow] {missing_str}")
+
+            console.print()
+
+
 def get_all_transcripts(
     decimal_filter: str | None = None,
     limit: int | None = None
@@ -844,6 +921,26 @@ def run_batch_pending(
 
 def main():
     import argparse
+
+    # Check if this is the 'missing' subcommand (invoked via kb missing)
+    # sys.argv[0] will be 'missing' when called via COMMANDS dispatch
+    if len(sys.argv) > 0 and sys.argv[0] == "missing":
+        # Parse missing-specific args
+        parser = argparse.ArgumentParser(
+            prog="kb missing",
+            description="Show transcripts missing their decimal's default analyses",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            epilog="""
+Examples:
+  kb missing              # Show summary table
+  kb missing --detailed   # Show per-transcript breakdown
+            """
+        )
+        parser.add_argument("--detailed", action="store_true",
+                            help="Show per-transcript breakdown under each decimal")
+        args = parser.parse_args(sys.argv[1:])
+        show_missing_analyses(detailed=args.detailed)
+        return
 
     parser = argparse.ArgumentParser(
         description="Analyze transcripts with LLM",
