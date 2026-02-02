@@ -70,21 +70,26 @@ DEFAULTS = {
     },
     "video_sources": [
         {
-            "path": "/Volumes/BackupArchive/skool-videos",
+            "path": "/Volumes/SharedFiles/kb-videos/skool-videos",
             "label": "Skool Videos",
         },
         {
-            "path": "/Volumes/BackupArchive/cap-exports",
+            "path": "/Volumes/SharedFiles/kb-videos/cap-exports",
             "label": "Cap Exports",
         },
     ],
-    "video_target": "/Volumes/BackupArchive/kb-videos",
+    "video_target": "/Volumes/SharedFiles/kb-videos",
     # Remote mount mappings for SSH-based audio extraction
     # Maps local mount paths to SSH destinations for efficient extraction
     "remote_mounts": {
-        "/Volumes/BackupArchive": {
+        "/Volumes/SharedFiles": {
             "host": "zen",  # SSH host (from ~/.ssh/config)
-            "path": "/mnt/seagate_archive",  # Samba share path on server
+            "path": "/mnt/shared_storage",  # Fast USB 3.0 drive
+        },
+        # Keep old mapping for any legacy paths
+        "/Volumes/BackupArchive": {
+            "host": "zen",
+            "path": "/mnt/seagate_archive",
         },
     },
     "presets": {
