@@ -95,18 +95,38 @@ def scan_video_sources(config: dict, existing_inventory: dict | None = None) -> 
     video_target = config.get("video_target")
     if video_target:
         target_path = expand_path(video_target)
-        if target_path.exists():
+        # Skip if target is parent of any source (would cause duplicates)
+        source_paths = [expand_path(s["path"]) for s in video_sources]
+        target_is_ancestor = any(
+            target_path == p or target_path in p.parents
+            for p in source_paths
+        )
+        if target_path.exists() and not target_is_ancestor:
             video_sources.append({
                 "path": str(target_path),
                 "label": "Reorganized"
             })
 
-    # Build lookup of existing videos by current_path for ID preservation
+    # Build lookups for ID preservation (prefer entries with transcript_id)
     existing_by_path = {}
+    existing_by_filename = {}
     if existing_inventory:
         for video in existing_inventory.get("videos", {}).values():
-            if video.get("current_path"):
-                existing_by_path[video["current_path"]] = video
+            path = video.get("current_path")
+            filename = video.get("filename")
+            has_transcript = bool(video.get("transcript_id"))
+
+            # For path lookup: prefer entries with transcript_id
+            if path:
+                existing_entry = existing_by_path.get(path)
+                if not existing_entry or (has_transcript and not existing_entry.get("transcript_id")):
+                    existing_by_path[path] = video
+
+            # For filename lookup: prefer entries with transcript_id
+            if filename:
+                existing_entry = existing_by_filename.get(filename)
+                if not existing_entry or (has_transcript and not existing_entry.get("transcript_id")):
+                    existing_by_filename[filename] = video
 
     for source in video_sources:
         source_path = expand_path(source["path"])
@@ -120,13 +140,18 @@ def scan_video_sources(config: dict, existing_inventory: dict | None = None) -> 
         for ext in VIDEO_FORMATS:
             for video_path in source_path.rglob(f"*{ext}"):
                 path_str = str(video_path)
+                filename = os.path.basename(path_str)
 
-                # CRITICAL: Preserve original_path for ID stability
-                # If this file exists in inventory, use its original_path for ID
+                # CRITICAL: Preserve ID for moved files
+                # Try path match first, then filename fallback
                 existing = existing_by_path.get(path_str)
-                if existing and existing.get("original_path"):
-                    original_path = existing["original_path"]
-                    video_id = generate_video_id(original_path)
+                if not existing:
+                    existing = existing_by_filename.get(filename)
+
+                if existing and existing.get("id"):
+                    # Use existing ID directly (don't regenerate from original_path)
+                    video_id = existing["id"]
+                    original_path = existing.get("original_path", path_str)
                 else:
                     # New file: current path becomes original path
                     original_path = path_str
@@ -279,31 +304,6 @@ def find_matching_transcript(
     return None
 
 
-def path_similarity(path1: str, path2: str) -> float:
-    """
-    Calculate similarity between two paths based on common path components.
-
-    Returns a score from 0.0 to 1.0 based on how many path components match.
-    """
-    parts1 = Path(path1).parts
-    parts2 = Path(path2).parts
-
-    if not parts1 or not parts2:
-        return 0.0
-
-    # Count matching components (from end, as filenames are most significant)
-    matches = 0
-    for p1, p2 in zip(reversed(parts1), reversed(parts2)):
-        if p1 == p2:
-            matches += 1
-        else:
-            break
-
-    # Score based on proportion of shorter path that matches
-    min_len = min(len(parts1), len(parts2))
-    return matches / min_len if min_len > 0 else 0.0
-
-
 def check_source_path_match(
     video_path: str,
     transcripts: list[dict],
@@ -314,7 +314,7 @@ def check_source_path_match(
 
     Matching priority:
     1. Exact path match (highest confidence)
-    2. Filename + path similarity > 0.5 (handles reorganized files)
+    2. Filename match (handles moved/reorganized files)
 
     Args:
         video_path: Path to the video file
@@ -328,8 +328,7 @@ def check_source_path_match(
     video_filename = os.path.basename(video_path)
     linked_ids = linked_transcript_ids or set()
 
-    best_match = None
-    best_similarity = 0.0
+    filename_matches = []
 
     for transcript in transcripts:
         # Skip already-linked transcripts to avoid duplicates
@@ -342,16 +341,16 @@ def check_source_path_match(
             if os.path.abspath(source) == video_path_abs:
                 return transcript
 
-            # Priority 2: Filename match with path similarity check
+            # Collect filename matches for priority 2
             if os.path.basename(source) == video_filename:
-                similarity = path_similarity(source, video_path)
-                # Require at least 50% path similarity (not just filename)
-                # This prevents matching "dir1/session.mp4" to "dir2/session.mp4"
-                if similarity > 0.5 and similarity > best_similarity:
-                    best_similarity = similarity
-                    best_match = transcript
+                filename_matches.append(transcript)
+                break  # Don't count same transcript multiple times
 
-    return best_match
+    # Priority 2: Filename match (only if unambiguous - exactly one match)
+    if len(filename_matches) == 1:
+        return filename_matches[0]
+
+    return None
 
 
 def load_inventory() -> dict:
