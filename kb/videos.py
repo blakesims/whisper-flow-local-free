@@ -998,14 +998,9 @@ def categorize_unlinked_videos():
             console.print("[yellow]Title is required[/yellow]")
             continue
 
-        # Optional tags
-        tags_str = questionary.text(
-            "Tags (comma-separated, optional):",
-            default="",
-            style=custom_style,
-        ).ask()
-
-        tags = [t.strip() for t in tags_str.split(",") if t.strip()] if tags_str else []
+        # Select tags (multi-select from registry with option to add new)
+        from kb.cli import select_tags
+        tags = select_tags(registry)
 
         # Confirm and queue
         console.print(f"\n[bold cyan]Summary[/bold cyan]")
