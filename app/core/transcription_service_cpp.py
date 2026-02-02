@@ -55,22 +55,54 @@ class WhisperCppService:
         self.model_name = self.MODEL_NAMES.get(model_name, model_name)
         print(f"[WhisperCpp] Target model: {self.model_name}")
 
-    def load_model(self):
-        """Load the whisper.cpp model."""
+    def load_model(self, quiet: bool = True):
+        """Load the whisper.cpp model.
+
+        Args:
+            quiet: If True, suppress verbose C library output (ggml, whisper init messages)
+        """
         if self._model_loaded and self.model is not None:
             return
 
-        print(f"[WhisperCpp] Loading model: {self.model_name}")
+        print(f"[Whisper] Loading model: {self.model_name}...", end="", flush=True)
         start = time.time()
 
         try:
-            # pywhispercpp auto-downloads models to ~/.cache/whisper/
-            self.model = Model(self.model_name)
+            if quiet:
+                # Suppress verbose C library output by redirecting at OS level
+                import os
+                import sys
+
+                # Save original file descriptors
+                stdout_fd = sys.stdout.fileno()
+                stderr_fd = sys.stderr.fileno()
+                saved_stdout = os.dup(stdout_fd)
+                saved_stderr = os.dup(stderr_fd)
+
+                # Redirect to /dev/null
+                devnull = os.open(os.devnull, os.O_WRONLY)
+                os.dup2(devnull, stdout_fd)
+                os.dup2(devnull, stderr_fd)
+
+                try:
+                    self.model = Model(self.model_name)
+                finally:
+                    # Restore original file descriptors
+                    os.dup2(saved_stdout, stdout_fd)
+                    os.dup2(saved_stderr, stderr_fd)
+                    os.close(saved_stdout)
+                    os.close(saved_stderr)
+                    os.close(devnull)
+            else:
+                # pywhispercpp auto-downloads models to ~/.cache/whisper/
+                self.model = Model(self.model_name)
+
             self._model_loaded = True
             elapsed = time.time() - start
-            print(f"[WhisperCpp] Model loaded in {elapsed:.2f}s")
+            print(f" ready ({elapsed:.1f}s)")
         except Exception as e:
-            print(f"[WhisperCpp] Error loading model: {e}")
+            print(f" failed!")
+            print(f"[Whisper] Error loading model: {e}")
             raise
 
     def _load_model(self):
@@ -100,7 +132,9 @@ class WhisperCppService:
         if not self._model_loaded or self.model is None:
             self.load_model()
 
-        print(f"[WhisperCpp] Transcribing: {audio_path}")
+        # Clean filename for display
+        audio_name = os.path.basename(audio_path)
+        print(f"[Whisper] Transcribing: {audio_name}...")
         start = time.time()
 
         # Notify progress start
@@ -132,8 +166,7 @@ class WhisperCppService:
             full_text = " ".join(text_parts).strip()
             elapsed = time.time() - start
 
-            print(f"[WhisperCpp] Transcription complete in {elapsed:.2f}s")
-            print(f"[WhisperCpp] Text: '{full_text[:80]}...'")
+            print(f"[Whisper] ✓ Complete ({elapsed:.1f}s, {len(full_text)} chars)")
 
             # Final progress callback
             if progress_callback:

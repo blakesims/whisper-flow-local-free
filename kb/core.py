@@ -258,8 +258,10 @@ class LocalFileCopy:
         """
         import shlex
         import uuid
+        import time
+        import sys
 
-        print_status(f"Extracting audio via SSH ({size_mb:.1f} MB video)...")
+        print(f"\n[SSH] Extracting audio from {size_mb:.0f} MB video on server...")
 
         # Generate unique temp filename on server
         temp_name = f"/tmp/kb_audio_{uuid.uuid4().hex[:8]}.wav"
@@ -270,48 +272,79 @@ class LocalFileCopy:
         quoted_remote_path = shlex.quote(remote_path)
         quoted_temp_name = shlex.quote(temp_name)
 
-        # Run ffmpeg on remote server
+        # Run ffmpeg on remote server with progress
+        # Use -stats to show progress on stderr
         ssh_cmd = [
             'ssh', ssh_host,
-            f'ffmpeg -i {quoted_remote_path} -vn -acodec pcm_s16le -ar 16000 -ac 1 -y {quoted_temp_name} 2>/dev/null'
+            f'ffmpeg -i {quoted_remote_path} -vn -acodec pcm_s16le -ar 16000 -ac 1 -y {quoted_temp_name} 2>&1 | grep -E "^(size=|video:|Duration:)" | tail -3'
         ]
 
         try:
+            start_time = time.time()
+            print(f"[SSH] Running ffmpeg on {ssh_host}...", end="", flush=True)
+
             result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=1800)  # 30 min timeout
 
+            extract_time = time.time() - start_time
+
             if result.returncode != 0:
+                print(f" failed!")
                 print_status(f"SSH extraction failed, falling back to local...")
                 self._cleanup_remote_temp()
                 return None
 
-            # SCP the audio file back
-            print_status("Copying audio from server...")
-            scp_cmd = ['scp', f'{ssh_host}:{temp_name}', self.local_path]
+            print(f" done ({extract_time:.1f}s)")
+
+            # Show ffmpeg output if any
+            if result.stdout.strip():
+                for line in result.stdout.strip().split('\n')[-2:]:
+                    if line.strip():
+                        print(f"[SSH] {line.strip()}")
+
+            # Get audio file size from server
+            size_cmd = ['ssh', ssh_host, f'ls -lh {quoted_temp_name} 2>/dev/null | awk "{{print \\$5}}"']
+            size_result = subprocess.run(size_cmd, capture_output=True, text=True, timeout=30)
+            remote_size = size_result.stdout.strip() or "?"
+
+            # SCP the audio file back with progress
+            print(f"[SSH] Copying {remote_size} audio file to Mac...", end="", flush=True)
+            start_time = time.time()
+
+            scp_cmd = ['scp', '-q', f'{ssh_host}:{temp_name}', self.local_path]
             scp_result = subprocess.run(scp_cmd, capture_output=True, text=True, timeout=300)
 
+            scp_time = time.time() - start_time
+
             if scp_result.returncode != 0:
+                print(f" failed!")
                 print_status("SCP failed, falling back to local...")
                 self._cleanup_remote_temp()
                 return None
 
             # Verify file was copied
             if not os.path.exists(self.local_path):
+                print(f" failed!")
                 self._cleanup_remote_temp()
                 return None
 
             audio_size_mb = os.path.getsize(self.local_path) / (1024 * 1024)
-            print_status(f"Audio extracted via SSH ({audio_size_mb:.1f} MB)")
+            transfer_speed = audio_size_mb / scp_time if scp_time > 0 else 0
+            print(f" done ({scp_time:.1f}s, {transfer_speed:.1f} MB/s)")
 
             # Cleanup remote temp file
             self._cleanup_remote_temp()
 
+            print(f"[SSH] ✓ Audio ready: {audio_size_mb:.1f} MB")
+
             return self.local_path
 
         except subprocess.TimeoutExpired:
+            print(f" timeout!")
             print_status("SSH extraction timed out, falling back to local...")
             self._cleanup_remote_temp()
             return None
         except Exception as e:
+            print(f" error!")
             print_status(f"SSH extraction error: {e}, falling back to local...")
             self._cleanup_remote_temp()
             return None
