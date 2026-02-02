@@ -31,6 +31,7 @@ import questionary
 from questionary import Style
 
 from kb.__main__ import load_config, get_paths, DEFAULTS
+from kb.core import load_registry
 
 console = Console()
 
@@ -79,6 +80,105 @@ def list_analysis_types() -> list[dict]:
                 "description": data["description"]
             })
     return types
+
+
+def get_decimal_defaults(decimal: str) -> list[str]:
+    """
+    Get the default_analyses list for a given decimal category.
+
+    Args:
+        decimal: Decimal code (e.g., "50.01.01")
+
+    Returns:
+        List of analysis type names that are defaults for this decimal.
+        Empty list if decimal not found or has no defaults configured.
+    """
+    registry = load_registry()
+    decimals = registry.get("decimals", {})
+
+    if decimal not in decimals:
+        return []
+
+    decimal_info = decimals[decimal]
+
+    # Handle both dict format and legacy string format
+    if isinstance(decimal_info, dict):
+        return decimal_info.get("default_analyses", [])
+
+    # Legacy string format (just name, no defaults)
+    return []
+
+
+def get_transcript_missing_analyses(transcript_data: dict) -> list[str]:
+    """
+    Get list of missing default analyses for a transcript.
+
+    Compares the transcript's existing analyses against its decimal's
+    configured default_analyses.
+
+    Args:
+        transcript_data: Transcript dict with 'decimal' and 'analysis' keys
+
+    Returns:
+        List of analysis type names that are in the decimal's defaults
+        but NOT in the transcript's existing analysis.
+        Empty list if all defaults are present or decimal has no defaults.
+    """
+    decimal = transcript_data.get("decimal")
+    if not decimal:
+        return []
+
+    defaults = get_decimal_defaults(decimal)
+    if not defaults:
+        return []
+
+    existing = transcript_data.get("analysis", {})
+    missing = [t for t in defaults if t not in existing]
+
+    return missing
+
+
+def scan_missing_by_decimal() -> dict[str, list[dict]]:
+    """
+    Scan all transcripts and find those missing their decimal's default analyses.
+
+    Returns:
+        Dict grouped by decimal code:
+        {
+            "50.01.01": [
+                {"path": "/path/to/file.json", "title": "...", "missing": ["summary", "guide"]},
+                ...
+            ],
+            ...
+        }
+        Only includes decimals that have transcripts with missing analyses.
+    """
+    transcripts = get_all_transcripts()
+    results: dict[str, list[dict]] = {}
+
+    for t in transcripts:
+        # Load full transcript to get analysis data
+        try:
+            with open(t["path"]) as f:
+                transcript_data = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            continue
+
+        missing = get_transcript_missing_analyses(transcript_data)
+        if not missing:
+            continue
+
+        decimal = t["decimal"]
+        if decimal not in results:
+            results[decimal] = []
+
+        results[decimal].append({
+            "path": t["path"],
+            "title": t["title"],
+            "missing": missing,
+        })
+
+    return results
 
 
 def get_all_transcripts(
