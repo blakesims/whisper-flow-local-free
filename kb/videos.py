@@ -854,6 +854,196 @@ def start_worker():
         _worker_thread.start()
 
 
+def categorize_unlinked_videos():
+    """
+    Interactive loop to categorize unlinked videos.
+
+    Shows list of unlinked videos, lets user select one,
+    prompts for decimal/title, and queues for background transcription.
+    """
+    import questionary
+    from questionary import Style
+
+    custom_style = Style([
+        ('qmark', 'fg:cyan bold'),
+        ('question', 'fg:white bold'),
+        ('answer', 'fg:green bold'),
+        ('pointer', 'fg:cyan bold'),
+        ('highlighted', 'fg:cyan bold'),
+        ('selected', 'fg:green'),
+    ])
+
+    # Load registry for decimal choices
+    registry = load_registry()
+    decimals = registry.get("decimals", {})
+
+    # Build decimal choices
+    decimal_choices = [
+        questionary.Choice(
+            title=f"{code}: {info.get('name', info) if isinstance(info, dict) else info}",
+            value=code
+        )
+        for code, info in sorted(decimals.items())
+    ]
+
+    if not decimal_choices:
+        console.print("[yellow]No decimal categories defined. Add some first with 'kb --decimals'[/yellow]")
+        return
+
+    while True:
+        # Reload inventory to get current state
+        inventory = load_inventory()
+        videos = inventory.get("videos", {})
+
+        # Filter to unlinked videos
+        unlinked = [
+            v for v in videos.values()
+            if v.get("status") == "unlinked" and v.get("current_path") and os.path.exists(v.get("current_path", ""))
+        ]
+
+        if not unlinked:
+            console.print("\n[green]✓ No unlinked videos remaining![/green]\n")
+            break
+
+        # Sort by mtime (newest first)
+        unlinked.sort(key=lambda v: v.get("mtime", ""), reverse=True)
+
+        # Show queue status
+        queue_status = get_queue_status()
+        if queue_status["pending"] > 0 or queue_status["processing"] > 0:
+            console.print(f"\n[dim]Background queue: {queue_status['pending']} pending, {queue_status['processing']} processing[/dim]")
+
+        console.print(f"\n[bold cyan]Unlinked Videos ({len(unlinked)} remaining)[/bold cyan]\n")
+
+        # Build video choices
+        video_choices = []
+        for v in unlinked[:20]:  # Limit to 20 for usability
+            filename = v.get("filename", "Unknown")
+            source = v.get("source_label", "")
+            duration = v.get("duration_seconds", 0)
+            duration_str = f"{int(duration // 60)}m" if duration else ""
+            size = v.get("size_mb", 0)
+            size_str = f"{size}MB" if size else ""
+
+            # Show sample text preview if available
+            sample = v.get("sample_text", "")
+            preview = ""
+            if sample:
+                preview = f" [dim]({sample[:40]}...)[/dim]"
+
+            title = f"{filename[:40]:<40} [{source}] {duration_str:>5} {size_str:>8}{preview}"
+            video_choices.append(questionary.Choice(title=title, value=v["id"]))
+
+        if len(unlinked) > 20:
+            video_choices.append(questionary.Choice(
+                title=f"[dim]... and {len(unlinked) - 20} more[/dim]",
+                value=None,
+                disabled="Showing first 20 only"
+            ))
+
+        video_choices.insert(0, questionary.Choice(title="← Done categorizing", value="exit"))
+
+        # Select video
+        selected = questionary.select(
+            "Select video to categorize:",
+            choices=video_choices,
+            style=custom_style,
+            instruction="(↑/↓ navigate, Enter select)",
+        ).ask()
+
+        if selected == "exit" or selected is None:
+            break
+
+        # Get the selected video
+        video = videos.get(selected)
+        if not video:
+            console.print("[red]Video not found in inventory[/red]")
+            continue
+
+        console.print(f"\n[bold]Selected:[/bold] {video.get('filename')}")
+        console.print(f"[dim]Path: {video.get('current_path')}[/dim]")
+        console.print(f"[dim]Duration: {video.get('duration_seconds', 0) // 60}m, Size: {video.get('size_mb', 0)}MB[/dim]")
+
+        if video.get("sample_text"):
+            console.print(f"\n[bold]Sample transcript:[/bold]")
+            console.print(f"[dim]{video['sample_text'][:200]}...[/dim]")
+
+        # Select decimal category
+        console.print()
+        decimal = questionary.select(
+            "Category (decimal):",
+            choices=decimal_choices,
+            style=custom_style,
+        ).ask()
+
+        if decimal is None:
+            continue
+
+        # Suggest title from filename
+        default_title = Path(video.get("filename", "")).stem
+        # Clean up common prefixes/suffixes
+        default_title = default_title.replace("_", " ").replace("-", " ")
+
+        title = questionary.text(
+            "Title:",
+            default=default_title,
+            style=custom_style,
+        ).ask()
+
+        if title is None:
+            continue
+
+        title = title.strip()
+        if not title:
+            console.print("[yellow]Title is required[/yellow]")
+            continue
+
+        # Optional tags
+        tags_str = questionary.text(
+            "Tags (comma-separated, optional):",
+            default="",
+            style=custom_style,
+        ).ask()
+
+        tags = [t.strip() for t in tags_str.split(",") if t.strip()] if tags_str else []
+
+        # Confirm and queue
+        console.print(f"\n[bold cyan]Summary[/bold cyan]")
+        console.print(f"  Video: {video.get('filename')}")
+        console.print(f"  Category: [cyan]{decimal}[/cyan]")
+        console.print(f"  Title: {title}")
+        if tags:
+            console.print(f"  Tags: {', '.join(tags)}")
+
+        confirm = questionary.confirm(
+            "\nQueue for transcription?",
+            default=True,
+            style=custom_style,
+        ).ask()
+
+        if confirm:
+            try:
+                job = queue_transcription(
+                    video_id=selected,
+                    decimal=decimal,
+                    title=title,
+                    tags=tags,
+                )
+                console.print(f"[green]✓ Queued for transcription![/green]")
+                console.print(f"[dim]Job will process in background. Check queue status with 'kb serve'[/dim]")
+            except Exception as e:
+                console.print(f"[red]Failed to queue: {e}[/red]")
+
+    # Final queue status
+    queue_status = get_queue_status()
+    if queue_status["pending"] > 0 or queue_status["processing"] > 0:
+        console.print(f"\n[bold cyan]Queue Status[/bold cyan]")
+        console.print(f"  Pending: {queue_status['pending']}")
+        console.print(f"  Processing: {queue_status['processing']}")
+        console.print(f"  Completed: {queue_status['completed']}")
+        console.print(f"\n[dim]Background worker is running. View progress at kb serve dashboard.[/dim]")
+
+
 def main():
     """CLI entry point for kb scan-videos."""
     import argparse
@@ -863,6 +1053,7 @@ def main():
     parser.add_argument("--reorganize", action="store_true", help="Move files to decimal structure")
     parser.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompts")
     parser.add_argument("--cron", action="store_true", help="Silent mode for cron jobs")
+    parser.add_argument("--categorize", "-c", action="store_true", help="After scan, interactively categorize unlinked videos")
 
     args = parser.parse_args()
 
@@ -879,6 +1070,19 @@ def main():
         log_path.parent.mkdir(parents=True, exist_ok=True)
         with open(log_path, 'a') as f:
             f.write(f"{datetime.now().isoformat()} - Found: {result['found']}, Linked: {result['linked']}, Unlinked: {result['unlinked']}\n")
+        return
+
+    # Interactive categorization if requested or if there are unlinked videos
+    if args.categorize and result.get("unlinked", 0) > 0:
+        categorize_unlinked_videos()
+    elif result.get("unlinked", 0) > 0 and not args.quick:
+        # Offer to categorize if there are unlinked videos
+        import questionary
+        if questionary.confirm(
+            f"\n{result['unlinked']} unlinked video(s). Categorize them now?",
+            default=True
+        ).ask():
+            categorize_unlinked_videos()
 
 
 if __name__ == "__main__":

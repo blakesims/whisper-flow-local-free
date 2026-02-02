@@ -192,8 +192,12 @@ def scan_actionable_items() -> list[dict]:
                         model = analysis_data.get("_model", "")
 
                         if inner is None:
-                            # No nested key, use the whole dict as content
-                            content = json.dumps(analysis_data, indent=2, ensure_ascii=False)
+                            # Check for 'post' field (e.g., linkedin_post)
+                            if "post" in analysis_data:
+                                content = analysis_data["post"]
+                            else:
+                                # No nested key, use the whole dict as content
+                                content = json.dumps(analysis_data, indent=2, ensure_ascii=False)
                         elif isinstance(inner, str):
                             content = inner
                         elif isinstance(inner, dict):
@@ -533,6 +537,9 @@ def get_transcript(transcript_id: str):
                                     display_content = inner
                                 else:
                                     display_content = json.dumps(inner, indent=2, ensure_ascii=False)
+                            elif "post" in content:
+                                # Special case for analysis types like linkedin_post with 'post' field
+                                display_content = content["post"]
                             else:
                                 # Filter out metadata keys for display
                                 display_data = {k: v for k, v in content.items() if not k.startswith("_")}
