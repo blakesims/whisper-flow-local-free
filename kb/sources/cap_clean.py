@@ -1046,7 +1046,7 @@ def main(triggers_only: bool = False, dry_run: bool = False, restore: bool = Fal
     if args.restore:
         restore = True
 
-    # Handle restore mode
+    # Handle restore mode (from --restore flag)
     if restore:
         console.print(Panel("[bold]Cap Recording Restore[/bold]", border_style="green"))
         if args.recording:
@@ -1056,6 +1056,31 @@ def main(triggers_only: bool = False, dry_run: bool = False, restore: bool = Fal
         if cap_path and cap_path.exists():
             restore_segments(cap_path)
         return
+
+    # Interactive mode selection (when no recording path provided)
+    if not args.recording:
+        console.print(Panel("[bold]Cap Recording Manager[/bold]", border_style="cyan"))
+
+        action = questionary.select(
+            "What would you like to do?",
+            choices=[
+                questionary.Choice("🧹 Clean a recording (remove junk segments)", value="clean"),
+                questionary.Choice("♻️  Restore deleted segments", value="restore"),
+                questionary.Choice("← Cancel", value="cancel"),
+            ],
+            style=custom_style
+        ).ask()
+
+        if action == "cancel" or action is None:
+            return
+
+        if action == "restore":
+            cap_path = select_recording()
+            if cap_path and cap_path.exists():
+                restore_segments(cap_path)
+            return
+
+        # Continue with clean flow below
 
     console.print(Panel("[bold]Cap Recording Cleanup[/bold]", border_style="cyan"))
 
