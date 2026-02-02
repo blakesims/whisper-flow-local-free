@@ -711,12 +711,13 @@ def queue_transcription(
     queue["jobs"][video_id] = job
     save_queue(queue)
 
-    # Update video status in inventory
-    inventory["videos"][video_id]["status"] = "processing"
+    # Update video status in inventory - mark as "queued" (not processing yet)
+    inventory["videos"][video_id]["status"] = "queued"
     save_inventory(inventory)
 
-    # Start worker if not running
-    start_worker()
+    # NOTE: Worker is NOT auto-started. Run separately with:
+    #   kb scan-videos --process
+    # This avoids stdout conflicts with interactive categorization.
 
     return job
 
@@ -780,13 +781,21 @@ def process_next_job(quiet: bool = False) -> bool:
             raise FileNotFoundError(f"Video file not found: {video_path}")
 
         if quiet:
-            # Redirect stdout/stderr to log file for background processing
+            # Redirect at OS file descriptor level to capture C library output (whisper.cpp)
             import sys
-            original_stdout = sys.stdout
-            original_stderr = sys.stderr
+
+            # Save original file descriptors
+            stdout_fd = sys.stdout.fileno()
+            stderr_fd = sys.stderr.fileno()
+            saved_stdout_fd = os.dup(stdout_fd)
+            saved_stderr_fd = os.dup(stderr_fd)
+
             with open(log_file, 'w') as log_f:
-                sys.stdout = log_f
-                sys.stderr = log_f
+                log_fd = log_f.fileno()
+                # Redirect stdout and stderr to log file at OS level
+                os.dup2(log_fd, stdout_fd)
+                os.dup2(log_fd, stderr_fd)
+
                 try:
                     # Step 1: Transcribe
                     result = transcribe_to_kb(
@@ -814,8 +823,11 @@ def process_next_job(quiet: bool = False) -> bool:
                         else:
                             print(f"[Warning] Transcript file not found: {transcript_path}")
                 finally:
-                    sys.stdout = original_stdout
-                    sys.stderr = original_stderr
+                    # Restore original stdout/stderr
+                    os.dup2(saved_stdout_fd, stdout_fd)
+                    os.dup2(saved_stderr_fd, stderr_fd)
+                    os.close(saved_stdout_fd)
+                    os.close(saved_stderr_fd)
         else:
             console.print(f"[cyan]Transcribing: {job['filename']}[/cyan]")
             result = transcribe_to_kb(
@@ -958,10 +970,12 @@ def categorize_unlinked_videos():
         inventory = load_inventory()
         videos = inventory.get("videos", {})
 
-        # Filter to unlinked videos
+        # Filter to unlinked videos (exclude queued and processing)
         unlinked = [
             v for v in videos.values()
-            if v.get("status") == "unlinked" and v.get("current_path") and os.path.exists(v.get("current_path", ""))
+            if v.get("status") == "unlinked"
+            and v.get("current_path")
+            and os.path.exists(v.get("current_path", ""))
         ]
 
         if not unlinked:
@@ -1087,20 +1101,18 @@ def categorize_unlinked_videos():
                     title=title,
                     tags=tags,
                 )
-                console.print(f"[green]✓ Queued![/green] Processing in background.")
-                console.print(f"[dim]Logs: ~/.kb/logs/transcription-{selected}.log[/dim]")
+                console.print(f"[green]✓ Queued![/green]")
             except Exception as e:
                 console.print(f"[red]Failed to queue: {e}[/red]")
 
     # Final queue status
     queue_status = get_queue_status()
-    if queue_status["pending"] > 0 or queue_status["processing"] > 0:
+    if queue_status["pending"] > 0:
         console.print(f"\n[bold cyan]Queue Status[/bold cyan]")
         console.print(f"  Pending: {queue_status['pending']}")
-        console.print(f"  Processing: {queue_status['processing']}")
-        console.print(f"  Completed: {queue_status['completed']}")
-        console.print(f"\n[dim]Check progress: kb scan-videos --queue[/dim]")
-        console.print(f"[dim]View logs: ls ~/.kb/logs/[/dim]")
+        console.print(f"\n[bold]To process the queue:[/bold]")
+        console.print(f"  kb scan-videos --process")
+        console.print(f"  [dim]or: kb scan-videos -p[/dim]")
 
 
 def show_queue_status():
@@ -1161,6 +1173,38 @@ def show_queue_status():
     console.print()
 
 
+def run_queue_processor():
+    """
+    Process all queued transcription jobs.
+
+    Runs in foreground with visible output. Use this after categorizing
+    videos to process the queue.
+    """
+    console.print("\n[bold cyan]Processing Transcription Queue[/bold cyan]\n")
+
+    processed = 0
+    while True:
+        # Check for pending jobs
+        queue = load_queue()
+        jobs = queue.get("jobs", {})
+        pending = [j for j in jobs.values() if j.get("status") == "pending"]
+
+        if not pending:
+            break
+
+        # Process next job (not quiet - show output)
+        if process_next_job(quiet=False):
+            processed += 1
+
+    if processed == 0:
+        console.print("[dim]No jobs to process.[/dim]")
+    else:
+        console.print(f"\n[green]✓ Processed {processed} job(s)[/green]")
+
+    # Show final status
+    show_queue_status()
+
+
 def main():
     """CLI entry point for kb scan-videos."""
     import argparse
@@ -1172,8 +1216,14 @@ def main():
     parser.add_argument("--cron", action="store_true", help="Silent mode for cron jobs")
     parser.add_argument("--categorize", "-c", action="store_true", help="After scan, interactively categorize unlinked videos")
     parser.add_argument("--queue", "-q", action="store_true", help="Show transcription queue status (no scan)")
+    parser.add_argument("--process", "-p", action="store_true", help="Process queued transcriptions (no scan)")
 
     args = parser.parse_args()
+
+    # Process queue mode - run transcriptions
+    if args.process:
+        run_queue_processor()
+        return
 
     # Queue status mode - skip scanning
     if args.queue:
