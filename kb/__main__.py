@@ -369,6 +369,23 @@ def show_config():
     else:
         console.print("  [yellow]No analysis types configured[/yellow]")
 
+    # Missing analyses quick status
+    try:
+        from kb.analyze import scan_missing_by_decimal
+        missing_by_decimal = scan_missing_by_decimal()
+        if missing_by_decimal:
+            total_transcripts = sum(len(ts) for ts in missing_by_decimal.values())
+            total_decimals = len(missing_by_decimal)
+            console.print(f"\n[bold cyan]Missing Analyses[/bold cyan]")
+            console.print(f"  [yellow]{total_transcripts} transcript(s) missing default analyses across {total_decimals} decimal(s)[/yellow]")
+            console.print(f"  [dim]Run 'kb missing' for details[/dim]")
+        else:
+            console.print(f"\n[bold cyan]Missing Analyses[/bold cyan]")
+            console.print(f"  [green]✓ All transcripts have their default analyses[/green]")
+    except Exception:
+        # Don't break config display if scan fails
+        pass
+
     # Config submenu
     console.print()
 

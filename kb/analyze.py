@@ -4,12 +4,19 @@ Knowledge Base LLM Analysis Module
 
 Analyzes transcripts using Google Gemini API with structured output.
 
-Usage:
-    python kb/analyze.py                    # Interactive: select transcripts + types
-    python kb/analyze.py -p                 # Only show transcripts with pending analysis
-    python kb/analyze.py --all-pending      # Batch: analyze all pending with defaults
-    python kb/analyze.py /path/to/file.json # Direct: analyze specific file
-    python kb/analyze.py --list-types       # Show available analysis types
+Usage (via kb command):
+    kb analyze                              # Interactive: select transcripts + types
+    kb analyze -p                           # Only show transcripts with pending analysis
+    kb analyze --all-pending                # Batch: analyze all pending with defaults
+    kb analyze /path/to/file.json           # Direct: analyze specific file
+    kb analyze --list-types                 # Show available analysis types
+
+    kb missing                              # Show transcripts missing decimal defaults
+    kb missing --detailed                   # Show per-transcript breakdown
+    kb missing --summary                    # One-line output (for scripts, exit code 1 if missing)
+    kb missing --run                        # Run all missing analyses
+    kb missing --run --decimal 50.01.01     # Run only for specific decimal
+    kb missing --run --yes                  # Run without confirmation (automation)
 """
 
 import sys
@@ -181,9 +188,29 @@ def scan_missing_by_decimal() -> dict[str, list[dict]]:
     return results
 
 
+def get_missing_summary() -> tuple[int, int, int]:
+    """
+    Get a quick summary of missing analyses counts.
+
+    Returns:
+        Tuple of (total_transcripts, total_analyses, total_decimals)
+    """
+    missing_by_decimal = scan_missing_by_decimal()
+
+    if not missing_by_decimal:
+        return (0, 0, 0)
+
+    total_transcripts = sum(len(ts) for ts in missing_by_decimal.values())
+    total_analyses = sum(len(t["missing"]) for ts in missing_by_decimal.values() for t in ts)
+    total_decimals = len(missing_by_decimal)
+
+    return (total_transcripts, total_analyses, total_decimals)
+
+
 def show_missing_analyses(
     detailed: bool = False,
-    decimal_filter: str | None = None
+    decimal_filter: str | None = None,
+    summary_only: bool = False
 ) -> dict[str, list[dict]]:
     """
     Display summary of transcripts missing their decimal's default analyses.
@@ -191,13 +218,12 @@ def show_missing_analyses(
     Args:
         detailed: If True, show per-transcript breakdown under each decimal
         decimal_filter: If provided, only show this decimal
+        summary_only: If True, just print one-line summary and return
 
     Returns:
         Dict of missing analyses by decimal (for use by run_missing_analyses)
     """
-    console.print(Panel("[bold]Missing Default Analyses[/bold]", border_style="cyan"))
-
-    # Scan for missing analyses
+    # Scan for missing analyses first (needed for all modes)
     missing_by_decimal = scan_missing_by_decimal()
 
     # Apply decimal filter if provided
@@ -205,6 +231,20 @@ def show_missing_analyses(
         missing_by_decimal = {decimal_filter: missing_by_decimal[decimal_filter]}
     elif decimal_filter:
         missing_by_decimal = {}
+
+    # Summary-only mode: one-line output, exit codes
+    if summary_only:
+        if not missing_by_decimal:
+            console.print("0 transcripts missing analyses")
+            return {}
+
+        total_transcripts = sum(len(ts) for ts in missing_by_decimal.values())
+        total_analyses = sum(len(t["missing"]) for ts in missing_by_decimal.values() for t in ts)
+        total_decimals = len(missing_by_decimal)
+        console.print(f"{total_transcripts} transcripts missing {total_analyses} analyses across {total_decimals} decimals")
+        return missing_by_decimal
+
+    console.print(Panel("[bold]Missing Default Analyses[/bold]", border_style="cyan"))
 
     if not missing_by_decimal:
         console.print("\n[green]✓ All transcripts have their default analyses![/green]\n")
@@ -1082,6 +1122,7 @@ def main():
 Examples:
   kb missing                    # Show summary table
   kb missing --detailed         # Show per-transcript breakdown
+  kb missing --summary          # One-line output (for scripts)
   kb missing --run              # Run all missing with confirmation
   kb missing --run --decimal X  # Run only for specific decimal
   kb missing --run --yes        # Run without prompting (automation)
@@ -1089,6 +1130,8 @@ Examples:
         )
         parser.add_argument("--detailed", action="store_true",
                             help="Show per-transcript breakdown under each decimal")
+        parser.add_argument("--summary", "-s", action="store_true",
+                            help="Compact one-line output; exit code 0 if none missing, 1 if some")
         parser.add_argument("--run", action="store_true",
                             help="Run missing analyses in batch mode")
         parser.add_argument("--decimal", "-d",
@@ -1105,6 +1148,13 @@ Examples:
                 model=args.model,
                 skip_confirm=args.yes
             )
+        elif args.summary:
+            # Summary mode: one-line output, exit code based on results
+            missing = show_missing_analyses(
+                decimal_filter=args.decimal,
+                summary_only=True
+            )
+            sys.exit(1 if missing else 0)
         else:
             show_missing_analyses(detailed=args.detailed, decimal_filter=args.decimal)
         return
