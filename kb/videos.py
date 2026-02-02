@@ -771,8 +771,9 @@ def process_next_job(quiet: bool = False) -> bool:
     log_file = log_dir / f"transcription-{job_id}.log"
 
     try:
-        # Import transcribe_to_kb here to avoid circular imports
-        from kb.core import transcribe_to_kb
+        # Import here to avoid circular imports
+        from kb.core import transcribe_to_kb, KB_ROOT
+        from kb.analyze import get_decimal_defaults, analyze_transcript_file
 
         video_path = job["video_path"]
         if not video_path or not os.path.exists(video_path):
@@ -787,6 +788,7 @@ def process_next_job(quiet: bool = False) -> bool:
                 sys.stdout = log_f
                 sys.stderr = log_f
                 try:
+                    # Step 1: Transcribe
                     result = transcribe_to_kb(
                         file_path=video_path,
                         decimal=job["decimal"],
@@ -794,6 +796,23 @@ def process_next_job(quiet: bool = False) -> bool:
                         tags=job["tags"],
                         source_type="video",
                     )
+
+                    # Step 2: Run default analyses for this decimal
+                    transcript_id = result.get("id")
+                    default_analyses = get_decimal_defaults(job["decimal"])
+                    if default_analyses and transcript_id:
+                        # Find the transcript file (ID format: decimal-YYMMDD-slug, filename: YYMMDD-slug.json)
+                        filename_part = transcript_id.split("-", 1)[1]  # Remove decimal prefix
+                        transcript_path = KB_ROOT / job["decimal"] / f"{filename_part}.json"
+                        if transcript_path.exists():
+                            print(f"\n[Analysis] Running default analyses: {', '.join(default_analyses)}")
+                            analyze_transcript_file(
+                                transcript_path=str(transcript_path),
+                                analysis_types=default_analyses,
+                                save=True,
+                            )
+                        else:
+                            print(f"[Warning] Transcript file not found: {transcript_path}")
                 finally:
                     sys.stdout = original_stdout
                     sys.stderr = original_stderr
@@ -806,6 +825,20 @@ def process_next_job(quiet: bool = False) -> bool:
                 tags=job["tags"],
                 source_type="video",
             )
+
+            # Run default analyses
+            transcript_id = result.get("id")
+            default_analyses = get_decimal_defaults(job["decimal"])
+            if default_analyses and transcript_id:
+                console.print(f"[cyan]Running analyses: {', '.join(default_analyses)}[/cyan]")
+                filename_part = transcript_id.split("-", 1)[1]
+                transcript_path = KB_ROOT / job["decimal"] / f"{filename_part}.json"
+                if transcript_path.exists():
+                    analyze_transcript_file(
+                        transcript_path=str(transcript_path),
+                        analysis_types=default_analyses,
+                        save=True,
+                    )
 
         transcript_id = result.get("id")
 
