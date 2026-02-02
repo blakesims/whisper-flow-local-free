@@ -84,7 +84,7 @@ DEFAULTS = {
     "remote_mounts": {
         "/Volumes/BackupArchive": {
             "host": "zen",  # SSH host (from ~/.ssh/config)
-            "path": "/home/blake/backups",  # Corresponding path on server
+            "path": "/mnt/seagate_archive",  # Samba share path on server
         },
     },
     "presets": {
