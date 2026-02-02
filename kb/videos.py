@@ -107,7 +107,7 @@ def scan_video_sources(config: dict, existing_inventory: dict | None = None) -> 
                 "label": "Reorganized"
             })
 
-    # Build lookups for ID preservation (prefer entries with transcript_id)
+    # Build lookups for ID preservation (prefer entries with transcript_id or sample_text)
     existing_by_path = {}
     existing_by_filename = {}
     if existing_inventory:
@@ -115,18 +115,23 @@ def scan_video_sources(config: dict, existing_inventory: dict | None = None) -> 
             path = video.get("current_path")
             filename = video.get("filename")
             has_transcript = bool(video.get("transcript_id"))
+            has_sample = bool(video.get("sample_text"))
 
-            # For path lookup: prefer entries with transcript_id
-            if path:
-                existing_entry = existing_by_path.get(path)
-                if not existing_entry or (has_transcript and not existing_entry.get("transcript_id")):
-                    existing_by_path[path] = video
+            def should_replace(existing_entry):
+                """Prefer entries with transcript_id, then sample_text."""
+                if not existing_entry:
+                    return True
+                if has_transcript and not existing_entry.get("transcript_id"):
+                    return True
+                if has_sample and not existing_entry.get("sample_text") and not existing_entry.get("transcript_id"):
+                    return True
+                return False
 
-            # For filename lookup: prefer entries with transcript_id
-            if filename:
-                existing_entry = existing_by_filename.get(filename)
-                if not existing_entry or (has_transcript and not existing_entry.get("transcript_id")):
-                    existing_by_filename[filename] = video
+            if path and should_replace(existing_by_path.get(path)):
+                existing_by_path[path] = video
+
+            if filename and should_replace(existing_by_filename.get(filename)):
+                existing_by_filename[filename] = video
 
     for source in video_sources:
         source_path = expand_path(source["path"])
