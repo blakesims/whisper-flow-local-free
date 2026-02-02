@@ -433,16 +433,29 @@ def scan_videos(
         for video in videos:
             video_id = video["id"]
 
-            # Check if already in inventory with a link
+            # Check if already in inventory with a preserved status
             if video_id in existing_videos:
                 existing = existing_videos[video_id]
-                if existing.get("status") == "linked" and existing.get("transcript_id"):
-                    # Keep existing link
+                existing_status = existing.get("status")
+
+                # Preserve "linked" status (has transcript)
+                if existing_status == "linked" and existing.get("transcript_id"):
                     video["status"] = "linked"
                     video["transcript_id"] = existing["transcript_id"]
                     video["match_confidence"] = existing.get("match_confidence", 1.0)
                     video["linked_at"] = existing.get("linked_at")
                     linked_transcript_ids.add(existing["transcript_id"])
+                    linked += 1
+                    progress.advance(task)
+                    continue
+
+                # Preserve "queued" and "processing" status (pending transcription)
+                if existing_status in ("queued", "processing"):
+                    video["status"] = existing_status
+                    video["transcript_id"] = existing.get("transcript_id")
+                    video["match_confidence"] = existing.get("match_confidence")
+                    video["linked_at"] = existing.get("linked_at")
+                    # Count as linked since it's been categorized
                     linked += 1
                     progress.advance(task)
                     continue
