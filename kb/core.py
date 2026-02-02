@@ -9,6 +9,7 @@ to prevent import breakage and code duplication.
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -163,6 +164,27 @@ def detect_source_type(file_path: str, explicit_type: str | None = None) -> str:
 
 # --- LocalFileCopy for network volumes ---
 
+def get_remote_mount_info(file_path: str) -> tuple[str, str, str] | None:
+    """
+    Check if file path matches a configured remote mount.
+
+    Returns (ssh_host, remote_path, local_mount) if matched, None otherwise.
+    """
+    remote_mounts = _config.get("remote_mounts", {})
+
+    for local_mount, mount_info in remote_mounts.items():
+        if file_path.startswith(local_mount):
+            ssh_host = mount_info.get("host")
+            remote_base = mount_info.get("path")
+            if ssh_host and remote_base:
+                # Map local path to remote path
+                relative_path = file_path[len(local_mount):]
+                remote_path = remote_base + relative_path
+                return (ssh_host, remote_path, local_mount)
+
+    return None
+
+
 class LocalFileCopy:
     """Context manager to extract audio from video files and handle network volumes."""
 
@@ -170,9 +192,12 @@ class LocalFileCopy:
         self.original_path = file_path
         self.local_path = None
         self.temp_dir = None
+        self.remote_temp_file = None  # Track remote temp file for cleanup
+        self.ssh_host = None
         ext = os.path.splitext(file_path)[1].lower()
         self.is_video = ext in VIDEO_FORMATS
         self.is_network = is_network_path(file_path)
+        self.remote_mount_info = get_remote_mount_info(file_path)
 
     def __enter__(self) -> str:
         # Video files always need audio extraction (whisper can't read video containers)
@@ -185,6 +210,16 @@ class LocalFileCopy:
         if self.is_video:
             self.local_path = os.path.join(self.temp_dir, 'audio.wav')
             size_mb = os.path.getsize(self.original_path) / (1024 * 1024)
+
+            # Try SSH extraction for remote mounts (most efficient)
+            if self.remote_mount_info:
+                ssh_host, remote_path, _ = self.remote_mount_info
+                result = self._extract_via_ssh(ssh_host, remote_path, size_mb)
+                if result:
+                    return result
+                # Fall through to local extraction on failure
+
+            # Local ffmpeg extraction
             print_status(f"Extracting audio from video ({size_mb:.1f} MB)...")
 
             try:
@@ -215,6 +250,84 @@ class LocalFileCopy:
         else:
             return self._copy_whole_file()
 
+    def _extract_via_ssh(self, ssh_host: str, remote_path: str, size_mb: float) -> str | None:
+        """
+        Extract audio via SSH on the remote server.
+
+        Returns local path to audio file on success, None on failure.
+        """
+        import shlex
+        import uuid
+
+        print_status(f"Extracting audio via SSH ({size_mb:.1f} MB video)...")
+
+        # Generate unique temp filename on server
+        temp_name = f"/tmp/kb_audio_{uuid.uuid4().hex[:8]}.wav"
+        self.remote_temp_file = temp_name
+        self.ssh_host = ssh_host
+
+        # Safely quote the remote path
+        quoted_remote_path = shlex.quote(remote_path)
+        quoted_temp_name = shlex.quote(temp_name)
+
+        # Run ffmpeg on remote server
+        ssh_cmd = [
+            'ssh', ssh_host,
+            f'ffmpeg -i {quoted_remote_path} -vn -acodec pcm_s16le -ar 16000 -ac 1 -y {quoted_temp_name} 2>/dev/null'
+        ]
+
+        try:
+            result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=1800)  # 30 min timeout
+
+            if result.returncode != 0:
+                print_status(f"SSH extraction failed, falling back to local...")
+                self._cleanup_remote_temp()
+                return None
+
+            # SCP the audio file back
+            print_status("Copying audio from server...")
+            scp_cmd = ['scp', f'{ssh_host}:{temp_name}', self.local_path]
+            scp_result = subprocess.run(scp_cmd, capture_output=True, text=True, timeout=300)
+
+            if scp_result.returncode != 0:
+                print_status("SCP failed, falling back to local...")
+                self._cleanup_remote_temp()
+                return None
+
+            # Verify file was copied
+            if not os.path.exists(self.local_path):
+                self._cleanup_remote_temp()
+                return None
+
+            audio_size_mb = os.path.getsize(self.local_path) / (1024 * 1024)
+            print_status(f"Audio extracted via SSH ({audio_size_mb:.1f} MB)")
+
+            # Cleanup remote temp file
+            self._cleanup_remote_temp()
+
+            return self.local_path
+
+        except subprocess.TimeoutExpired:
+            print_status("SSH extraction timed out, falling back to local...")
+            self._cleanup_remote_temp()
+            return None
+        except Exception as e:
+            print_status(f"SSH extraction error: {e}, falling back to local...")
+            self._cleanup_remote_temp()
+            return None
+
+    def _cleanup_remote_temp(self):
+        """Clean up temporary file on remote server."""
+        if self.ssh_host and self.remote_temp_file:
+            try:
+                subprocess.run(
+                    ['ssh', self.ssh_host, f'rm -f {shlex.quote(self.remote_temp_file)}'],
+                    capture_output=True, timeout=30
+                )
+            except Exception:
+                pass  # Best effort cleanup
+            self.remote_temp_file = None
+
     def _copy_whole_file(self) -> str:
         """Fallback: copy the entire file."""
         filename = os.path.basename(self.original_path)
@@ -228,6 +341,10 @@ class LocalFileCopy:
         return self.local_path
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        # Cleanup remote temp file if still exists
+        self._cleanup_remote_temp()
+
+        # Cleanup local temp dir
         if self.temp_dir and os.path.exists(self.temp_dir):
             try:
                 shutil.rmtree(self.temp_dir)

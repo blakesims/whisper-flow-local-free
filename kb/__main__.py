@@ -79,6 +79,14 @@ DEFAULTS = {
         },
     ],
     "video_target": "/Volumes/BackupArchive/kb-videos",
+    # Remote mount mappings for SSH-based audio extraction
+    # Maps local mount paths to SSH destinations for efficient extraction
+    "remote_mounts": {
+        "/Volumes/BackupArchive": {
+            "host": "zen",  # SSH host (from ~/.ssh/config)
+            "path": "/home/blake/backups",  # Corresponding path on server
+        },
+    },
     "presets": {
         "alpha_session": {
             "label": "Alpha Cohort Session",
@@ -159,6 +167,8 @@ def load_config() -> dict:
                 config["video_sources"] = file_config["video_sources"]
             if "video_target" in file_config:
                 config["video_target"] = file_config["video_target"]
+            if "remote_mounts" in file_config:
+                config["remote_mounts"] = {**DEFAULTS.get("remote_mounts", {}), **file_config["remote_mounts"]}
         except Exception as e:
             console.print(f"[yellow]Warning: Could not load config: {e}[/yellow]")
 
