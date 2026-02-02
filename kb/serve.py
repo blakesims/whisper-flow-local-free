@@ -28,6 +28,7 @@ from kb.videos import (
     load_inventory, save_inventory, scan_videos, INVENTORY_PATH,
     queue_transcription, get_queue_status, start_worker, load_queue
 )
+from kb.analyze import list_analysis_types, load_analysis_type, ANALYSIS_TYPES_DIR
 
 # Action ID separator (using -- to avoid URL encoding issues with ::)
 ACTION_ID_SEP = "--"
@@ -46,6 +47,7 @@ _paths = get_paths(_config)
 KB_ROOT = _paths["kb_output"]
 CONFIG_DIR = _paths["config_dir"]
 ACTION_STATE_PATH = Path.home() / ".kb" / "action-state.json"
+PROMPT_FEEDBACK_PATH = Path.home() / ".kb" / "prompt-feedback.json"
 
 def get_action_mapping() -> dict:
     """Load action mapping from config with pattern support.
@@ -140,6 +142,36 @@ def save_action_state(state: dict):
     ACTION_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(ACTION_STATE_PATH, 'w') as f:
         json.dump(state, f, indent=2)
+
+
+# --- Prompt Feedback Storage ---
+
+def load_prompt_feedback() -> dict:
+    """Load prompt feedback from ~/.kb/prompt-feedback.json.
+
+    Returns dict with 'flags' list. Creates empty structure if file doesn't exist.
+    """
+    if not PROMPT_FEEDBACK_PATH.exists():
+        return {"flags": []}
+
+    try:
+        with open(PROMPT_FEEDBACK_PATH) as f:
+            feedback = json.load(f)
+
+        # Validate structure
+        if not isinstance(feedback, dict) or "flags" not in feedback:
+            return {"flags": []}
+
+        return feedback
+    except (json.JSONDecodeError, IOError):
+        return {"flags": []}
+
+
+def save_prompt_feedback(feedback: dict):
+    """Save prompt feedback to ~/.kb/prompt-feedback.json."""
+    PROMPT_FEEDBACK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(PROMPT_FEEDBACK_PATH, 'w') as f:
+        json.dump(feedback, f, indent=2)
 
 
 # --- KB Scanning for Actionable Items ---
@@ -425,6 +457,55 @@ def skip_action(action_id: str):
         state["actions"][action_id]["status"] = "skipped"
 
     state["actions"][action_id]["completed_at"] = datetime.now().isoformat()
+    save_action_state(state)
+
+    return jsonify({"success": True})
+
+
+@app.route('/api/action/<action_id>/flag', methods=['POST'])
+def flag_action(action_id: str):
+    """Flag an action for prompt quality feedback.
+
+    Stores flag in prompt-feedback.json and marks action as skipped.
+    Request body: { "note": "optional note" }
+    """
+    if not validate_action_id(action_id):
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    # Extract analysis_type from action_id (format: transcript_id--analysis_type)
+    parts = action_id.split(ACTION_ID_SEP)
+    if len(parts) != 2:
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    analysis_type = parts[1]
+
+    # Get optional note from request body
+    data = request.get_json() or {}
+    note = data.get("note", "")
+
+    # Add flag to prompt feedback
+    feedback = load_prompt_feedback()
+    feedback["flags"].append({
+        "analysis_type": analysis_type,
+        "action_id": action_id,
+        "flagged_at": datetime.now().isoformat(),
+        "note": note,
+    })
+    save_prompt_feedback(feedback)
+
+    # Also mark action as skipped (reuse skip logic)
+    state = load_action_state()
+    if action_id not in state["actions"]:
+        state["actions"][action_id] = {
+            "status": "skipped",
+            "copied_count": 0,
+            "created_at": datetime.now().isoformat(),
+        }
+    else:
+        state["actions"][action_id]["status"] = "skipped"
+
+    state["actions"][action_id]["completed_at"] = datetime.now().isoformat()
+    state["actions"][action_id]["flagged"] = True  # Mark as flagged for reference
     save_action_state(state)
 
     return jsonify({"success": True})
@@ -880,6 +961,99 @@ def get_presets():
         for k, v in presets.items()
     ]
     return jsonify({"presets": result})
+
+
+# --- Prompts Routes ---
+
+@app.route('/prompts')
+def prompts():
+    """Prompts page HTML."""
+    return render_template('prompts.html')
+
+
+@app.route('/api/prompts')
+def get_prompts():
+    """Get all analysis types with flag stats.
+
+    Returns list of prompts sorted by flag_rate descending (bubbling).
+    """
+    # Load prompt feedback and action state for stats
+    feedback = load_prompt_feedback()
+    action_state = load_action_state()
+
+    # Count flags by analysis type
+    flags_by_type = {}
+    recent_flags_by_type = {}
+    flagged_ids_by_type = {}
+    seven_days_ago = datetime.now().timestamp() - (7 * 24 * 60 * 60)
+
+    for flag in feedback.get("flags", []):
+        analysis_type = flag.get("analysis_type", "")
+        if not analysis_type:
+            continue
+
+        if analysis_type not in flags_by_type:
+            flags_by_type[analysis_type] = 0
+            recent_flags_by_type[analysis_type] = 0
+            flagged_ids_by_type[analysis_type] = []
+
+        flags_by_type[analysis_type] += 1
+        flagged_ids_by_type[analysis_type].append(flag.get("action_id", ""))
+
+        # Check if recent (within 7 days)
+        flagged_at = flag.get("flagged_at", "")
+        if flagged_at:
+            try:
+                flag_ts = datetime.fromisoformat(flagged_at).timestamp()
+                if flag_ts > seven_days_ago:
+                    recent_flags_by_type[analysis_type] += 1
+            except (ValueError, TypeError):
+                pass
+
+    # Count total actions by analysis type for flag_rate calculation
+    actions_by_type = {}
+    for action_id in action_state.get("actions", {}).keys():
+        # action_id format: transcript_id--analysis_type
+        parts = action_id.split(ACTION_ID_SEP)
+        if len(parts) == 2:
+            analysis_type = parts[1]
+            actions_by_type[analysis_type] = actions_by_type.get(analysis_type, 0) + 1
+
+    # Build response for each analysis type
+    prompts_list = []
+    for analysis_type in list_analysis_types():
+        name = analysis_type["name"]
+
+        try:
+            full_def = load_analysis_type(name)
+        except ValueError:
+            continue
+
+        # Calculate stats
+        total_flagged = flags_by_type.get(name, 0)
+        total_actions = actions_by_type.get(name, 0)
+        flag_rate = total_flagged / total_actions if total_actions > 0 else 0.0
+
+        prompts_list.append({
+            "name": name,
+            "description": analysis_type.get("description", ""),
+            "prompt_preview": full_def.get("prompt", "")[:200] + "..." if len(full_def.get("prompt", "")) > 200 else full_def.get("prompt", ""),
+            "prompt_full": full_def.get("prompt", ""),
+            "output_schema": full_def.get("output_schema", {}),
+            "file_path": str(ANALYSIS_TYPES_DIR / f"{name}.json"),
+            "stats": {
+                "total_flagged": total_flagged,
+                "flag_rate": round(flag_rate, 3),
+                "recent_flags": recent_flags_by_type.get(name, 0),
+                "total_actions": total_actions,
+                "flagged_action_ids": flagged_ids_by_type.get(name, []),
+            }
+        })
+
+    # Sort by flag_rate descending (bubbling mechanism)
+    prompts_list.sort(key=lambda x: x["stats"]["flag_rate"], reverse=True)
+
+    return jsonify({"prompts": prompts_list})
 
 
 def check_and_auto_scan():

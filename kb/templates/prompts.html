@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KB Prompts - Analysis Type Viewer</title>
+    <style>
+        /* Catppuccin Mocha palette */
+        :root {
+            --base: #1e1e2e;
+            --mantle: #181825;
+            --crust: #11111b;
+            --surface0: #313244;
+            --surface1: #45475a;
+            --surface2: #585b70;
+            --overlay0: #6c7086;
+            --overlay1: #7f849c;
+            --text: #cdd6f4;
+            --subtext1: #bac2de;
+            --subtext0: #a6adc8;
+            --lavender: #b4befe;
+            --blue: #89b4fa;
+            --sapphire: #74c7ec;
+            --sky: #89dceb;
+            --teal: #94e2d5;
+            --green: #a6e3a1;
+            --yellow: #f9e2af;
+            --peach: #fab387;
+            --maroon: #eba0ac;
+            --red: #f38ba8;
+            --mauve: #cba6f7;
+            --pink: #f5c2e7;
+            --flamingo: #f2cdcd;
+            --rosewater: #f5e0dc;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: var(--crust);
+            color: var(--text);
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Tmux-style layout */
+        .tmux-container {
+            display: grid;
+            grid-template-columns: 1fr 500px;
+            grid-template-rows: 1fr auto;
+            height: 100vh;
+            gap: 1px;
+            background: var(--surface1);
+        }
+
+        .pane {
+            background: var(--base);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .pane-header {
+            background: var(--mantle);
+            padding: 8px 16px;
+            font-size: 11px;
+            color: var(--subtext0);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            border-bottom: 1px solid var(--surface0);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .pane-header .pane-index {
+            color: var(--mauve);
+        }
+
+        .pane-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0;
+        }
+
+        /* Section headers */
+        .section-header {
+            background: var(--mantle);
+            padding: 12px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--surface0);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .section-title {
+            color: var(--text);
+            font-weight: 600;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .section-count {
+            background: var(--mauve);
+            color: var(--crust);
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        /* Prompt items */
+        .prompt-item {
+            padding: 16px;
+            border-bottom: 1px solid var(--surface0);
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+
+        .prompt-item:hover {
+            background: var(--mantle);
+        }
+
+        .prompt-item.selected {
+            background: var(--surface0);
+            border-left: 3px solid var(--mauve);
+        }
+
+        .prompt-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 8px;
+        }
+
+        .prompt-name {
+            font-weight: 600;
+            color: var(--text);
+            font-size: 14px;
+        }
+
+        .prompt-description {
+            color: var(--subtext0);
+            font-size: 12px;
+            margin-bottom: 8px;
+        }
+
+        .prompt-stats {
+            display: flex;
+            gap: 12px;
+            font-size: 11px;
+            color: var(--overlay0);
+        }
+
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* Flag rate badge */
+        .flag-badge {
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        .flag-badge.high {
+            background: var(--red);
+            color: var(--crust);
+        }
+
+        .flag-badge.medium {
+            background: var(--yellow);
+            color: var(--crust);
+        }
+
+        .flag-badge.low {
+            background: var(--green);
+            color: var(--crust);
+        }
+
+        .flag-badge.none {
+            background: var(--surface1);
+            color: var(--overlay0);
+        }
+
+        /* Needs attention indicator */
+        .needs-attention {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            background: var(--red);
+            color: var(--crust);
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: 600;
+            margin-left: 6px;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        /* Dim prompts with 0 flags (working well) */
+        .prompt-item.working-well {
+            opacity: 0.6;
+        }
+
+        .prompt-item.working-well .prompt-name {
+            color: var(--overlay1);
+        }
+
+        /* Right pane - Preview */
+        .preview-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--overlay0);
+            text-align: center;
+            padding: 40px;
+        }
+
+        .preview-empty-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        .preview-content {
+            padding: 20px;
+            overflow-y: auto;
+            height: 100%;
+        }
+
+        .preview-title {
+            color: var(--mauve);
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .preview-subtitle {
+            color: var(--overlay0);
+            font-size: 12px;
+            margin-bottom: 20px;
+        }
+
+        .preview-section {
+            margin-bottom: 20px;
+        }
+
+        .preview-section-title {
+            color: var(--overlay0);
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 8px;
+        }
+
+        .preview-text {
+            background: var(--mantle);
+            padding: 16px;
+            border-radius: 6px;
+            font-size: 12px;
+            line-height: 1.7;
+            color: var(--text);
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+
+        .preview-schema {
+            background: var(--mantle);
+            padding: 16px;
+            border-radius: 6px;
+            font-size: 11px;
+            line-height: 1.5;
+            color: var(--subtext1);
+            max-height: 200px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+
+        .preview-stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+        }
+
+        .preview-stat-item {
+            background: var(--mantle);
+            padding: 12px;
+            border-radius: 6px;
+            text-align: center;
+        }
+
+        .preview-stat-label {
+            color: var(--overlay0);
+            font-size: 10px;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .preview-stat-value {
+            color: var(--text);
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .preview-stat-value.red { color: var(--red); }
+        .preview-stat-value.yellow { color: var(--yellow); }
+        .preview-stat-value.green { color: var(--green); }
+
+        .preview-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 20px;
+        }
+
+        .preview-actions .btn {
+            flex: 1;
+            justify-content: center;
+            padding: 10px;
+        }
+
+        .btn {
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-family: inherit;
+            cursor: pointer;
+            border: none;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.1s;
+        }
+
+        .btn-primary {
+            background: var(--mauve);
+            color: var(--crust);
+            font-weight: 600;
+        }
+
+        .btn-primary:hover {
+            background: var(--lavender);
+        }
+
+        .btn-secondary {
+            background: var(--surface0);
+            color: var(--text);
+        }
+
+        .btn-secondary:hover {
+            background: var(--surface1);
+        }
+
+        .btn .key {
+            background: rgba(0,0,0,0.2);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+        }
+
+        /* Flagged action IDs list */
+        .flagged-ids {
+            margin-top: 12px;
+        }
+
+        .flagged-id {
+            background: var(--surface0);
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            color: var(--subtext0);
+            margin-bottom: 4px;
+            display: block;
+        }
+
+        /* Status bar */
+        .status-bar {
+            grid-column: 1 / -1;
+            background: var(--mauve);
+            color: var(--crust);
+            padding: 4px 16px;
+            font-size: 11px;
+            display: flex;
+            justify-content: space-between;
+            font-weight: 500;
+        }
+
+        .status-section {
+            display: flex;
+            gap: 24px;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-key {
+            background: rgba(0,0,0,0.2);
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+        }
+
+        /* Toast notification */
+        .toast {
+            position: fixed;
+            bottom: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--surface0);
+            color: var(--text);
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 13px;
+            display: none;
+            align-items: center;
+            gap: 10px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            border: 1px solid var(--surface1);
+            z-index: 1000;
+        }
+
+        .toast.show {
+            display: flex;
+            animation: slideUp 0.3s ease;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateX(-50%) translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(-50%) translateY(0);
+            }
+        }
+
+        .toast-icon {
+            color: var(--green);
+            font-size: 16px;
+        }
+
+        /* Empty state */
+        .empty-state {
+            padding: 60px 20px;
+            text-align: center;
+            color: var(--overlay0);
+        }
+
+        .empty-state-icon {
+            font-size: 40px;
+            margin-bottom: 12px;
+            opacity: 0.5;
+        }
+
+        .empty-state-text {
+            font-size: 13px;
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--mantle);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--surface1);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--surface2);
+        }
+
+        /* Shortcut hints */
+        .shortcut-bar {
+            background: var(--mantle);
+            padding: 8px 16px;
+            font-size: 11px;
+            color: var(--subtext0);
+            display: flex;
+            gap: 20px;
+            border-top: 1px solid var(--surface0);
+        }
+
+        .shortcut {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .key-hint {
+            background: var(--surface0);
+            color: var(--sapphire);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        /* Mode toggle */
+        .mode-toggle {
+            display: flex;
+            gap: 4px;
+            background: var(--surface0);
+            padding: 2px;
+            border-radius: 4px;
+        }
+
+        .mode-btn {
+            padding: 4px 8px;
+            font-size: 11px;
+            border: none;
+            background: transparent;
+            color: var(--overlay0);
+            cursor: pointer;
+            border-radius: 2px;
+            font-family: inherit;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+        }
+
+        .mode-btn.active {
+            background: var(--mauve);
+            color: var(--crust);
+        }
+
+        .mode-btn:hover:not(.active) {
+            color: var(--text);
+        }
+
+        .mode-btn .key-hint {
+            background: rgba(0,0,0,0.2);
+        }
+
+        /* File path display */
+        .file-path {
+            background: var(--mantle);
+            padding: 10px 12px;
+            border-radius: 6px;
+            font-size: 11px;
+            color: var(--subtext0);
+            word-break: break-all;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="tmux-container">
+        <!-- Left Pane: Prompt List -->
+        <div class="pane">
+            <div class="pane-header">
+                <span><span class="pane-index">0:</span> prompts</span>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <div class="mode-toggle">
+                        <a href="/" class="mode-btn"><span class="key-hint">q</span></a>
+                        <a href="/browse" class="mode-btn"><span class="key-hint">b</span></a>
+                        <a href="/videos" class="mode-btn"><span class="key-hint">v</span></a>
+                        <button class="mode-btn active"><span class="key-hint">p</span></button>
+                    </div>
+                </div>
+            </div>
+            <div class="pane-body" id="prompt-list">
+                <!-- Populated by JavaScript -->
+            </div>
+            <div class="shortcut-bar">
+                <span class="shortcut"><span class="key-hint">j/k</span> navigate</span>
+                <span class="shortcut"><span class="key-hint">e</span> edit (nvim)</span>
+            </div>
+        </div>
+
+        <!-- Right Pane: Preview -->
+        <div class="pane">
+            <div class="pane-header">
+                <span><span class="pane-index">1:</span> detail</span>
+                <span id="preview-type-label" style="color: var(--mauve);"></span>
+            </div>
+            <div class="pane-body" id="preview-pane">
+                <div class="preview-empty">
+                    <div class="preview-empty-icon">...</div>
+                    <div>Select a prompt to preview</div>
+                </div>
+            </div>
+            <div class="shortcut-bar">
+                <span class="shortcut"><span class="key-hint">Ctrl+C</span> quit</span>
+            </div>
+        </div>
+
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <div class="status-section">
+                <span>[kb-prompts]</span>
+                <span id="status-total">0 analysis types</span>
+                <span id="status-flagged">0 flagged</span>
+            </div>
+            <div class="status-section">
+                <span class="status-item"><span class="status-key">q</span> queue</span>
+                <span class="status-item"><span class="status-key">b</span> browse</span>
+                <span class="status-item"><span class="status-key">v</span> videos</span>
+                <span class="status-item"><span class="status-key">p</span> prompts</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast notification -->
+    <div class="toast" id="toast">
+        <span class="toast-icon">...</span>
+        <span id="toast-message">Copied to clipboard!</span>
+    </div>
+
+    <script>
+        // State
+        let promptsData = [];
+        let selectedIndex = 0;
+        let selectedPrompt = null;
+
+        // Fetch prompts data
+        async function fetchPrompts() {
+            try {
+                const response = await fetch('/api/prompts');
+                const data = await response.json();
+                promptsData = data.prompts;
+                renderPrompts();
+                updateStatusBar();
+
+                // Auto-select first item if none selected
+                if (selectedPrompt === null && promptsData.length > 0) {
+                    selectItem(0);
+                }
+            } catch (error) {
+                console.error('Failed to fetch prompts:', error);
+            }
+        }
+
+        // Get flag badge class based on rate
+        function getFlagBadgeClass(rate) {
+            if (rate >= 0.2) return 'high';
+            if (rate >= 0.1) return 'medium';
+            if (rate > 0) return 'low';
+            return 'none';
+        }
+
+        // Format flag rate as percentage
+        function formatRate(rate) {
+            return (rate * 100).toFixed(0) + '%';
+        }
+
+        // Render prompt list
+        function renderPrompts() {
+            const promptList = document.getElementById('prompt-list');
+            promptList.innerHTML = '';
+
+            if (promptsData.length === 0) {
+                promptList.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">...</div>
+                        <div class="empty-state-text">No analysis types found</div>
+                    </div>
+                `;
+                return;
+            }
+
+            // Section header
+            const header = document.createElement('div');
+            header.className = 'section-header';
+            header.innerHTML = `
+                <div class="section-title">
+                    <span>Analysis Types</span>
+                    <span class="section-count">${promptsData.length}</span>
+                </div>
+            `;
+            promptList.appendChild(header);
+
+            promptsData.forEach((prompt, index) => {
+                const div = document.createElement('div');
+                div.className = 'prompt-item';
+                if (index === selectedIndex) {
+                    div.classList.add('selected');
+                }
+
+                const stats = prompt.stats;
+                const badgeClass = getFlagBadgeClass(stats.flag_rate);
+                const flagText = stats.total_flagged > 0
+                    ? `${stats.total_flagged} flags (${formatRate(stats.flag_rate)})`
+                    : 'No flags';
+
+                // Add "working well" class for prompts with 0 flags and some usage
+                if (stats.total_flagged === 0 && stats.total_actions > 0) {
+                    div.classList.add('working-well');
+                }
+
+                // Needs attention indicator for high flag rate
+                const needsAttention = stats.flag_rate >= 0.2;
+
+                div.innerHTML = `
+                    <div class="prompt-item-header">
+                        <span class="prompt-name">${formatName(prompt.name)}${needsAttention ? '<span class="needs-attention">NEEDS ATTENTION</span>' : ''}</span>
+                        <span class="flag-badge ${badgeClass}">${flagText}</span>
+                    </div>
+                    <div class="prompt-description">${escapeHtml(prompt.description)}</div>
+                    <div class="prompt-stats">
+                        <span class="stat-item">
+                            <span style="color: var(--overlay0);">${stats.total_actions} total actions</span>
+                        </span>
+                        ${stats.recent_flags > 0 ? `
+                            <span class="stat-item">
+                                <span style="color: var(--yellow);">${stats.recent_flags} recent (7d)</span>
+                            </span>
+                        ` : ''}
+                    </div>
+                `;
+
+                div.addEventListener('click', () => selectItem(index));
+                promptList.appendChild(div);
+            });
+        }
+
+        // Select an item
+        function selectItem(index) {
+            if (index < 0 || index >= promptsData.length) return;
+
+            selectedIndex = index;
+            selectedPrompt = promptsData[index];
+
+            // Update UI
+            document.querySelectorAll('.prompt-item').forEach((el, i) => {
+                el.classList.toggle('selected', i === index);
+                // Scroll selected item into view
+                if (i === index) {
+                    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                }
+            });
+
+            loadPreview(selectedPrompt);
+        }
+
+        // Load preview pane
+        function loadPreview(prompt) {
+            const previewPane = document.getElementById('preview-pane');
+            const previewTypeLabel = document.getElementById('preview-type-label');
+
+            previewTypeLabel.textContent = prompt.name;
+
+            const stats = prompt.stats;
+            const rateClass = stats.flag_rate >= 0.2 ? 'red' : (stats.flag_rate >= 0.1 ? 'yellow' : 'green');
+
+            // Format output schema
+            const schemaJson = JSON.stringify(prompt.output_schema, null, 2);
+
+            // Flagged action IDs list
+            let flaggedIdsHtml = '';
+            if (stats.flagged_action_ids && stats.flagged_action_ids.length > 0) {
+                const idsToShow = stats.flagged_action_ids.slice(0, 5);
+                flaggedIdsHtml = `
+                    <div class="preview-section">
+                        <div class="preview-section-title">Flagged Actions (${stats.flagged_action_ids.length})</div>
+                        <div class="flagged-ids">
+                            ${idsToShow.map(id => `<span class="flagged-id">${escapeHtml(id)}</span>`).join('')}
+                            ${stats.flagged_action_ids.length > 5 ? `<span class="flagged-id" style="color: var(--overlay0);">... and ${stats.flagged_action_ids.length - 5} more</span>` : ''}
+                        </div>
+                    </div>
+                `;
+            }
+
+            previewPane.innerHTML = `
+                <div class="preview-content">
+                    <div class="preview-title">${formatName(prompt.name)}</div>
+                    <div class="preview-subtitle">${escapeHtml(prompt.description)}</div>
+
+                    <div class="preview-section">
+                        <div class="preview-section-title">Flag Statistics</div>
+                        <div class="preview-stats-grid">
+                            <div class="preview-stat-item">
+                                <div class="preview-stat-label">Total Flags</div>
+                                <div class="preview-stat-value ${stats.total_flagged > 0 ? 'red' : ''}">${stats.total_flagged}</div>
+                            </div>
+                            <div class="preview-stat-item">
+                                <div class="preview-stat-label">Flag Rate</div>
+                                <div class="preview-stat-value ${rateClass}">${formatRate(stats.flag_rate)}</div>
+                            </div>
+                            <div class="preview-stat-item">
+                                <div class="preview-stat-label">Recent (7d)</div>
+                                <div class="preview-stat-value ${stats.recent_flags > 0 ? 'yellow' : ''}">${stats.recent_flags}</div>
+                            </div>
+                            <div class="preview-stat-item">
+                                <div class="preview-stat-label">Total Actions</div>
+                                <div class="preview-stat-value">${stats.total_actions}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    ${flaggedIdsHtml}
+
+                    <div class="preview-section">
+                        <div class="preview-section-title">File Path</div>
+                        <div class="file-path">${escapeHtml(prompt.file_path)}</div>
+                    </div>
+
+                    <div class="preview-section">
+                        <div class="preview-section-title">Prompt</div>
+                        <div class="preview-text">${escapeHtml(prompt.prompt_full)}</div>
+                    </div>
+
+                    <div class="preview-section">
+                        <div class="preview-section-title">Output Schema</div>
+                        <div class="preview-schema">${escapeHtml(schemaJson)}</div>
+                    </div>
+
+                    <div class="preview-actions">
+                        <button class="btn btn-primary" onclick="copyNvimCommand()">
+                            <span>Copy nvim command</span>
+                            <span class="key">e</span>
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Update status bar
+        function updateStatusBar() {
+            document.getElementById('status-total').textContent = `${promptsData.length} analysis types`;
+
+            const totalFlagged = promptsData.reduce((sum, p) => sum + p.stats.total_flagged, 0);
+            document.getElementById('status-flagged').textContent = `${totalFlagged} total flags`;
+        }
+
+        // Show toast notification
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            const toastMessage = document.getElementById('toast-message');
+            toastMessage.textContent = message;
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 2000);
+        }
+
+        // Copy nvim command to clipboard
+        async function copyNvimCommand() {
+            if (!selectedPrompt) return;
+
+            const command = `nvim ${selectedPrompt.file_path}`;
+
+            try {
+                await navigator.clipboard.writeText(command);
+                showToast(`Copied: ${command}`);
+            } catch (error) {
+                console.error('Copy failed:', error);
+                showToast('Copy failed - please try manually');
+            }
+        }
+
+        // Format name for display
+        function formatName(name) {
+            return name.split('_').map(word =>
+                word.charAt(0).toUpperCase() + word.slice(1)
+            ).join(' ');
+        }
+
+        // Escape HTML
+        function escapeHtml(text) {
+            if (text == null) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Keyboard navigation
+        document.addEventListener('keydown', function(e) {
+            // Mode switching
+            if (e.key === 'q') {
+                window.location.href = '/';
+                return;
+            }
+            if (e.key === 'b') {
+                window.location.href = '/browse';
+                return;
+            }
+            if (e.key === 'v') {
+                window.location.href = '/videos';
+                return;
+            }
+
+            if (promptsData.length === 0) return;
+
+            if (e.key === 'j') {
+                // Move down
+                selectItem(Math.min(selectedIndex + 1, promptsData.length - 1));
+            } else if (e.key === 'k') {
+                // Move up
+                selectItem(Math.max(selectedIndex - 1, 0));
+            } else if (e.key === 'e') {
+                // Copy nvim command
+                copyNvimCommand();
+            }
+        });
+
+        // Initialize
+        fetchPrompts();
+    </script>
+</body>
+</html>

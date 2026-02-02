@@ -605,6 +605,7 @@
                     <a href="/" class="mode-btn" id="mode-queue"><span class="key-hint">q</span></a>
                     <button class="mode-btn active" id="mode-browse"><span class="key-hint">b</span></button>
                     <a href="/videos" class="mode-btn" id="mode-videos"><span class="key-hint">v</span></a>
+                    <a href="/prompts" class="mode-btn" id="mode-prompts"><span class="key-hint">p</span></a>
                 </div>
             </div>
             <div class="search-bar">
@@ -660,6 +661,7 @@
                 <span class="status-item"><span class="status-key">q</span> queue</span>
                 <span class="status-item"><span class="status-key">b</span> browse</span>
                 <span class="status-item"><span class="status-key">v</span> videos</span>
+                <span class="status-item"><span class="status-key">p</span> prompts</span>
             </div>
         </div>
     </div>
@@ -1099,6 +1101,10 @@
             }
             if (e.key === 'v' && !isSearchFocused) {
                 window.location.href = '/videos';
+                return;
+            }
+            if (e.key === 'p' && !isSearchFocused) {
+                window.location.href = '/prompts';
                 return;
             }
 

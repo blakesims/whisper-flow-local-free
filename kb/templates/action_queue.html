@@ -436,6 +436,64 @@
             font-size: 16px;
         }
 
+        /* Flag modal (telescope-style) */
+        .flag-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 1001;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .flag-modal.show {
+            display: flex;
+            animation: flagFadeIn 0.1s ease;
+        }
+
+        @keyframes flagFadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .flag-modal-backdrop {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+        }
+
+        .flag-modal-content {
+            position: relative;
+            background: var(--surface0);
+            border: 2px solid var(--sapphire);
+            border-radius: 8px;
+            padding: 4px;
+            width: 300px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+
+        .flag-modal-input {
+            width: 100%;
+            background: var(--base);
+            border: none;
+            padding: 12px 16px;
+            color: var(--text);
+            font-family: inherit;
+            font-size: 13px;
+            border-radius: 4px;
+            outline: none;
+        }
+
+        .flag-modal-input::placeholder {
+            color: var(--overlay0);
+        }
+
         /* Empty state */
         .empty-state {
             padding: 60px 20px;
@@ -554,6 +612,7 @@
                         <button class="mode-btn active"><span class="key-hint">q</span></button>
                         <a href="/browse" class="mode-btn"><span class="key-hint">b</span></a>
                         <a href="/videos" class="mode-btn"><span class="key-hint">v</span></a>
+                        <a href="/prompts" class="mode-btn"><span class="key-hint">p</span></a>
                     </div>
                     <span id="connection-status" style="color: var(--green);">connected</span>
                 </div>
@@ -566,6 +625,7 @@
                 <span class="shortcut"><span class="key-hint">c</span> copy</span>
                 <span class="shortcut"><span class="key-hint">d</span> done</span>
                 <span class="shortcut"><span class="key-hint">s</span> skip</span>
+                <span class="shortcut"><span class="key-hint">x</span> flag</span>
             </div>
         </div>
 
@@ -598,6 +658,7 @@
                 <span class="status-item"><span class="status-key">q</span> queue</span>
                 <span class="status-item"><span class="status-key">b</span> browse</span>
                 <span class="status-item"><span class="status-key">v</span> videos</span>
+                <span class="status-item"><span class="status-key">p</span> prompts</span>
                 <span id="status-host">localhost:8765</span>
             </div>
         </div>
@@ -607,6 +668,16 @@
     <div class="toast" id="toast">
         <span class="toast-icon">✓</span>
         <span id="toast-message">Copied to clipboard!</span>
+    </div>
+
+    <!-- Flag modal (telescope-style) -->
+    <div class="flag-modal" id="flag-modal">
+        <div class="flag-modal-backdrop" onclick="hideFlagModal()"></div>
+        <div class="flag-modal-content">
+            <input type="text" class="flag-modal-input" id="flag-note-input"
+                   placeholder="Note (optional, Enter to submit)"
+                   autocomplete="off">
+        </div>
     </div>
 
     <script>
@@ -784,6 +855,10 @@
             // Update UI
             document.querySelectorAll('.action-item:not(.completed)').forEach((el, i) => {
                 el.classList.toggle('selected', i === index);
+                // Scroll selected item into view
+                if (i === index) {
+                    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                }
             });
 
             loadPreview(selectedItem);
@@ -862,6 +937,81 @@
                 toast.classList.remove('show');
             }, 2000);
         }
+
+        // Flag modal state
+        let modalOpen = false;
+
+        // Show flag modal
+        function showFlagModal() {
+            if (!selectedItem) return;
+            modalOpen = true;
+            const modal = document.getElementById('flag-modal');
+            const input = document.getElementById('flag-note-input');
+            modal.classList.add('show');
+            input.value = '';
+            input.focus();
+        }
+
+        // Hide flag modal
+        function hideFlagModal() {
+            modalOpen = false;
+            const modal = document.getElementById('flag-modal');
+            const input = document.getElementById('flag-note-input');
+            modal.classList.remove('show');
+            input.value = '';
+        }
+
+        // Submit flag
+        async function submitFlag(note) {
+            if (!selectedItem) return;
+
+            try {
+                const response = await fetch(`/api/action/${selectedItem.id}/flag`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ note: note || '' }),
+                });
+
+                if (response.ok) {
+                    // Copy content to clipboard
+                    try {
+                        await navigator.clipboard.writeText(selectedItem.content);
+                    } catch (error) {
+                        // Fallback to server-side
+                        await fetch(`/api/action/${selectedItem.id}/copy`, { method: 'POST' });
+                    }
+
+                    hideFlagModal();
+                    showToast('Flagged & copied!');
+                    await fetchQueue();
+
+                    // Move to next item (same logic as skipItem)
+                    if (selectedIndex >= queueData.pending.length) {
+                        selectedIndex = Math.max(0, queueData.pending.length - 1);
+                    }
+                    if (queueData.pending.length > 0) {
+                        selectItem(selectedIndex);
+                    } else {
+                        selectedItem = null;
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to flag:', error);
+                hideFlagModal();
+                showToast('Flag failed');
+            }
+        }
+
+        // Flag modal keydown handler
+        document.getElementById('flag-note-input').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                submitFlag(this.value);
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                hideFlagModal();
+            }
+        });
 
         // Copy to clipboard
         async function copyToClipboard() {
@@ -943,6 +1093,9 @@
 
         // Keyboard navigation
         document.addEventListener('keydown', function(e) {
+            // Ignore when modal is open (modal has its own handlers)
+            if (modalOpen) return;
+
             // Mode switching (always active)
             if (e.key === 'b') {
                 window.location.href = '/browse';
@@ -950,6 +1103,10 @@
             }
             if (e.key === 'v') {
                 window.location.href = '/videos';
+                return;
+            }
+            if (e.key === 'p') {
+                window.location.href = '/prompts';
                 return;
             }
 
@@ -970,6 +1127,9 @@
             } else if (e.key === 's') {
                 // Skip
                 skipItem();
+            } else if (e.key === 'x') {
+                // Flag
+                showFlagModal();
             }
         });
 

@@ -617,6 +617,7 @@
                     <a href="/" class="mode-btn"><span class="key-hint">q</span></a>
                     <a href="/browse" class="mode-btn"><span class="key-hint">b</span></a>
                     <button class="mode-btn active"><span class="key-hint">v</span></button>
+                    <a href="/prompts" class="mode-btn"><span class="key-hint">p</span></a>
                 </div>
             </div>
             <div class="filter-tabs">
@@ -690,6 +691,7 @@
                 <span class="status-item"><span class="status-key">q</span> queue</span>
                 <span class="status-item"><span class="status-key">b</span> browse</span>
                 <span class="status-item"><span class="status-key">v</span> videos</span>
+                <span class="status-item"><span class="status-key">p</span> prompts</span>
             </div>
         </div>
     </div>
@@ -1346,6 +1348,10 @@
             }
             if (e.key === 'b') {
                 window.location.href = '/browse';
+                return;
+            }
+            if (e.key === 'p') {
+                window.location.href = '/prompts';
                 return;
             }
 
