@@ -594,6 +594,105 @@ def run_interactive_review(
     return to_delete
 
 
+def _shift_project_config_indices(config_path: Path, insertion_point: int) -> bool:
+    """
+    Shift segment indices in project-config.json to make room for a restored segment.
+
+    All indices >= insertion_point are incremented by 1.
+
+    Args:
+        config_path: Path to project-config.json
+        insertion_point: The index where a segment is being inserted
+
+    Returns:
+        True if successful, False if config doesn't exist or update failed
+    """
+    if not config_path.exists():
+        return False
+
+    try:
+        with open(config_path) as f:
+            config = json.load(f)
+
+        # Update timeline.segments - shift recordingSegment indices
+        if "timeline" in config and "segments" in config["timeline"]:
+            for seg in config["timeline"]["segments"]:
+                rec_seg = seg.get("recordingSegment")
+                if rec_seg is not None and rec_seg >= insertion_point:
+                    seg["recordingSegment"] = rec_seg + 1
+
+        # Update clips - shift index values
+        if "clips" in config:
+            for clip in config["clips"]:
+                clip_idx = clip.get("index")
+                if clip_idx is not None and clip_idx >= insertion_point:
+                    clip["index"] = clip_idx + 1
+
+        # Write updated config
+        with open(config_path, 'w') as f:
+            json.dump(config, f, indent=2)
+
+        return True
+
+    except Exception as e:
+        console.print(f"[red]Error updating project-config.json: {e}[/red]")
+        return False
+
+
+def _update_project_config(config_path: Path, indices_to_delete: set[int], index_mapping: dict[int, int]) -> bool:
+    """
+    Update project-config.json to reflect segment deletions and renumbering.
+
+    Args:
+        config_path: Path to project-config.json
+        indices_to_delete: Set of segment indices being deleted
+        index_mapping: Dict mapping old_index -> new_index for kept segments
+
+    Returns:
+        True if successful, False if config doesn't exist or update failed
+    """
+    if not config_path.exists():
+        return False
+
+    try:
+        with open(config_path) as f:
+            config = json.load(f)
+
+        # Update timeline.segments - filter and remap recordingSegment
+        if "timeline" in config and "segments" in config["timeline"]:
+            new_timeline_segments = []
+            for seg in config["timeline"]["segments"]:
+                rec_seg = seg.get("recordingSegment")
+                if rec_seg is not None and rec_seg not in indices_to_delete:
+                    # Remap to new index
+                    if rec_seg in index_mapping:
+                        seg["recordingSegment"] = index_mapping[rec_seg]
+                    new_timeline_segments.append(seg)
+            config["timeline"]["segments"] = new_timeline_segments
+
+        # Update clips - filter and remap index
+        if "clips" in config:
+            new_clips = []
+            for clip in config["clips"]:
+                clip_idx = clip.get("index")
+                if clip_idx is not None and clip_idx not in indices_to_delete:
+                    # Remap to new index
+                    if clip_idx in index_mapping:
+                        clip["index"] = index_mapping[clip_idx]
+                    new_clips.append(clip)
+            config["clips"] = new_clips
+
+        # Write updated config
+        with open(config_path, 'w') as f:
+            json.dump(config, f, indent=2)
+
+        return True
+
+    except Exception as e:
+        console.print(f"[red]Error updating project-config.json: {e}[/red]")
+        return False
+
+
 def soft_delete_segments(cap_path: Path, indices_to_delete: set[int]) -> dict:
     """
     Soft-delete segments by renaming folders and updating metadata.
@@ -689,15 +788,19 @@ def soft_delete_segments(cap_path: Path, indices_to_delete: set[int]) -> dict:
     with open(meta_path, 'w') as f:
         json.dump(meta, f, indent=2)
 
-    # Step 5: Backup project-config.json (contains timeline edits)
-    # TODO: Properly update segment references instead of deleting
+    # Step 5: Update project-config.json (preserves timeline edits!)
     if config_path.exists():
-        backup_path = cap_path / "_backup_project-config.json"
-        import shutil
-        shutil.copy2(config_path, backup_path)
-        config_path.unlink()
-        console.print(f"[bold]💾 Backed up project-config.json[/bold] → {backup_path.name}")
-        console.print("[yellow]⚠️  Timeline edits saved to backup. Cap will regenerate fresh config.[/yellow]")
+        # Build index mapping from kept_segments
+        index_mapping = {
+            ks["original_index"]: ks["new_index"]
+            for ks in audit_data["kept_segments"]
+        }
+
+        console.print("\n[bold]📝 Updating project-config.json...[/bold]")
+        if _update_project_config(config_path, set(indices_to_delete), index_mapping):
+            console.print("[green]✓ Timeline edits preserved![/green]")
+        else:
+            console.print("[yellow]⚠️  Could not update project-config.json[/yellow]")
 
     audit_data["remaining_segment_count"] = len(new_segments)
 
@@ -870,15 +973,14 @@ def restore_segments(cap_path: Path) -> None:
     with open(meta_path, 'w') as f:
         json.dump(meta, f, indent=2)
 
-    # Step 4: Backup project-config.json (contains timeline edits)
-    # TODO: Properly update segment references instead of deleting
+    # Step 4: Update project-config.json (shift indices to make room)
     if config_path.exists():
-        backup_path = cap_path / "_backup_project-config.json"
-        import shutil
-        shutil.copy2(config_path, backup_path)
-        config_path.unlink()
-        console.print(f"[bold]💾 Backed up project-config.json[/bold] → {backup_path.name}")
-        console.print("[yellow]⚠️  Timeline edits saved to backup. Cap will regenerate fresh config.[/yellow]")
+        console.print("\n[bold]📝 Updating project-config.json...[/bold]")
+        if _shift_project_config_indices(config_path, insertion_point):
+            console.print("[green]✓ Timeline edits preserved![/green]")
+            console.print("[dim]Note: Timeline entries for the restored segment were lost during deletion.[/dim]")
+        else:
+            console.print("[yellow]⚠️  Could not update project-config.json[/yellow]")
 
     # Step 5: Update audit log to remove the restored segment
     if audit_path.exists() and audit_data:
