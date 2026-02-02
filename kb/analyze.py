@@ -181,21 +181,34 @@ def scan_missing_by_decimal() -> dict[str, list[dict]]:
     return results
 
 
-def show_missing_analyses(detailed: bool = False) -> None:
+def show_missing_analyses(
+    detailed: bool = False,
+    decimal_filter: str | None = None
+) -> dict[str, list[dict]]:
     """
     Display summary of transcripts missing their decimal's default analyses.
 
     Args:
         detailed: If True, show per-transcript breakdown under each decimal
+        decimal_filter: If provided, only show this decimal
+
+    Returns:
+        Dict of missing analyses by decimal (for use by run_missing_analyses)
     """
     console.print(Panel("[bold]Missing Default Analyses[/bold]", border_style="cyan"))
 
     # Scan for missing analyses
     missing_by_decimal = scan_missing_by_decimal()
 
+    # Apply decimal filter if provided
+    if decimal_filter and decimal_filter in missing_by_decimal:
+        missing_by_decimal = {decimal_filter: missing_by_decimal[decimal_filter]}
+    elif decimal_filter:
+        missing_by_decimal = {}
+
     if not missing_by_decimal:
         console.print("\n[green]✓ All transcripts have their default analyses![/green]\n")
-        return
+        return {}
 
     # Load registry for decimal names
     registry = load_registry()
@@ -256,6 +269,141 @@ def show_missing_analyses(detailed: bool = False) -> None:
                 console.print(f"    [yellow]Missing:[/yellow] {missing_str}")
 
             console.print()
+
+    return missing_by_decimal
+
+
+def run_missing_analyses(
+    decimal_filter: str | None = None,
+    model: str = DEFAULT_MODEL,
+    skip_confirm: bool = False
+) -> None:
+    """
+    Run all missing default analyses in batch mode.
+
+    Args:
+        decimal_filter: If provided, only process this decimal
+        model: Gemini model to use for analysis
+        skip_confirm: If True, skip confirmation prompt (for automation)
+    """
+    # Get missing analyses (also displays summary)
+    missing_by_decimal = show_missing_analyses(decimal_filter=decimal_filter)
+
+    if not missing_by_decimal:
+        return
+
+    # Count total work
+    total_transcripts = sum(len(ts) for ts in missing_by_decimal.values())
+    total_analyses = sum(len(t["missing"]) for ts in missing_by_decimal.values() for t in ts)
+
+    console.print(f"[bold]Will run {total_analyses} analyses on {total_transcripts} transcript(s)[/bold]")
+    console.print(f"  Model: {model}")
+
+    # Confirmation
+    if not skip_confirm:
+        if not questionary.confirm("Proceed?", default=True, style=custom_style).ask():
+            console.print("[yellow]Cancelled.[/yellow]")
+            return
+
+    # Run analyses
+    success_count = 0
+    error_count = 0
+    current = 0
+
+    for decimal in sorted(missing_by_decimal.keys()):
+        transcripts = missing_by_decimal[decimal]
+
+        for t in transcripts:
+            current += 1
+            title_short = t["title"][:40] + "..." if len(t["title"]) > 40 else t["title"]
+            console.print(f"\n[bold cyan]({current}/{total_transcripts}) {title_short}[/bold cyan]")
+            console.print(f"  [dim]Missing: {', '.join(t['missing'])}[/dim]")
+
+            try:
+                results = analyze_transcript_file(
+                    transcript_path=t["path"],
+                    analysis_types=t["missing"],
+                    model=model,
+                    save=True,
+                    skip_existing=True,
+                    force=False
+                )
+
+                # Count successes/errors in this batch
+                successes = sum(1 for r in results.values() if "error" not in r)
+                errors = sum(1 for r in results.values() if "error" in r)
+
+                if successes > 0:
+                    success_count += successes
+                if errors > 0:
+                    error_count += errors
+
+            except Exception as e:
+                console.print(f"[red]Error: {e}[/red]")
+                error_count += len(t["missing"])
+
+    # Summary
+    console.print(f"\n[bold green]Done![/bold green]")
+    console.print(f"  [green]Successful:[/green] {success_count} analyses")
+    if error_count > 0:
+        console.print(f"  [red]Failed:[/red] {error_count} analyses")
+
+
+def run_missing_interactive() -> None:
+    """
+    Interactive mode for running missing analyses.
+
+    Shows summary, then offers options:
+    - Run all missing analyses
+    - Select specific decimal to run
+    - Cancel
+    """
+    # First show summary
+    missing_by_decimal = show_missing_analyses()
+
+    if not missing_by_decimal:
+        return
+
+    # Build choices
+    decimals = sorted(missing_by_decimal.keys())
+    registry = load_registry()
+    decimals_info = registry.get("decimals", {})
+
+    choices = [
+        questionary.Choice(
+            title="Run all missing analyses",
+            value="all"
+        ),
+    ]
+
+    # Add per-decimal options
+    for decimal in decimals:
+        decimal_data = decimals_info.get(decimal, {})
+        name = decimal_data.get("name", "") if isinstance(decimal_data, dict) else decimal_data
+        count = len(missing_by_decimal[decimal])
+        label = f"Run only {decimal} ({name[:20]}...) - {count} transcript(s)" if len(name) > 20 else f"Run only {decimal} ({name}) - {count} transcript(s)"
+        choices.append(questionary.Choice(title=label, value=decimal))
+
+    choices.append(questionary.Choice(title="Cancel", value="cancel"))
+
+    # Ask user
+    console.print("\n[bold cyan]What would you like to do?[/bold cyan]")
+    selection = questionary.select(
+        "Action:",
+        choices=choices,
+        style=custom_style
+    ).ask()
+
+    if not selection or selection == "cancel":
+        console.print("[yellow]Cancelled.[/yellow]")
+        return
+
+    # Run based on selection
+    if selection == "all":
+        run_missing_analyses(skip_confirm=True)
+    else:
+        # Specific decimal
+        run_missing_analyses(decimal_filter=selection, skip_confirm=True)
 
 
 def get_all_transcripts(
@@ -932,14 +1080,33 @@ def main():
             formatter_class=argparse.RawDescriptionHelpFormatter,
             epilog="""
 Examples:
-  kb missing              # Show summary table
-  kb missing --detailed   # Show per-transcript breakdown
+  kb missing                    # Show summary table
+  kb missing --detailed         # Show per-transcript breakdown
+  kb missing --run              # Run all missing with confirmation
+  kb missing --run --decimal X  # Run only for specific decimal
+  kb missing --run --yes        # Run without prompting (automation)
             """
         )
         parser.add_argument("--detailed", action="store_true",
                             help="Show per-transcript breakdown under each decimal")
+        parser.add_argument("--run", action="store_true",
+                            help="Run missing analyses in batch mode")
+        parser.add_argument("--decimal", "-d",
+                            help="Filter to specific decimal category")
+        parser.add_argument("--yes", "-y", action="store_true",
+                            help="Skip confirmation prompt (for automation)")
+        parser.add_argument("--model", "-m", default=DEFAULT_MODEL,
+                            help=f"Gemini model (default: {DEFAULT_MODEL})")
         args = parser.parse_args(sys.argv[1:])
-        show_missing_analyses(detailed=args.detailed)
+
+        if args.run:
+            run_missing_analyses(
+                decimal_filter=args.decimal,
+                model=args.model,
+                skip_confirm=args.yes
+            )
+        else:
+            show_missing_analyses(detailed=args.detailed, decimal_filter=args.decimal)
         return
 
     parser = argparse.ArgumentParser(
