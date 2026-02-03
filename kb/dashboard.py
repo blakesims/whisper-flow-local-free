@@ -424,13 +424,10 @@ def generate_html() -> str:
     <div class="section">
         <div class="section-header">
             <span class="section-title">Workflow Overview</span>
-            <span class="section-badge">hover to explore connections</span>
+            <span class="section-badge">hover to highlight paths</span>
         </div>
         <div class="section-content">
-            <div id="workflow-graph" style="height: 400px; border: 1px solid var(--border); border-radius: 6px;"></div>
-            <div id="hover-info" style="margin-top: 1rem; padding: 0.75rem; background: var(--bg-secondary); border-radius: 6px; min-height: 60px;">
-                <span style="color: var(--text-muted);">Hover over a node to see its connections</span>
-            </div>
+            <div id="workflow-graph" style="height: calc(90vh - 120px); min-height: 600px; border: 1px solid var(--border); border-radius: 6px;"></div>
         </div>
     </div>
 
@@ -708,7 +705,6 @@ def generate_graph_data(presets: dict, decimals: dict, analyses: list) -> str:
             'label': source,
             'group': 'source',
             'level': 0,
-            'title': f'Source: {source}',
             'color': {'background': colors['source'], 'border': colors['source']},
         })
 
@@ -724,7 +720,6 @@ def generate_graph_data(presets: dict, decimals: dict, analyses: list) -> str:
             'label': label,
             'group': 'preset',
             'level': 1,
-            'title': f"Preset: {preset.get('label', key)}\\nDecimal: {preset.get('decimal', '')}\\nTemplate: {preset.get('title_template', '')}",
             'color': {'background': colors['preset'], 'border': colors['preset']},
         })
 
@@ -747,7 +742,6 @@ def generate_graph_data(presets: dict, decimals: dict, analyses: list) -> str:
             'label': code,
             'group': 'decimal',
             'level': 2,
-            'title': f"Category: {code}\\n{info.get('name', '')}\\n{info.get('description', '')}",
             'color': {'background': colors['decimal'], 'border': colors['decimal']},
         })
 
@@ -772,7 +766,6 @@ def generate_graph_data(presets: dict, decimals: dict, analyses: list) -> str:
             'label': analysis['name'],
             'group': 'analysis',
             'level': 3,
-            'title': f"Analysis: {analysis['name']}\\n{analysis.get('description', '')}",
             'color': {'background': colors['analysis'], 'border': colors['analysis']},
         })
 
@@ -801,20 +794,24 @@ def generate_graph_data(presets: dict, decimals: dict, analyses: list) -> str:
                 hierarchical: {{
                     direction: 'LR',
                     sortMethod: 'directed',
-                    levelSeparation: 200,
-                    nodeSpacing: 80,
-                    treeSpacing: 100,
+                    levelSeparation: 250,
+                    nodeSpacing: 100,
+                    treeSpacing: 150,
+                    blockShifting: true,
+                    edgeMinimization: true,
+                    parentCentralization: true,
                 }}
             }},
             nodes: {{
                 shape: 'box',
                 borderWidth: 2,
                 font: {{
-                    color: '#c0caf5',
+                    color: '#1a1b26',
                     face: 'SF Mono, Fira Code, Consolas, monospace',
-                    size: 12,
+                    size: 14,
+                    bold: true,
                 }},
-                margin: 10,
+                margin: 12,
                 shadow: true,
             }},
             edges: {{
@@ -827,75 +824,93 @@ def generate_graph_data(presets: dict, decimals: dict, analyses: list) -> str:
             }},
             interaction: {{
                 hover: true,
-                tooltipDelay: 100,
+                tooltipDelay: 0,
             }},
             physics: false,
         }};
 
         const network = new vis.Network(container, data, options);
 
-        // Hover info panel
-        const hoverInfo = document.getElementById('hover-info');
+        // Recursive function to find ALL connected nodes (multi-level)
+        function findAllConnected(startNodeId, direction) {{
+            const visited = new Set();
+            const connectedEdgeIds = new Set();
+            const queue = [startNodeId];
+
+            while (queue.length > 0) {{
+                const currentId = queue.shift();
+                if (visited.has(currentId)) continue;
+                visited.add(currentId);
+
+                const nodeEdges = edges.get({{
+                    filter: e => {{
+                        if (direction === 'forward') return e.from === currentId;
+                        if (direction === 'backward') return e.to === currentId;
+                        return e.from === currentId || e.to === currentId;
+                    }}
+                }});
+
+                nodeEdges.forEach(e => {{
+                    connectedEdgeIds.add(e.id);
+                    const nextId = e.from === currentId ? e.to : e.from;
+                    if (!visited.has(nextId)) {{
+                        queue.push(nextId);
+                    }}
+                }});
+            }}
+
+            return {{ nodeIds: visited, edgeIds: connectedEdgeIds }};
+        }}
 
         network.on('hoverNode', function(params) {{
             const nodeId = params.node;
             const node = nodes.get(nodeId);
 
-            // Find connected nodes
-            const connectedEdges = edges.get({{
-                filter: e => e.from === nodeId || e.to === nodeId
-            }});
+            // Find ALL connected nodes - both forward and backward through the graph
+            const forwardResult = findAllConnected(nodeId, 'forward');
+            const backwardResult = findAllConnected(nodeId, 'backward');
 
-            const connectedNodeIds = new Set();
-            connectedEdges.forEach(e => {{
-                connectedNodeIds.add(e.from);
-                connectedNodeIds.add(e.to);
-            }});
+            // Combine results
+            const allNodeIds = new Set([...forwardResult.nodeIds, ...backwardResult.nodeIds]);
+            const allEdgeIds = new Set([...forwardResult.edgeIds, ...backwardResult.edgeIds]);
 
-            const connectedNodes = nodes.get(Array.from(connectedNodeIds));
-
-            // Group by level
-            const byLevel = {{}};
-            connectedNodes.forEach(n => {{
-                const level = n.level;
-                if (!byLevel[level]) byLevel[level] = [];
-                byLevel[level].push(n.label);
-            }});
-
-            const levelNames = ['Sources', 'Presets', 'Categories', 'Analyses'];
-            let html = `<strong style="color: ${{node.color.background}}">${{node.label}}</strong><br>`;
-            html += '<span style="color: var(--text-secondary); font-size: 0.85rem;">Connected: ';
-
-            const parts = [];
-            for (let i = 0; i < 4; i++) {{
-                if (byLevel[i] && byLevel[i].length > 0) {{
-                    const filtered = byLevel[i].filter(l => l !== node.label);
-                    if (filtered.length > 0) {{
-                        parts.push(`${{levelNames[i]}}: ${{filtered.join(', ')}}`);
-                    }}
-                }}
-            }}
-            html += parts.join(' → ') || 'none';
-            html += '</span>';
-
-            hoverInfo.innerHTML = html;
-
-            // Highlight connected edges
+            // Highlight ALL connected edges with cascading colors
             const allEdges = edges.get();
             allEdges.forEach(e => {{
-                if (e.from === nodeId || e.to === nodeId) {{
-                    edges.update({{id: e.id, width: 4, color: {{color: node.color.background}}}});
+                if (allEdgeIds.has(e.id)) {{
+                    // Color based on source node level
+                    const fromNode = nodes.get(e.from);
+                    const levelColors = ['#9ece6a', '#7aa2f7', '#e0af68', '#bb9af7'];
+                    const edgeColor = levelColors[fromNode.level] || node.color.background;
+                    edges.update({{id: e.id, width: 4, color: {{color: edgeColor}}}});
+                }} else {{
+                    // Dim non-connected edges
+                    edges.update({{id: e.id, width: 1, color: {{color: '#24283b'}}}});
+                }}
+            }});
+
+            // Also dim non-connected nodes
+            const allNodes = nodes.get();
+            allNodes.forEach(n => {{
+                if (!allNodeIds.has(n.id)) {{
+                    nodes.update({{id: n.id, opacity: 0.3}});
+                }} else {{
+                    nodes.update({{id: n.id, opacity: 1}});
                 }}
             }});
         }});
 
         network.on('blurNode', function() {{
-            hoverInfo.innerHTML = '<span style="color: var(--text-muted);">Hover over a node to see its connections</span>';
-
             // Reset edge styles
             const allEdges = edges.get();
             allEdges.forEach(e => {{
                 edges.update({{id: e.id, width: 2, color: {{color: '#3b4261'}}}});
+            }});
+
+            // Reset node opacity
+            const allNodes = nodes.get();
+            allNodes.forEach(n => {{
+                nodes.update({{id: n.id, opacity: 1}});
             }});
         }});
     '''
