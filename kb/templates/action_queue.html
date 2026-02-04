@@ -690,6 +690,13 @@
         let selectedIndex = 0;
         let selectedItem = null;
 
+        // XSS protection helper
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
         // Action type icons
         const ACTION_ICONS = {
             'skool_post': '📝',
@@ -796,23 +803,23 @@
                 <div class="action-item-header">
                     <div class="action-type">
                         <span class="action-icon">${icon}</span>
-                        <span class="action-label">${formatActionType(item.type)}</span>
+                        <span class="action-label">${escapeHtml(formatActionType(item.type))}</span>
                     </div>
-                    <span class="action-destination">→ ${item.destination}</span>
+                    <span class="action-destination">&rarr; ${escapeHtml(item.destination)}</span>
                 </div>
                 <div class="action-source">
-                    from <span class="action-source-title">"${item.source_title}"</span>
+                    from <span class="action-source-title">"${escapeHtml(item.source_title)}"</span>
                 </div>
                 <div class="action-meta">
                     <span class="meta-item">
-                        <span style="color: var(--mauve)">${item.source_decimal}</span>
+                        <span style="color: var(--mauve)">${escapeHtml(item.source_decimal)}</span>
                     </span>
                     <span class="meta-item">
-                        <span style="color: var(--yellow)">${item.relative_time}</span>
+                        <span style="color: var(--yellow)">${escapeHtml(item.relative_time)}</span>
                     </span>
                     ${item.word_count > 0 ? `<span class="meta-item"><span>~${item.word_count} words</span></span>` : ''}
                 </div>
-                <div class="action-preview">${preview}...</div>
+                <div class="action-preview">${escapeHtml(preview)}...</div>
             `;
 
             div.addEventListener('click', () => selectItem(index));
@@ -830,12 +837,12 @@
                 <div class="action-item-header">
                     <div class="action-type">
                         <span class="action-icon" style="opacity: 0.5">${icon}</span>
-                        <span class="action-label">${formatActionType(item.type)}</span>
+                        <span class="action-label">${escapeHtml(formatActionType(item.type))}</span>
                     </div>
-                    <span style="color: var(--green); font-size: 11px;">✓ ${item.status}</span>
+                    <span style="color: var(--green); font-size: 11px;">&check; ${escapeHtml(item.status)}</span>
                 </div>
                 <div class="action-source">
-                    from <span class="action-source-title">"${item.source_title}"</span>
+                    from <span class="action-source-title">"${escapeHtml(item.source_title)}"</span>
                 </div>
             `;
 
@@ -877,18 +884,18 @@
 
             previewPane.innerHTML = `
                 <div class="preview-content">
-                    <div class="preview-title">${formatActionType(item.type)}</div>
-                    <div class="preview-subtitle">${item.source_title} → ${item.destination}</div>
+                    <div class="preview-title">${escapeHtml(formatActionType(item.type))}</div>
+                    <div class="preview-subtitle">${escapeHtml(item.source_title)} &rarr; ${escapeHtml(item.destination)}</div>
 
                     <div class="preview-section">
                         <div class="preview-meta-grid">
                             <div class="preview-meta-item">
                                 <div class="preview-meta-label">Category</div>
-                                <div class="preview-meta-value decimal">${item.source_decimal}</div>
+                                <div class="preview-meta-value decimal">${escapeHtml(item.source_decimal)}</div>
                             </div>
                             <div class="preview-meta-item">
                                 <div class="preview-meta-label">Generated</div>
-                                <div class="preview-meta-value date">${item.relative_time}</div>
+                                <div class="preview-meta-value date">${escapeHtml(item.relative_time)}</div>
                             </div>
                             <div class="preview-meta-item">
                                 <div class="preview-meta-label">Word Count</div>
@@ -896,19 +903,19 @@
                             </div>
                             <div class="preview-meta-item">
                                 <div class="preview-meta-label">Destination</div>
-                                <div class="preview-meta-value">${item.destination}</div>
+                                <div class="preview-meta-value">${escapeHtml(item.destination)}</div>
                             </div>
                         </div>
                     </div>
 
                     <div class="preview-section">
                         <div class="preview-section-title">Content Preview</div>
-                        <div class="preview-text">${item.content}</div>
+                        <div class="preview-text">${escapeHtml(item.content)}</div>
                     </div>
 
                     <div class="preview-actions">
                         <button class="btn btn-primary" onclick="copyToClipboard()">
-                            <span>📋 Copy</span>
+                            <span>&#128203; Copy</span>
                             <span class="key">c</span>
                         </button>
                         <button class="btn btn-secondary" onclick="approveItem()" style="background: var(--sapphire); color: var(--crust);">

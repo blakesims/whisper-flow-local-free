@@ -610,7 +610,7 @@
             <div class="shortcut-bar">
                 <span class="shortcut"><span class="key-hint">j/k</span> navigate</span>
                 <span class="shortcut"><span class="key-hint">c</span> copy</span>
-                <span class="shortcut"><span class="key-hint">p</span> mark posted</span>
+                <span class="shortcut"><span class="key-hint">m</span> mark posted</span>
                 <span class="shortcut"><span class="key-hint">q</span> queue</span>
             </div>
         </div>
@@ -660,6 +660,13 @@
         let queueData = { items: [], runway_counts: {}, total: 0 };
         let selectedIndex = 0;
         let selectedItem = null;
+
+        // XSS protection helper
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
 
         // Action type icons
         const ACTION_ICONS = {
@@ -771,22 +778,22 @@
                 <div class="action-item-header">
                     <div class="action-type">
                         <span class="action-icon">${icon}</span>
-                        <span class="action-label">${formatActionType(item.type)}</span>
+                        <span class="action-label">${escapeHtml(formatActionType(item.type))}</span>
                     </div>
-                    <span class="platform-badge ${platformClass}">${item.destination}</span>
+                    <span class="platform-badge ${platformClass}">${escapeHtml(item.destination)}</span>
                 </div>
                 <div class="action-source">
-                    from <span class="action-source-title">"${item.source_title}"</span>
+                    from <span class="action-source-title">"${escapeHtml(item.source_title)}"</span>
                 </div>
                 <div class="action-meta">
                     <span class="meta-item">
-                        <span style="color: var(--mauve)">${item.source_decimal}</span>
+                        <span style="color: var(--mauve)">${escapeHtml(item.source_decimal)}</span>
                     </span>
                     <span class="meta-item">
                         <span>~${item.word_count} words</span>
                     </span>
                 </div>
-                <div class="action-preview">${preview}...</div>
+                <div class="action-preview">${escapeHtml(preview)}...</div>
             `;
 
             div.addEventListener('click', () => selectItem(index));
@@ -829,17 +836,17 @@
 
             previewPane.innerHTML = `
                 <div class="preview-content">
-                    <div class="preview-title">${formatActionType(item.type)}</div>
+                    <div class="preview-title">${escapeHtml(formatActionType(item.type))}</div>
                     <div class="preview-subtitle">
-                        ${item.source_title}
-                        <span class="platform-badge ${platformClass}" style="margin-left: 8px;">${item.destination}</span>
+                        ${escapeHtml(item.source_title)}
+                        <span class="platform-badge ${platformClass}" style="margin-left: 8px;">${escapeHtml(item.destination)}</span>
                     </div>
 
                     <div class="preview-section">
                         <div class="preview-meta-grid">
                             <div class="preview-meta-item">
                                 <div class="preview-meta-label">Category</div>
-                                <div class="preview-meta-value decimal">${item.source_decimal}</div>
+                                <div class="preview-meta-value decimal">${escapeHtml(item.source_decimal)}</div>
                             </div>
                             <div class="preview-meta-item">
                                 <div class="preview-meta-label">Word Count</div>
@@ -850,13 +857,13 @@
 
                     <div class="preview-section">
                         <div class="preview-section-title">Content</div>
-                        <div class="preview-text">${item.content}</div>
+                        <div class="preview-text">${escapeHtml(item.content)}</div>
                     </div>
 
                     <div class="preview-actions">
                         <button class="btn btn-primary" onclick="copyAndMarkPosted()">
                             <span>Copy & Mark Posted</span>
-                            <span class="key">p</span>
+                            <span class="key">m</span>
                         </button>
                         <button class="btn btn-secondary" onclick="copyOnly()">
                             <span>Copy Only</span>
@@ -965,13 +972,12 @@
                 window.location.href = '/videos';
                 return;
             }
-            // Note: 'p' is used for mark posted when item selected, prompts when not
+            if (e.key === 'p') {
+                window.location.href = '/prompts';
+                return;
+            }
 
             if (queueData.items.length === 0) {
-                // Allow prompts shortcut when no items
-                if (e.key === 'p') {
-                    window.location.href = '/prompts';
-                }
                 return;
             }
 
@@ -984,7 +990,7 @@
             } else if (e.key === 'c') {
                 // Copy only
                 copyOnly();
-            } else if (e.key === 'p') {
+            } else if (e.key === 'm') {
                 // Mark posted (copy + mark)
                 copyAndMarkPosted();
             }

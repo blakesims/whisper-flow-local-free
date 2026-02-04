@@ -517,6 +517,7 @@ def approve_action(action_id: str):
 
     Sets status to 'approved' and records approved_at timestamp.
     Also copies content to clipboard (auto-copy on approve).
+    Requires item to be in 'pending' status (or no status yet).
     """
     if not validate_action_id(action_id):
         return jsonify({"error": "Invalid action ID format"}), 400
@@ -534,6 +535,11 @@ def approve_action(action_id: str):
 
     # Update state
     state = load_action_state()
+
+    # Validate state transition: must be pending (or not set) before approving
+    current_status = state["actions"].get(action_id, {}).get("status", "pending")
+    if current_status != "pending":
+        return jsonify({"error": f"Cannot approve item with status '{current_status}'. Item must be pending."}), 400
 
     if action_id not in state["actions"]:
         state["actions"][action_id] = {
@@ -562,21 +568,18 @@ def mark_posted(action_id: str):
     """Mark action as posted.
 
     Sets status to 'posted' and records posted_at timestamp.
+    Requires item to be in 'approved' status first.
     """
     if not validate_action_id(action_id):
         return jsonify({"error": "Invalid action ID format"}), 400
 
     state = load_action_state()
 
-    if action_id not in state["actions"]:
-        state["actions"][action_id] = {
-            "status": "posted",
-            "copied_count": 0,
-            "created_at": datetime.now().isoformat(),
-        }
-    else:
-        state["actions"][action_id]["status"] = "posted"
+    # Validate state transition: must be approved before posting
+    if action_id not in state["actions"] or state["actions"][action_id].get("status") != "approved":
+        return jsonify({"error": "Item must be approved before marking as posted"}), 400
 
+    state["actions"][action_id]["status"] = "posted"
     state["actions"][action_id]["posted_at"] = datetime.now().isoformat()
     save_action_state(state)
 
