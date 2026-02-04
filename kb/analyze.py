@@ -669,6 +669,63 @@ def substitute_template_vars(prompt: str, context: dict) -> str:
     return re.sub(r'\{\{(\w+)\}\}', replacer, prompt)
 
 
+def render_conditional_template(prompt: str, context: dict) -> str:
+    """
+    Render Handlebars-style conditional blocks in a prompt template.
+
+    Supports:
+    - {{#if var}}content{{/if}} - renders content when var exists and is truthy
+    - {{#if var}}content{{else}}fallback{{/if}} - renders fallback when var missing/falsy
+
+    After processing conditionals, also substitutes {{variable}} placeholders.
+
+    Args:
+        prompt: The prompt template with conditional blocks
+        context: Dict mapping variable names to their values
+
+    Returns:
+        The prompt with conditionals resolved and variables substituted
+
+    Example:
+        >>> render_conditional_template(
+        ...     "{{#if key_points}}{{key_points}}{{else}}{{transcript}}{{/if}}",
+        ...     {"transcript": "Hello world"}
+        ... )
+        'Hello world'
+    """
+    import re
+
+    # Pattern for {{#if var}}...{{/if}} with optional {{else}}
+    # Uses non-greedy matching to handle nested content correctly
+    if_pattern = re.compile(
+        r'\{\{#if\s+(\w+)\}\}'   # {{#if varname}}
+        r'(.*?)'                  # content (non-greedy)
+        r'(?:\{\{else\}\}(.*?))?' # optional {{else}}fallback
+        r'\{\{/if\}\}',           # {{/if}}
+        re.DOTALL                 # Allow . to match newlines
+    )
+
+    def if_replacer(match):
+        var_name = match.group(1)
+        if_content = match.group(2)
+        else_content = match.group(3) or ""
+
+        # Check if variable exists and is truthy
+        value = context.get(var_name)
+        if value:
+            return if_content
+        else:
+            return else_content
+
+    # Process all conditional blocks
+    result = if_pattern.sub(if_replacer, prompt)
+
+    # Now substitute any remaining {{variable}} placeholders
+    result = substitute_template_vars(result, context)
+
+    return result
+
+
 def analyze_transcript(
     transcript_text: str,
     analysis_type: str,
@@ -711,10 +768,10 @@ def analyze_transcript(
     # Load analysis type config
     config = load_analysis_type(analysis_type)
 
-    # Get the prompt and substitute any prerequisite context
+    # Get the prompt and render conditionals + substitute variables
     prompt_template = config['prompt']
     if prerequisite_context:
-        prompt_template = substitute_template_vars(prompt_template, prerequisite_context)
+        prompt_template = render_conditional_template(prompt_template, prerequisite_context)
 
     # Build the prompt with schema instruction
     title_context = f"Title: {title}\n\n" if title else ""
@@ -779,6 +836,50 @@ Output ONLY the JSON, no markdown code blocks or explanation."""
     raise RuntimeError("Max retries exceeded")
 
 
+def resolve_optional_inputs(
+    analysis_def: dict,
+    existing_analysis: dict,
+    transcript_text: str
+) -> dict:
+    """
+    Resolve optional inputs for an analysis type.
+
+    Optional inputs are included in the context if they exist in the transcript's
+    existing analysis, but don't trigger auto-run if missing. This allows analysis
+    types to gracefully handle varying input availability.
+
+    Always includes 'transcript' as a fallback for when optional inputs aren't available.
+
+    Args:
+        analysis_def: The analysis type definition (with optional_inputs field)
+        existing_analysis: Dict of existing analysis results for this transcript
+        transcript_text: The raw transcript text (always included as fallback)
+
+    Returns:
+        Dict of {input_name: formatted_value} for available optional inputs.
+        Always includes 'transcript' key.
+
+    Example:
+        analysis_def = {"optional_inputs": ["key_points", "summary"]}
+        existing = {"key_points": {"key_points": [...]}}
+        result = resolve_optional_inputs(analysis_def, existing, "raw text...")
+        # Returns {"transcript": "raw text...", "key_points": "formatted..."}
+        # (summary not included because it wasn't in existing)
+    """
+    context = {
+        "transcript": transcript_text
+    }
+
+    optional_inputs = analysis_def.get("optional_inputs", [])
+
+    for opt_input in optional_inputs:
+        if opt_input in existing_analysis:
+            # Format the optional input for injection into the prompt
+            context[opt_input] = format_prerequisite_output(existing_analysis[opt_input])
+
+    return context
+
+
 def run_analysis_with_deps(
     transcript_data: dict,
     analysis_type: str,
@@ -787,6 +888,9 @@ def run_analysis_with_deps(
 ) -> tuple[dict, list[str]]:
     """
     Run an analysis type, automatically running any required prerequisites first.
+
+    Handles both required dependencies (auto-run if missing) and optional inputs
+    (included if available, skipped if not).
 
     Args:
         transcript_data: Full transcript data dict (with 'transcript', 'title', 'analysis')
@@ -805,7 +909,7 @@ def run_analysis_with_deps(
     required = analysis_def.get("requires", [])
     prerequisites_run = []
 
-    # Check and run any missing prerequisites
+    # Check and run any missing prerequisites (required deps)
     for req in required:
         if req not in existing_analysis:
             console.print(f"[dim]Running prerequisite: {req}[/dim]")
@@ -827,19 +931,22 @@ def run_analysis_with_deps(
                 # Prerequisite failed - can't continue
                 raise ValueError(f"Prerequisite '{req}' failed: {req_result.get('error')}")
 
-    # Build prerequisite context for compound prompts
-    prerequisite_context = {}
+    # Build context for the prompt, starting with optional inputs (includes transcript)
+    transcript_text = transcript_data.get("transcript", "")
+    prompt_context = resolve_optional_inputs(analysis_def, existing_analysis, transcript_text)
+
+    # Add required prerequisites to context (these are guaranteed to exist now)
     for req in required:
         if req in existing_analysis:
-            prerequisite_context[req] = format_prerequisite_output(existing_analysis[req])
+            prompt_context[req] = format_prerequisite_output(existing_analysis[req])
 
     # Run the actual analysis
     result = analyze_transcript(
-        transcript_text=transcript_data.get("transcript", ""),
+        transcript_text=transcript_text,
         analysis_type=analysis_type,
         title=transcript_data.get("title", ""),
         model=model,
-        prerequisite_context=prerequisite_context if prerequisite_context else None
+        prerequisite_context=prompt_context if prompt_context else None
     )
 
     return result, prerequisites_run
