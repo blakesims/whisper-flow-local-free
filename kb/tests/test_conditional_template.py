@@ -132,6 +132,29 @@ Full transcript:
         result = render_conditional_template(prompt, context)
         assert result == "Name: Test, Value: 123"
 
+    def test_nested_conditionals_not_supported(self):
+        """Document that nested conditionals are NOT supported.
+
+        The regex-based approach matches the first {{/if}} it finds,
+        which breaks nested structures. Use sequential conditionals instead.
+
+        Example of what NOT to do:
+            {{#if a}}outer {{#if b}}inner{{/if}} end{{/if}}
+
+        Instead, use sequential blocks:
+            {{#if a}}outer {{/if}}{{#if b}}inner{{/if}}{{#if a}} end{{/if}}
+        """
+        # This demonstrates the limitation - nested conditionals produce unexpected results
+        prompt = "{{#if a}}outer {{#if b}}inner{{/if}} end{{/if}}"
+        context = {"a": "yes", "b": "yes"}
+        result = render_conditional_template(prompt, context)
+
+        # The result is NOT "outer inner end" as one might expect
+        # Instead, the first {{/if}} closes the outer block prematurely
+        assert result != "outer inner end"
+        # The actual result has leftover markup
+        assert "{{" in result or "}}" in result or result == "outer inner end"
+
     def test_real_world_linkedin_example(self):
         """Test case based on actual linkedin_post usage."""
         prompt = """INPUT CONTENT:

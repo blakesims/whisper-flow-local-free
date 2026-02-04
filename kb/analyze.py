@@ -679,6 +679,10 @@ def render_conditional_template(prompt: str, context: dict) -> str:
 
     After processing conditionals, also substitutes {{variable}} placeholders.
 
+    Note: Nested {{#if}} blocks are NOT supported. The regex matches the first
+    {{/if}} it finds, which breaks nesting. For complex logic, use multiple
+    sequential conditionals instead of nesting them.
+
     Args:
         prompt: The prompt template with conditional blocks
         context: Dict mapping variable names to their values
@@ -696,7 +700,8 @@ def render_conditional_template(prompt: str, context: dict) -> str:
     import re
 
     # Pattern for {{#if var}}...{{/if}} with optional {{else}}
-    # Uses non-greedy matching to handle nested content correctly
+    # Note: Non-greedy matching means nested {{#if}} blocks are NOT supported.
+    # The regex matches the first {{/if}} it finds, breaking nested structures.
     if_pattern = re.compile(
         r'\{\{#if\s+(\w+)\}\}'   # {{#if varname}}
         r'(.*?)'                  # content (non-greedy)

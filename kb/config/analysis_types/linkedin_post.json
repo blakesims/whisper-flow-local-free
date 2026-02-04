@@ -1,0 +1,25 @@
+{
+  "name": "linkedin_post",
+  "description": "Generate a LinkedIn post from transcript content",
+  "requires": [],
+  "optional_inputs": [],
+  "prompt": "You are a LinkedIn content strategist.\n\nINPUT CONTENT:\n\n{{transcript}}\n\nWrite a post that shares the most actionable insight from this content.\n\nRequirements:\n- Start with a hook that grabs attention\n- Include 1-2 specific, actionable takeaways\n- End with a question or call to action\n- Keep under 1300 characters (optimal LinkedIn length)\n- Use line breaks for readability\n- No hashtags",
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "post": {
+        "type": "string",
+        "description": "The LinkedIn post content"
+      },
+      "hook": {
+        "type": "string",
+        "description": "The opening hook line"
+      },
+      "cta": {
+        "type": "string",
+        "description": "The closing call to action"
+      }
+    },
+    "required": ["post"]
+  }
+}
