@@ -310,6 +310,12 @@ def index():
     return render_template('action_queue.html')
 
 
+@app.route('/posting-queue')
+def posting_queue():
+    """Posting queue HTML - shows approved items ready to post."""
+    return render_template('posting_queue.html')
+
+
 @app.route('/api/queue')
 def get_queue():
     """List pending/completed actions."""
@@ -328,8 +334,11 @@ def get_queue():
 
         if item_state["status"] == "pending":
             pending.append(item)
-        elif item_state["status"] in ("done", "skipped"):
-            item["completed_at"] = item_state["completed_at"]
+        elif item_state["status"] == "approved":
+            # Approved items go to posting queue, not main queue
+            pass
+        elif item_state["status"] in ("done", "skipped", "posted"):
+            item["completed_at"] = item_state.get("completed_at") or item_state.get("posted_at", "")
 
             # Only show items completed today
             if item["completed_at"]:
@@ -457,6 +466,118 @@ def skip_action(action_id: str):
         state["actions"][action_id]["status"] = "skipped"
 
     state["actions"][action_id]["completed_at"] = datetime.now().isoformat()
+    save_action_state(state)
+
+    return jsonify({"success": True})
+
+
+@app.route('/api/posting-queue')
+def get_posting_queue():
+    """Get approved items for posting queue.
+
+    Returns only approved items filtered to actionable types (linkedin_post, skool_post).
+    Includes runway count by platform.
+    """
+    state = load_action_state()
+    items = scan_actionable_items()
+
+    # Filter to approved items only
+    approved_items = []
+    runway_counts = {}
+
+    for item in items:
+        item_state = state["actions"].get(item["id"], {})
+        status = item_state.get("status", "pending")
+
+        if status == "approved":
+            # Add state info to item
+            item["status"] = "approved"
+            item["approved_at"] = item_state.get("approved_at", "")
+            item["relative_time"] = format_relative_time(item["analyzed_at"])
+
+            approved_items.append(item)
+
+            # Count by destination/platform
+            dest = item["destination"]
+            runway_counts[dest] = runway_counts.get(dest, 0) + 1
+
+    # Sort by approved_at (newest first)
+    approved_items.sort(key=lambda x: x.get("approved_at", ""), reverse=True)
+
+    return jsonify({
+        "items": approved_items,
+        "runway_counts": runway_counts,
+        "total": len(approved_items),
+    })
+
+
+@app.route('/api/action/<action_id>/approve', methods=['POST'])
+def approve_action(action_id: str):
+    """Mark action as approved for posting queue.
+
+    Sets status to 'approved' and records approved_at timestamp.
+    Also copies content to clipboard (auto-copy on approve).
+    """
+    if not validate_action_id(action_id):
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    # Get item content for clipboard copy
+    items = scan_actionable_items()
+    item_content = None
+    for item in items:
+        if item["id"] == action_id:
+            item_content = item["content"]
+            break
+
+    if item_content is None:
+        return jsonify({"error": "Action not found"}), 404
+
+    # Update state
+    state = load_action_state()
+
+    if action_id not in state["actions"]:
+        state["actions"][action_id] = {
+            "status": "approved",
+            "copied_count": 0,
+            "created_at": datetime.now().isoformat(),
+        }
+    else:
+        state["actions"][action_id]["status"] = "approved"
+
+    state["actions"][action_id]["approved_at"] = datetime.now().isoformat()
+    save_action_state(state)
+
+    # Auto-copy to clipboard
+    try:
+        pyperclip.copy(item_content)
+        copied = True
+    except Exception:
+        copied = False
+
+    return jsonify({"success": True, "copied": copied})
+
+
+@app.route('/api/action/<action_id>/posted', methods=['POST'])
+def mark_posted(action_id: str):
+    """Mark action as posted.
+
+    Sets status to 'posted' and records posted_at timestamp.
+    """
+    if not validate_action_id(action_id):
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    state = load_action_state()
+
+    if action_id not in state["actions"]:
+        state["actions"][action_id] = {
+            "status": "posted",
+            "copied_count": 0,
+            "created_at": datetime.now().isoformat(),
+        }
+    else:
+        state["actions"][action_id]["status"] = "posted"
+
+    state["actions"][action_id]["posted_at"] = datetime.now().isoformat()
     save_action_state(state)
 
     return jsonify({"success": True})

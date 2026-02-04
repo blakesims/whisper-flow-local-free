@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KB Serve - Action Queue Dashboard</title>
+    <title>KB Serve - Posting Queue (Runway)</title>
     <style>
         /* Catppuccin Mocha palette */
         :root {
@@ -90,6 +90,63 @@
             padding: 0;
         }
 
+        /* Runway counter */
+        .runway-counter {
+            background: var(--mantle);
+            padding: 16px;
+            border-bottom: 1px solid var(--surface0);
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .runway-stat {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: var(--surface0);
+            border-radius: 6px;
+        }
+
+        .runway-stat-count {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--green);
+        }
+
+        .runway-stat-label {
+            font-size: 11px;
+            color: var(--subtext0);
+        }
+
+        .runway-stat.linkedin .runway-stat-count {
+            color: var(--blue);
+        }
+
+        .runway-stat.skool .runway-stat-count {
+            color: var(--green);
+        }
+
+        /* Platform badges */
+        .platform-badge {
+            font-size: 10px;
+            font-weight: 600;
+            padding: 3px 8px;
+            border-radius: 4px;
+            text-transform: uppercase;
+        }
+
+        .platform-badge.linkedin {
+            background: var(--blue);
+            color: var(--crust);
+        }
+
+        .platform-badge.skool {
+            background: var(--green);
+            color: var(--crust);
+        }
+
         /* Section headers */
         .section-header {
             background: var(--mantle);
@@ -113,16 +170,12 @@
         }
 
         .section-count {
-            background: var(--green);
+            background: var(--sapphire);
             color: var(--crust);
             padding: 2px 8px;
             border-radius: 10px;
             font-size: 11px;
             font-weight: 600;
-        }
-
-        .section-count.processing {
-            background: var(--yellow);
         }
 
         .section-count.empty {
@@ -144,7 +197,7 @@
 
         .action-item.selected {
             background: var(--surface0);
-            border-left: 3px solid var(--green);
+            border-left: 3px solid var(--sapphire);
         }
 
         .action-item-header {
@@ -363,7 +416,7 @@
         /* Status bar */
         .status-bar {
             grid-column: 1 / -1;
-            background: var(--green);
+            background: var(--sapphire);
             color: var(--crust);
             padding: 4px 16px;
             font-size: 11px;
@@ -388,12 +441,6 @@
             padding: 1px 6px;
             border-radius: 3px;
             font-size: 10px;
-        }
-
-        .status-item {
-            display: flex;
-            align-items: center;
-            gap: 6px;
         }
 
         /* Toast notification */
@@ -436,64 +483,6 @@
             font-size: 16px;
         }
 
-        /* Flag modal (telescope-style) */
-        .flag-modal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            z-index: 1001;
-            display: none;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .flag-modal.show {
-            display: flex;
-            animation: flagFadeIn 0.1s ease;
-        }
-
-        @keyframes flagFadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
-
-        .flag-modal-backdrop {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.5);
-        }
-
-        .flag-modal-content {
-            position: relative;
-            background: var(--surface0);
-            border: 2px solid var(--sapphire);
-            border-radius: 8px;
-            padding: 4px;
-            width: 300px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-        }
-
-        .flag-modal-input {
-            width: 100%;
-            background: var(--base);
-            border: none;
-            padding: 12px 16px;
-            color: var(--text);
-            font-family: inherit;
-            font-size: 13px;
-            border-radius: 4px;
-            outline: none;
-        }
-
-        .flag-modal-input::placeholder {
-            color: var(--overlay0);
-        }
-
         /* Empty state */
         .empty-state {
             padding: 60px 20px;
@@ -509,15 +498,6 @@
 
         .empty-state-text {
             font-size: 13px;
-        }
-
-        /* Completed items (dimmed) */
-        .action-item.completed {
-            opacity: 0.5;
-        }
-
-        .action-item.completed .action-label {
-            text-decoration: line-through;
         }
 
         /* Scrollbar styling */
@@ -588,7 +568,7 @@
         }
 
         .mode-btn.active {
-            background: var(--green);
+            background: var(--sapphire);
             color: var(--crust);
         }
 
@@ -603,14 +583,14 @@
 </head>
 <body>
     <div class="tmux-container">
-        <!-- Left Pane: Action Queue -->
+        <!-- Left Pane: Posting Queue -->
         <div class="pane">
             <div class="pane-header">
-                <span><span class="pane-index">0:</span> action-queue</span>
+                <span><span class="pane-index">0:</span> posting-queue</span>
                 <div style="display: flex; align-items: center; gap: 12px;">
                     <div class="mode-toggle">
-                        <button class="mode-btn active"><span class="key-hint">q</span></button>
-                        <a href="/posting-queue" class="mode-btn"><span class="key-hint">r</span></a>
+                        <a href="/" class="mode-btn"><span class="key-hint">q</span></a>
+                        <button class="mode-btn active"><span class="key-hint">r</span></button>
                         <a href="/browse" class="mode-btn"><span class="key-hint">b</span></a>
                         <a href="/videos" class="mode-btn"><span class="key-hint">v</span></a>
                         <a href="/prompts" class="mode-btn"><span class="key-hint">p</span></a>
@@ -618,17 +598,20 @@
                     <span id="connection-status" style="color: var(--green);">connected</span>
                 </div>
             </div>
+
+            <!-- Runway counter -->
+            <div class="runway-counter" id="runway-counter">
+                <!-- Populated by JavaScript -->
+            </div>
+
             <div class="pane-body" id="queue-list">
                 <!-- Populated by JavaScript -->
             </div>
             <div class="shortcut-bar">
                 <span class="shortcut"><span class="key-hint">j/k</span> navigate</span>
                 <span class="shortcut"><span class="key-hint">c</span> copy</span>
-                <span class="shortcut"><span class="key-hint">a</span> approve</span>
-                <span class="shortcut"><span class="key-hint">d</span> done</span>
-                <span class="shortcut"><span class="key-hint">s</span> skip</span>
-                <span class="shortcut"><span class="key-hint">x</span> flag</span>
-                <span class="shortcut"><span class="key-hint">r</span> runway</span>
+                <span class="shortcut"><span class="key-hint">p</span> mark posted</span>
+                <span class="shortcut"><span class="key-hint">q</span> queue</span>
             </div>
         </div>
 
@@ -640,7 +623,7 @@
             </div>
             <div class="pane-body" id="preview-pane">
                 <div class="preview-empty">
-                    <div class="preview-empty-icon">📋</div>
+                    <div class="preview-empty-icon">📤</div>
                     <div>Select an item to preview</div>
                 </div>
             </div>
@@ -653,9 +636,7 @@
         <div class="status-bar">
             <div class="status-section">
                 <span>[kb-serve]</span>
-                <span id="status-pending">0 pending</span>
-                <span id="status-processing">0 processing</span>
-                <span id="status-completed">0 completed today</span>
+                <span id="status-runway">0 in runway</span>
             </div>
             <div class="status-section">
                 <span class="status-item"><span class="status-key">q</span> queue</span>
@@ -670,23 +651,13 @@
 
     <!-- Toast notification -->
     <div class="toast" id="toast">
-        <span class="toast-icon">✓</span>
+        <span class="toast-icon">+</span>
         <span id="toast-message">Copied to clipboard!</span>
-    </div>
-
-    <!-- Flag modal (telescope-style) -->
-    <div class="flag-modal" id="flag-modal">
-        <div class="flag-modal-backdrop" onclick="hideFlagModal()"></div>
-        <div class="flag-modal-content">
-            <input type="text" class="flag-modal-input" id="flag-note-input"
-                   placeholder="Note (optional, Enter to submit)"
-                   autocomplete="off">
-        </div>
     </div>
 
     <script>
         // State
-        let queueData = { pending: [], completed: [], processing: [] };
+        let queueData = { items: [], runway_counts: {}, total: 0 };
         let selectedIndex = 0;
         let selectedItem = null;
 
@@ -697,23 +668,58 @@
             'student_guide': '📚',
         };
 
-        // Fetch queue data
+        // Platform colors for badges
+        const PLATFORM_CLASS = {
+            'LinkedIn': 'linkedin',
+            'Skool': 'skool',
+        };
+
+        // Fetch posting queue data
         async function fetchQueue() {
             try {
-                const response = await fetch('/api/queue');
+                const response = await fetch('/api/posting-queue');
                 queueData = await response.json();
+                renderRunwayCounter();
                 renderQueue();
                 updateStatusBar();
 
                 // Auto-select first item if none selected
-                if (selectedItem === null && queueData.pending.length > 0) {
+                if (selectedItem === null && queueData.items.length > 0) {
                     selectItem(0);
                 }
             } catch (error) {
-                console.error('Failed to fetch queue:', error);
-                document.getElementById('connection-status').innerHTML = '⬤ disconnected';
+                console.error('Failed to fetch posting queue:', error);
+                document.getElementById('connection-status').innerHTML = 'disconnected';
                 document.getElementById('connection-status').style.color = 'var(--red)';
             }
+        }
+
+        // Render runway counter
+        function renderRunwayCounter() {
+            const counter = document.getElementById('runway-counter');
+
+            if (queueData.total === 0) {
+                counter.innerHTML = `
+                    <div class="runway-stat">
+                        <span class="runway-stat-count">0</span>
+                        <span class="runway-stat-label">posts ready</span>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = '';
+            for (const [platform, count] of Object.entries(queueData.runway_counts)) {
+                const platformClass = PLATFORM_CLASS[platform] || '';
+                html += `
+                    <div class="runway-stat ${platformClass}">
+                        <span class="runway-stat-count">${count}</span>
+                        <span class="runway-stat-label">${platform} ready</span>
+                    </div>
+                `;
+            }
+
+            counter.innerHTML = html;
         }
 
         // Render queue list
@@ -721,64 +727,32 @@
             const queueList = document.getElementById('queue-list');
             queueList.innerHTML = '';
 
-            // Pending section
-            if (queueData.pending.length > 0) {
-                const header = document.createElement('div');
-                header.className = 'section-header';
-                header.innerHTML = `
-                    <div class="section-title">
-                        <span>📋 Ready for Action</span>
-                        <span class="section-count">${queueData.pending.length}</span>
-                    </div>
-                `;
-                queueList.appendChild(header);
-
-                queueData.pending.forEach((item, index) => {
-                    const actionItem = createActionItem(item, index);
-                    queueList.appendChild(actionItem);
-                });
-            } else {
+            if (queueData.items.length === 0) {
                 const emptyState = document.createElement('div');
                 emptyState.className = 'empty-state';
                 emptyState.innerHTML = `
-                    <div class="empty-state-icon">✨</div>
-                    <div class="empty-state-text">No pending actions. All clear!</div>
+                    <div class="empty-state-icon">📤</div>
+                    <div class="empty-state-text">No approved posts in runway.<br>Approve items from the action queue.</div>
                 `;
                 queueList.appendChild(emptyState);
+                return;
             }
 
-            // Processing section
-            if (queueData.processing.length > 0) {
-                const header = document.createElement('div');
-                header.className = 'section-header';
-                header.innerHTML = `
-                    <div class="section-title">
-                        <span>⟳ Processing</span>
-                        <span class="section-count processing">${queueData.processing.length}</span>
-                    </div>
-                `;
-                queueList.appendChild(header);
+            // Section header
+            const header = document.createElement('div');
+            header.className = 'section-header';
+            header.innerHTML = `
+                <div class="section-title">
+                    <span>📤 Ready to Post</span>
+                    <span class="section-count">${queueData.total}</span>
+                </div>
+            `;
+            queueList.appendChild(header);
 
-                // TODO: Render processing items in Phase 2
-            }
-
-            // Completed section
-            if (queueData.completed.length > 0) {
-                const header = document.createElement('div');
-                header.className = 'section-header';
-                header.innerHTML = `
-                    <div class="section-title">
-                        <span>✓ Completed Today</span>
-                        <span class="section-count empty">${queueData.completed.length}</span>
-                    </div>
-                `;
-                queueList.appendChild(header);
-
-                queueData.completed.forEach(item => {
-                    const actionItem = createCompletedItem(item);
-                    queueList.appendChild(actionItem);
-                });
-            }
+            queueData.items.forEach((item, index) => {
+                const actionItem = createActionItem(item, index);
+                queueList.appendChild(actionItem);
+            });
         }
 
         // Create action item element
@@ -790,7 +764,8 @@
             }
 
             const icon = ACTION_ICONS[item.type] || '📄';
-            const preview = item.content.substring(0, 200);
+            const preview = item.content.substring(0, 100);
+            const platformClass = PLATFORM_CLASS[item.destination] || '';
 
             div.innerHTML = `
                 <div class="action-item-header">
@@ -798,7 +773,7 @@
                         <span class="action-icon">${icon}</span>
                         <span class="action-label">${formatActionType(item.type)}</span>
                     </div>
-                    <span class="action-destination">→ ${item.destination}</span>
+                    <span class="platform-badge ${platformClass}">${item.destination}</span>
                 </div>
                 <div class="action-source">
                     from <span class="action-source-title">"${item.source_title}"</span>
@@ -808,37 +783,13 @@
                         <span style="color: var(--mauve)">${item.source_decimal}</span>
                     </span>
                     <span class="meta-item">
-                        <span style="color: var(--yellow)">${item.relative_time}</span>
+                        <span>~${item.word_count} words</span>
                     </span>
-                    ${item.word_count > 0 ? `<span class="meta-item"><span>~${item.word_count} words</span></span>` : ''}
                 </div>
                 <div class="action-preview">${preview}...</div>
             `;
 
             div.addEventListener('click', () => selectItem(index));
-            return div;
-        }
-
-        // Create completed item element
-        function createCompletedItem(item) {
-            const div = document.createElement('div');
-            div.className = 'action-item completed';
-
-            const icon = ACTION_ICONS[item.type] || '📄';
-
-            div.innerHTML = `
-                <div class="action-item-header">
-                    <div class="action-type">
-                        <span class="action-icon" style="opacity: 0.5">${icon}</span>
-                        <span class="action-label">${formatActionType(item.type)}</span>
-                    </div>
-                    <span style="color: var(--green); font-size: 11px;">✓ ${item.status}</span>
-                </div>
-                <div class="action-source">
-                    from <span class="action-source-title">"${item.source_title}"</span>
-                </div>
-            `;
-
             return div;
         }
 
@@ -851,13 +802,13 @@
 
         // Select an item
         function selectItem(index) {
-            if (index < 0 || index >= queueData.pending.length) return;
+            if (index < 0 || index >= queueData.items.length) return;
 
             selectedIndex = index;
-            selectedItem = queueData.pending[index];
+            selectedItem = queueData.items[index];
 
             // Update UI
-            document.querySelectorAll('.action-item:not(.completed)').forEach((el, i) => {
+            document.querySelectorAll('.action-item').forEach((el, i) => {
                 el.classList.toggle('selected', i === index);
                 // Scroll selected item into view
                 if (i === index) {
@@ -872,13 +823,17 @@
         async function loadPreview(item) {
             const previewPane = document.getElementById('preview-pane');
             const previewTypeLabel = document.getElementById('preview-type-label');
+            const platformClass = PLATFORM_CLASS[item.destination] || '';
 
             previewTypeLabel.textContent = item.type;
 
             previewPane.innerHTML = `
                 <div class="preview-content">
                     <div class="preview-title">${formatActionType(item.type)}</div>
-                    <div class="preview-subtitle">${item.source_title} → ${item.destination}</div>
+                    <div class="preview-subtitle">
+                        ${item.source_title}
+                        <span class="platform-badge ${platformClass}" style="margin-left: 8px;">${item.destination}</span>
+                    </div>
 
                     <div class="preview-section">
                         <div class="preview-meta-grid">
@@ -887,41 +842,25 @@
                                 <div class="preview-meta-value decimal">${item.source_decimal}</div>
                             </div>
                             <div class="preview-meta-item">
-                                <div class="preview-meta-label">Generated</div>
-                                <div class="preview-meta-value date">${item.relative_time}</div>
-                            </div>
-                            <div class="preview-meta-item">
                                 <div class="preview-meta-label">Word Count</div>
                                 <div class="preview-meta-value">~${item.word_count} words</div>
-                            </div>
-                            <div class="preview-meta-item">
-                                <div class="preview-meta-label">Destination</div>
-                                <div class="preview-meta-value">${item.destination}</div>
                             </div>
                         </div>
                     </div>
 
                     <div class="preview-section">
-                        <div class="preview-section-title">Content Preview</div>
+                        <div class="preview-section-title">Content</div>
                         <div class="preview-text">${item.content}</div>
                     </div>
 
                     <div class="preview-actions">
-                        <button class="btn btn-primary" onclick="copyToClipboard()">
-                            <span>📋 Copy</span>
+                        <button class="btn btn-primary" onclick="copyAndMarkPosted()">
+                            <span>Copy & Mark Posted</span>
+                            <span class="key">p</span>
+                        </button>
+                        <button class="btn btn-secondary" onclick="copyOnly()">
+                            <span>Copy Only</span>
                             <span class="key">c</span>
-                        </button>
-                        <button class="btn btn-secondary" onclick="approveItem()" style="background: var(--sapphire); color: var(--crust);">
-                            <span>Approve</span>
-                            <span class="key">a</span>
-                        </button>
-                        <button class="btn btn-secondary" onclick="markDone()">
-                            <span>Done</span>
-                            <span class="key">d</span>
-                        </button>
-                        <button class="btn btn-secondary" onclick="skipItem()">
-                            <span>Skip</span>
-                            <span class="key">s</span>
                         </button>
                     </div>
                 </div>
@@ -930,9 +869,7 @@
 
         // Update status bar
         function updateStatusBar() {
-            document.getElementById('status-pending').textContent = `${queueData.pending.length} pending`;
-            document.getElementById('status-processing').textContent = `${queueData.processing.length} processing`;
-            document.getElementById('status-completed').textContent = `${queueData.completed.length} completed today`;
+            document.getElementById('status-runway').textContent = `${queueData.total} in runway`;
         }
 
         // Show toast notification
@@ -946,89 +883,14 @@
             }, 2000);
         }
 
-        // Flag modal state
-        let modalOpen = false;
-
-        // Show flag modal
-        function showFlagModal() {
-            if (!selectedItem) return;
-            modalOpen = true;
-            const modal = document.getElementById('flag-modal');
-            const input = document.getElementById('flag-note-input');
-            modal.classList.add('show');
-            input.value = '';
-            input.focus();
-        }
-
-        // Hide flag modal
-        function hideFlagModal() {
-            modalOpen = false;
-            const modal = document.getElementById('flag-modal');
-            const input = document.getElementById('flag-note-input');
-            modal.classList.remove('show');
-            input.value = '';
-        }
-
-        // Submit flag
-        async function submitFlag(note) {
-            if (!selectedItem) return;
-
-            try {
-                const response = await fetch(`/api/action/${selectedItem.id}/flag`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ note: note || '' }),
-                });
-
-                if (response.ok) {
-                    // Copy content to clipboard
-                    try {
-                        await navigator.clipboard.writeText(selectedItem.content);
-                    } catch (error) {
-                        // Fallback to server-side
-                        await fetch(`/api/action/${selectedItem.id}/copy`, { method: 'POST' });
-                    }
-
-                    hideFlagModal();
-                    showToast('Flagged & copied!');
-                    await fetchQueue();
-
-                    // Move to next item (same logic as skipItem)
-                    if (selectedIndex >= queueData.pending.length) {
-                        selectedIndex = Math.max(0, queueData.pending.length - 1);
-                    }
-                    if (queueData.pending.length > 0) {
-                        selectItem(selectedIndex);
-                    } else {
-                        selectedItem = null;
-                    }
-                }
-            } catch (error) {
-                console.error('Failed to flag:', error);
-                hideFlagModal();
-                showToast('Flag failed');
-            }
-        }
-
-        // Flag modal keydown handler
-        document.getElementById('flag-note-input').addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                submitFlag(this.value);
-            } else if (e.key === 'Escape') {
-                e.preventDefault();
-                hideFlagModal();
-            }
-        });
-
-        // Copy to clipboard
-        async function copyToClipboard() {
+        // Copy to clipboard only
+        async function copyOnly() {
             if (!selectedItem) return;
 
             try {
                 // Try client-side clipboard API first
                 await navigator.clipboard.writeText(selectedItem.content);
-                showToast(`Copied to clipboard! Paste to ${selectedItem.destination}.`);
+                showToast(`Copied! Paste to ${selectedItem.destination}.`);
             } catch (error) {
                 // Fallback to server-side pyperclip
                 try {
@@ -1036,7 +898,7 @@
                         method: 'POST',
                     });
                     if (response.ok) {
-                        showToast(`Copied to clipboard! Paste to ${selectedItem.destination}.`);
+                        showToast(`Copied! Paste to ${selectedItem.destination}.`);
                     }
                 } catch (err) {
                     console.error('Copy failed:', err);
@@ -1045,95 +907,56 @@
             }
         }
 
-        // Mark item as done
-        async function markDone() {
+        // Copy and mark as posted
+        async function copyAndMarkPosted() {
             if (!selectedItem) return;
 
             try {
-                const response = await fetch(`/api/action/${selectedItem.id}/done`, {
+                // Copy to clipboard first
+                try {
+                    await navigator.clipboard.writeText(selectedItem.content);
+                } catch (error) {
+                    // Fallback to server-side
+                    await fetch(`/api/action/${selectedItem.id}/copy`, { method: 'POST' });
+                }
+
+                // Mark as posted
+                const response = await fetch(`/api/action/${selectedItem.id}/posted`, {
                     method: 'POST',
                 });
                 if (response.ok) {
-                    showToast('Marked as done!');
+                    showToast(`Copied & marked posted!`);
                     await fetchQueue();
 
                     // Move to next item
-                    if (selectedIndex >= queueData.pending.length) {
-                        selectedIndex = Math.max(0, queueData.pending.length - 1);
+                    if (selectedIndex >= queueData.items.length) {
+                        selectedIndex = Math.max(0, queueData.items.length - 1);
                     }
-                    if (queueData.pending.length > 0) {
+                    if (queueData.items.length > 0) {
                         selectItem(selectedIndex);
                     } else {
                         selectedItem = null;
+                        document.getElementById('preview-pane').innerHTML = `
+                            <div class="preview-empty">
+                                <div class="preview-empty-icon">📤</div>
+                                <div>No more posts in runway!</div>
+                            </div>
+                        `;
                     }
                 }
             } catch (error) {
-                console.error('Failed to mark done:', error);
-            }
-        }
-
-        // Skip item
-        async function skipItem() {
-            if (!selectedItem) return;
-
-            try {
-                const response = await fetch(`/api/action/${selectedItem.id}/skip`, {
-                    method: 'POST',
-                });
-                if (response.ok) {
-                    showToast('Skipped!');
-                    await fetchQueue();
-
-                    // Move to next item
-                    if (selectedIndex >= queueData.pending.length) {
-                        selectedIndex = Math.max(0, queueData.pending.length - 1);
-                    }
-                    if (queueData.pending.length > 0) {
-                        selectItem(selectedIndex);
-                    } else {
-                        selectedItem = null;
-                    }
-                }
-            } catch (error) {
-                console.error('Failed to skip:', error);
-            }
-        }
-
-        // Approve item (move to posting queue)
-        async function approveItem() {
-            if (!selectedItem) return;
-
-            try {
-                const response = await fetch(`/api/action/${selectedItem.id}/approve`, {
-                    method: 'POST',
-                });
-                if (response.ok) {
-                    const data = await response.json();
-                    const msg = data.copied ? 'Approved & copied!' : 'Approved!';
-                    showToast(msg);
-                    await fetchQueue();
-
-                    // Move to next item
-                    if (selectedIndex >= queueData.pending.length) {
-                        selectedIndex = Math.max(0, queueData.pending.length - 1);
-                    }
-                    if (queueData.pending.length > 0) {
-                        selectItem(selectedIndex);
-                    } else {
-                        selectedItem = null;
-                    }
-                }
-            } catch (error) {
-                console.error('Failed to approve:', error);
+                console.error('Failed to mark posted:', error);
+                showToast('Failed to mark as posted');
             }
         }
 
         // Keyboard navigation
         document.addEventListener('keydown', function(e) {
-            // Ignore when modal is open (modal has its own handlers)
-            if (modalOpen) return;
-
             // Mode switching (always active)
+            if (e.key === 'q') {
+                window.location.href = '/';
+                return;
+            }
             if (e.key === 'b') {
                 window.location.href = '/browse';
                 return;
@@ -1142,47 +965,36 @@
                 window.location.href = '/videos';
                 return;
             }
-            if (e.key === 'p') {
-                window.location.href = '/prompts';
-                return;
-            }
-            if (e.key === 'r') {
-                window.location.href = '/posting-queue';
-                return;
-            }
+            // Note: 'p' is used for mark posted when item selected, prompts when not
 
-            if (queueData.pending.length === 0) return;
+            if (queueData.items.length === 0) {
+                // Allow prompts shortcut when no items
+                if (e.key === 'p') {
+                    window.location.href = '/prompts';
+                }
+                return;
+            }
 
             if (e.key === 'j') {
                 // Move down
-                selectItem(Math.min(selectedIndex + 1, queueData.pending.length - 1));
+                selectItem(Math.min(selectedIndex + 1, queueData.items.length - 1));
             } else if (e.key === 'k') {
                 // Move up
                 selectItem(Math.max(selectedIndex - 1, 0));
             } else if (e.key === 'c') {
-                // Copy
-                copyToClipboard();
-            } else if (e.key === 'd') {
-                // Done
-                markDone();
-            } else if (e.key === 's') {
-                // Skip
-                skipItem();
-            } else if (e.key === 'a') {
-                // Approve
-                approveItem();
-            } else if (e.key === 'x') {
-                // Flag - prevent default to avoid 'x' appearing in input
-                e.preventDefault();
-                showFlagModal();
+                // Copy only
+                copyOnly();
+            } else if (e.key === 'p') {
+                // Mark posted (copy + mark)
+                copyAndMarkPosted();
             }
         });
 
         // Initialize
         fetchQueue();
 
-        // Poll for updates every 5 seconds
-        setInterval(fetchQueue, 5000);
+        // Poll for updates every 10 seconds (less aggressive than main queue)
+        setInterval(fetchQueue, 10000);
     </script>
 </body>
 </html>
