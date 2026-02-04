@@ -1128,7 +1128,8 @@
                 // Skip
                 skipItem();
             } else if (e.key === 'x') {
-                // Flag
+                // Flag - prevent default to avoid 'x' appearing in input
+                e.preventDefault();
                 showFlagModal();
             }
         });
