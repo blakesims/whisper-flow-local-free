@@ -52,6 +52,7 @@ DEFAULTS = {
         "action_mapping": {
             # Compound outputs
             "skool_post": "Skool",
+            "skool_weekly_catchup": "Skool",
             "linkedin_post": "LinkedIn",
             # Existing analysis types
             "summary": "Review",
