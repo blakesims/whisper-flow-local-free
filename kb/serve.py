@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 # Action ID separator (using -- to avoid URL encoding issues with ::)
 ACTION_ID_SEP = "--"
 # Regex for validating action IDs: transcript_id--analysis_name
-ACTION_ID_PATTERN = re.compile(r'^[\w\.\-]+--[a-z_]+$')
+ACTION_ID_PATTERN = re.compile(r'^[\w\.\-]+--[a-z0-9_]+$')
 
 # Add project root for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
