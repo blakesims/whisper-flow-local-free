@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width={{ width }}, initial-scale=1.0">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html, body {
+    width: {{ width }}px;
+    height: {{ height }}px;
+    overflow: hidden;
+  }
+
+  .slide {
+    width: {{ width }}px;
+    height: {{ height }}px;
+    background: linear-gradient(165deg, {{ colors.background }} 0%, {{ colors.background_gradient_end }} 100%);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 80px 90px;
+    position: relative;
+    font-family: {{ fonts.heading }};
+    overflow: hidden;
+  }
+
+  /* Subtle geometric accent — top-right corner */
+  .slide::before {
+    content: '';
+    position: absolute;
+    top: -120px;
+    right: -120px;
+    width: 360px;
+    height: 360px;
+    border-radius: 50%;
+    background: radial-gradient(circle, {{ colors.accent }}15 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  /* Bottom-left accent */
+  .slide::after {
+    content: '';
+    position: absolute;
+    bottom: -80px;
+    left: -80px;
+    width: 240px;
+    height: 240px;
+    border-radius: 50%;
+    background: radial-gradient(circle, {{ colors.accent }}10 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .slide-content {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    flex: 1;
+    text-align: center;
+  }
+
+  /* ===== HOOK SLIDE ===== */
+  .slide-hook .slide-content {
+    justify-content: center;
+  }
+
+  .slide-hook .hook-text {
+    font-size: 64px;
+    font-weight: 900;
+    line-height: 1.15;
+    color: {{ colors.text_primary }};
+    letter-spacing: -1.5px;
+    max-width: 900px;
+  }
+
+  .slide-hook .hook-accent {
+    display: block;
+    width: 80px;
+    height: 5px;
+    background: {{ colors.accent }};
+    border-radius: 3px;
+    margin: 40px auto 0;
+  }
+
+  /* ===== CONTENT SLIDE ===== */
+  .slide-content-type .slide-content {
+    justify-content: center;
+  }
+
+  .slide-content-type .content-text {
+    font-size: 44px;
+    font-weight: 600;
+    line-height: 1.4;
+    color: {{ colors.text_primary }};
+    letter-spacing: -0.5px;
+    max-width: 900px;
+  }
+
+  .slide-content-type .content-number {
+    font-size: 120px;
+    font-weight: 900;
+    color: {{ colors.accent }};
+    opacity: 0.12;
+    position: absolute;
+    top: 60px;
+    left: 80px;
+    line-height: 1;
+    z-index: 0;
+  }
+
+  /* ===== MERMAID SLIDE ===== */
+  .slide-mermaid .slide-content {
+    justify-content: center;
+    padding: 20px 0;
+  }
+
+  .slide-mermaid .mermaid-label {
+    font-size: 28px;
+    font-weight: 700;
+    color: {{ colors.text_secondary }};
+    text-transform: uppercase;
+    letter-spacing: 4px;
+    margin-bottom: 40px;
+  }
+
+  .slide-mermaid .mermaid-img {
+    max-width: 860px;
+    max-height: 900px;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    border-radius: 16px;
+  }
+
+  /* ===== CTA SLIDE ===== */
+  .slide-cta .slide-content {
+    justify-content: center;
+  }
+
+  .slide-cta .cta-text {
+    font-size: 52px;
+    font-weight: 700;
+    line-height: 1.3;
+    color: {{ colors.text_primary }};
+    max-width: 860px;
+  }
+
+  .slide-cta .cta-accent {
+    display: block;
+    width: 80px;
+    height: 5px;
+    background: {{ colors.accent }};
+    border-radius: 3px;
+    margin: 0 auto 40px;
+  }
+
+  .slide-cta .cta-brand {
+    margin-top: 50px;
+    font-size: 28px;
+    font-weight: 600;
+    color: {{ colors.text_secondary }};
+    letter-spacing: 1px;
+  }
+
+  /* ===== SUMMARY SLIDE ===== */
+  .slide-summary .slide-content {
+    justify-content: center;
+    text-align: left;
+    align-items: flex-start;
+  }
+
+  .slide-summary .summary-title {
+    font-size: 36px;
+    font-weight: 800;
+    color: {{ colors.accent }};
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    margin-bottom: 40px;
+  }
+
+  .slide-summary .summary-text {
+    font-size: 38px;
+    font-weight: 500;
+    line-height: 1.5;
+    color: {{ colors.text_primary }};
+  }
+
+  /* ===== FOOTER (all slides) ===== */
+  .slide-footer {
+    position: absolute;
+    bottom: 40px;
+    left: 90px;
+    right: 90px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    z-index: 2;
+  }
+
+  .slide-footer .brand-name {
+    font-size: 22px;
+    font-weight: 600;
+    color: {{ colors.slide_number }};
+    letter-spacing: 0.5px;
+  }
+
+  .slide-footer .slide-indicator {
+    font-size: 20px;
+    font-weight: 500;
+    color: {{ colors.slide_number }};
+  }
+
+  /* ===== TOP ACCENT BAR ===== */
+  .top-bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 6px;
+    background: linear-gradient(90deg, {{ colors.accent }} 0%, {{ colors.accent_light }} 100%);
+    z-index: 2;
+  }
+
+  /* ===== LIGHT THEME: subtle bottom border ===== */
+  .slide {
+    border-bottom: 1px solid {{ colors.divider }};
+  }
+</style>
+</head>
+<body>
+
+{% for slide in slides %}
+<div class="slide slide-{{ slide.type }}{% if slide.type == 'content' %} slide-content-type{% endif %}" id="slide-{{ slide.slide_number }}">
+  <div class="top-bar"></div>
+
+  <div class="slide-content">
+    {% if slide.type == 'hook' %}
+      <div class="hook-text">{{ slide.content }}</div>
+      <span class="hook-accent"></span>
+
+    {% elif slide.type == 'content' %}
+      {% set content_index = [] %}
+      {% for s in slides[:slide.slide_number] if s.type == 'content' %}
+        {% if content_index.append(1) %}{% endif %}
+      {% endfor %}
+      <div class="content-number">{{ content_index | length }}</div>
+      <div class="content-text">{{ slide.content }}</div>
+
+    {% elif slide.type == 'mermaid' %}
+      <div class="mermaid-label">Process Flow</div>
+      {% if slide.mermaid_image_path %}
+        <img class="mermaid-img" src="{{ slide.mermaid_image_path }}" alt="Mermaid diagram">
+      {% else %}
+        <div class="content-text" style="font-family: {{ fonts.mono }}; font-size: 24px; color: {{ colors.text_secondary }}; white-space: pre-wrap;">{{ slide.content }}</div>
+      {% endif %}
+
+    {% elif slide.type == 'cta' %}
+      <span class="cta-accent"></span>
+      <div class="cta-text">{{ slide.content }}</div>
+      <div class="cta-brand">{{ brand.name }}{% if brand.handle %} &middot; {{ brand.handle }}{% endif %}</div>
+
+    {% elif slide.type == 'summary' %}
+      <div class="summary-title">Key Takeaways</div>
+      <div class="summary-text">{{ slide.content }}</div>
+    {% endif %}
+  </div>
+
+  <div class="slide-footer">
+    <span class="brand-name">{{ brand.name }}</span>
+    <span class="slide-indicator">{{ slide.slide_number }} / {{ slides | length }}</span>
+  </div>
+</div>
+
+{% if not loop.last %}
+<!-- PAGE BREAK: Each slide is a separate page -->
+<div style="page-break-after: always;"></div>
+{% endif %}
+{% endfor %}
+
+</body>
+</html>

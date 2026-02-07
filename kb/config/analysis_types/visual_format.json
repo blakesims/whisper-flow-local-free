@@ -1,0 +1,39 @@
+{
+  "name": "visual_format",
+  "description": "Classify a LinkedIn post as CAROUSEL or TEXT_ONLY, and flag if mermaid diagram is appropriate",
+  "requires": ["linkedin_v2"],
+  "optional_inputs": [],
+  "prompt": "You are a LinkedIn visual format classifier. Your job is to analyze a LinkedIn post and determine the optimal visual format for maximum reach.\n\nPOST TO CLASSIFY:\n\n{{linkedin_v2}}\n\nORIGINAL TRANSCRIPT (for additional context):\n{{transcript}}\n\n---\n\nRULES:\n\nLinkedIn data shows:\n- Native PDF carousels get 5-10x MORE reach than text-only posts\n- Single images get 30% LESS reach than text-only\n- Therefore we only use two formats: CAROUSEL (PDF) or TEXT_ONLY\n\nClassify as CAROUSEL when the post:\n- Teaches a tutorial, framework, or methodology\n- Lists multiple steps, tips, or principles (3+ items)\n- Describes a workflow, pipeline, or process\n- Explains a how-to with distinct stages\n- Presents a comparison or progression (amateur/pro/expert)\n- Contains enough substance to fill 6-10 slides (10-30 words each)\n\nClassify as TEXT_ONLY when the post:\n- Is a short opinion or hot take (under 800 characters)\n- Is a single insight or observation without multiple sub-points\n- Is a personal story that flows as continuous narrative\n- Would lose impact if broken into slides\n- Has fewer than 3 distinct ideas to visualize\n\nMERMAID DIAGRAM FLAG:\nIf you classified as CAROUSEL AND the post describes any of the following, set include_mermaid to true:\n- A workflow or pipeline (A -> B -> C)\n- A system architecture or data flow\n- A decision tree or branching logic\n- A cycle or feedback loop\n- A process with clear sequential or parallel steps\n\nMermaid diagrams are embedded as ONE slide in the carousel. They must be simple (max 10 nodes, readable in 3 seconds).\n\nProvide your classification with reasoning.",
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "format": {
+        "type": "string",
+        "enum": ["CAROUSEL", "TEXT_ONLY"],
+        "description": "The recommended visual format"
+      },
+      "confidence": {
+        "type": "number",
+        "description": "Confidence score 0.0-1.0"
+      },
+      "reasoning": {
+        "type": "string",
+        "description": "Brief explanation of why this format was chosen"
+      },
+      "include_mermaid": {
+        "type": "boolean",
+        "description": "Whether the content warrants a mermaid diagram slide (only true if format is CAROUSEL)"
+      },
+      "mermaid_type": {
+        "type": "string",
+        "enum": ["pipeline", "fork", "cycle", "decision_tree", "none"],
+        "description": "If include_mermaid is true, which mermaid pattern best fits the content"
+      },
+      "suggested_slide_count": {
+        "type": "integer",
+        "description": "If CAROUSEL, suggested number of slides (6-10)"
+      }
+    },
+    "required": ["format", "confidence", "reasoning", "include_mermaid"]
+  }
+}

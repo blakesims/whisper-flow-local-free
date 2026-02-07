@@ -1,0 +1,48 @@
+{
+  "name": "carousel_slides",
+  "description": "Break a LinkedIn post into structured slide data for carousel rendering",
+  "requires": ["linkedin_v2"],
+  "optional_inputs": [],
+  "prompt": "You are a carousel content architect. Your job is to take a LinkedIn post and break it into individual slides for a PDF carousel.\n\nPOST CONTENT:\n\n{{linkedin_v2}}\n\nORIGINAL TRANSCRIPT (for additional context and detail):\n{{transcript}}\n\n---\n\nSLIDE STRUCTURE RULES:\n\n1. HOOK SLIDE (slide 1): The opening hook from the post. 5-12 words maximum. Must create curiosity or tension. This is what makes someone swipe.\n\n2. CONTENT SLIDES (slides 2 through N-1): One idea per slide. 10-30 words each. Each slide should:\n   - Communicate a single, clear point\n   - Be readable in 3-5 seconds\n   - Flow logically from the previous slide\n   - Use short sentences or bullet fragments, not paragraphs\n   - Include specific details (tool names, metrics, numbers) when available\n\n3. MERMAID SLIDE (optional): If the content describes a workflow, pipeline, or process, include ONE mermaid slide. Provide the mermaid diagram code. Constraints:\n   - Maximum 10 nodes\n   - Must be readable at a glance (3 seconds)\n   - Use one of these patterns:\n     - Pipeline: A --> B --> C --> D\n     - Fork: A --> B & A --> C\n     - Cycle: A --> B --> C --> A\n   - Keep node labels to 2-4 words each\n\n4. CTA SLIDE (last slide): The closing question or call-to-action from the post. 8-20 words. Should invite engagement.\n\nTOTAL SLIDES: 6 to 10. Aim for the sweet spot where each slide has exactly one idea. Do not pad or compress.\n\nFor each slide, specify:\n- slide_number: integer starting at 1\n- type: one of \"hook\", \"content\", \"mermaid\", \"cta\"\n- content: the text for this slide (for mermaid type, this is the mermaid code)\n- words: word count of the content\n\nReturn ONLY the slides array. No preamble.",
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "slides": {
+        "type": "array",
+        "description": "Array of slide objects for the carousel",
+        "items": {
+          "type": "object",
+          "properties": {
+            "slide_number": {
+              "type": "integer",
+              "description": "Slide position, starting at 1"
+            },
+            "type": {
+              "type": "string",
+              "enum": ["hook", "content", "mermaid", "cta"],
+              "description": "Slide type"
+            },
+            "content": {
+              "type": "string",
+              "description": "The text content for this slide (or mermaid code for mermaid type)"
+            },
+            "words": {
+              "type": "integer",
+              "description": "Word count of the content"
+            }
+          },
+          "required": ["slide_number", "type", "content", "words"]
+        }
+      },
+      "total_slides": {
+        "type": "integer",
+        "description": "Total number of slides"
+      },
+      "has_mermaid": {
+        "type": "boolean",
+        "description": "Whether a mermaid diagram slide is included"
+      }
+    },
+    "required": ["slides", "total_slides", "has_mermaid"]
+  }
+}

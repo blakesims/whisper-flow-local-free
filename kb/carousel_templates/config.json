@@ -1,0 +1,64 @@
+{
+  "dimensions": {
+    "width": 1080,
+    "height": 1350,
+    "unit": "px"
+  },
+  "templates": {
+    "dark-purple": {
+      "file": "dark-purple.html",
+      "description": "Dark purple brand template — CCA/zen-ai identity",
+      "colors": {
+        "background": "#2D1B69",
+        "background_gradient_end": "#1A0F3C",
+        "text_primary": "#FFFFFF",
+        "text_secondary": "#C4B5E3",
+        "accent": "#8B5CF6",
+        "accent_light": "#A78BFA",
+        "divider": "rgba(139, 92, 246, 0.3)",
+        "slide_number": "rgba(255, 255, 255, 0.4)"
+      },
+      "fonts": {
+        "heading": "'Inter', 'Segoe UI', system-ui, sans-serif",
+        "body": "'Inter', 'Segoe UI', system-ui, sans-serif",
+        "mono": "'JetBrains Mono', 'Fira Code', monospace"
+      }
+    },
+    "light": {
+      "file": "light.html",
+      "description": "Clean light template — professional, minimal",
+      "colors": {
+        "background": "#FFFFFF",
+        "background_gradient_end": "#F8F9FA",
+        "text_primary": "#1A1A2E",
+        "text_secondary": "#4A4A6A",
+        "accent": "#2D1B69",
+        "accent_light": "#8B5CF6",
+        "divider": "rgba(45, 27, 105, 0.15)",
+        "slide_number": "rgba(26, 26, 46, 0.3)"
+      },
+      "fonts": {
+        "heading": "'Inter', 'Segoe UI', system-ui, sans-serif",
+        "body": "'Inter', 'Segoe UI', system-ui, sans-serif",
+        "mono": "'JetBrains Mono', 'Fira Code', monospace"
+      }
+    }
+  },
+  "defaults": {
+    "template": "dark-purple",
+    "slide_range": {
+      "min": 6,
+      "max": 10
+    },
+    "words_per_slide": {
+      "min": 10,
+      "max": 30
+    }
+  },
+  "brand": {
+    "name": "Blake Sims",
+    "tagline": "Building with AI",
+    "handle": "@blakesims",
+    "primary_color": "#2D1B69"
+  }
+}
