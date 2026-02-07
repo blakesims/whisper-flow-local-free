@@ -9,6 +9,7 @@
 | T012 | KB Transcription Architecture + Zoom | 2 | 2/3 | ACTIVE | - | task-documentation | [main.md](active/T012-kb-zoom-meetings/main.md) |
 | T014 | Cap AI Markers for Intra-Segment Editing | 3 | 0/4 | PLANNING | T013 | - | [main.md](planning/T014-cap-ai-markers/main.md) |
 | T019 | KB Prompt Quality Feedback System | 2 | 4/4 | COMPLETE | - | - | [main.md](completed/T019-prompt-quality-feedback/main.md) |
+| T020 | KB Posting Queue Extension | 1 | 0/4 | PLAN_REVIEW | - | - | [main.md](active/T020-kb-posting-queue-extension/main.md) |
 
 ## Notes
 - Priority: 1=Highest, 5=Lowest

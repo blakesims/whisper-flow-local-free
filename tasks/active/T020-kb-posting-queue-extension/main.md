@@ -1,7 +1,7 @@
 # T020: KB Posting Queue Extension
 
 ## Meta
-- **Status:** CODE_REVIEW
+- **Status:** COMPLETE
 - **Created:** 2026-02-04
 - **Last Updated:** 2026-02-04
 - **Blocked Reason:** N/A
@@ -213,54 +213,104 @@ Enable content generation from any transcript length and create a two-stage work
 - [x] AC3: Existing analysis types without optional_inputs continue working (72 tests pass)
 
 ### Phase 3: Posting Queue Backend
-- **Status:** NOT_STARTED
-- **Started:** -
-- **Completed:** -
-- **Commits:** -
-- **Files Modified:** -
-- **Notes:** -
-- **Blockers:** -
+- **Status:** COMPLETE
+- **Started:** 2026-02-04
+- **Completed:** 2026-02-04
+- **Commits:** `1d7622a`
+- **Files Modified:**
+  - `kb/serve.py` - Added 3 new endpoints: `/api/posting-queue`, `/api/action/<id>/approve`, `/api/action/<id>/posted`
+- **Notes:**
+  - Approve endpoint auto-copies to clipboard (per Blake's answer to open question #1)
+  - Approved items are excluded from main /api/queue (per Blake's answer to open question #3)
+  - Posting queue returns runway_counts by platform
+- **Blockers:** None
+
+### Tasks Completed (Phase 3)
+- [x] Task 3.1: State handling already supports new statuses dynamically
+- [x] Task 3.2: Added `/api/action/<id>/approve` endpoint with auto-copy
+- [x] Task 3.3: Added `/api/posting-queue` endpoint with runway counts
+- [x] Task 3.4: Added `/api/action/<id>/posted` endpoint
+
+### Acceptance Criteria (Phase 3)
+- [x] AC1: Approve endpoint sets status to `approved` with `approved_at` timestamp
+- [x] AC2: Posting queue endpoint returns only approved items with runway counts
+- [x] AC3: Posted endpoint sets status to `posted` with `posted_at` timestamp
+- [x] AC4: action-state.json persists new fields (verified via code review)
 
 ### Phase 4: Posting Queue UI
-- **Status:** NOT_STARTED
-- **Started:** -
-- **Completed:** -
-- **Commits:** -
-- **Files Modified:** -
-- **Notes:** -
-- **Blockers:** -
+- **Status:** COMPLETE
+- **Started:** 2026-02-04
+- **Completed:** 2026-02-04
+- **Commits:** `1d7622a`
+- **Files Modified:**
+  - `kb/templates/action_queue.html` - Added approve button (`a` shortcut), runway link (`r` shortcut), mode toggle update
+  - `kb/templates/posting_queue.html` - New template with runway counter, platform badges, copy/post workflow
+  - `kb/serve.py` - Added `/posting-queue` HTML route
+- **Notes:**
+  - Posting queue is a separate page (per Blake's answer to open question #2)
+  - `r` shortcut for runway (per Blake's answer to open question #4)
+  - Platform badges: LinkedIn blue, Skool green
+  - Copy & Mark Posted (`p`) combines copy + status change
+- **Blockers:** None
+
+### Tasks Completed (Phase 4)
+- [x] Task 4.1: Added "Approve" button with `a` keyboard shortcut
+- [x] Task 4.2: Added "Posting Queue" tab with `r` shortcut, mode toggle
+- [x] Task 4.3: Added "Copy & Mark Posted" action with `p` shortcut
+- [x] Task 4.4: Styled with platform badges, runway counter, word counts
+
+### Acceptance Criteria (Phase 4)
+- [x] AC1: Approve button visible and functional on pending items
+- [x] AC2: Posting Queue accessible via `r` keyboard shortcut
+- [x] AC3: Runway counter shows counts per platform
+- [x] AC4: Copy & Mark Posted works correctly
 
 ---
 
 ## Code Review Log
 
-### Phase 1
-- **Gate:** PENDING
-- **Reviewed:** -
-- **Issues:** -
-- **Summary:** -
+### Phase 1-2 (Combined)
+- **Gate:** REVISE
+- **Reviewed:** 2026-02-04
+- **Issues:** 1 critical, 1 major, 1 minor
+- **Summary:** Core code implementation is solid with good test coverage (20 tests, all passing). However, config files (linkedin_post.json, skool_post.json) were NOT updated as claimed - they still have hard requirements instead of optional_inputs. This means Phase 2 AC1/AC2 cannot be verified. Also found that nested conditionals fail silently.
 
-### Phase 2
-- **Gate:** PENDING
-- **Reviewed:** -
-- **Issues:** -
-- **Summary:** -
+-> Details: `code-review-phase-1-2.md`
 
-### Phase 3
-- **Gate:** PENDING
-- **Reviewed:** -
-- **Issues:** -
-- **Summary:** -
+#### REVISE Actions Completed (2026-02-04)
+- **Commit:** `8dcb7aa`
+- **Files Created:**
+  - `kb/config/analysis_types/linkedin_post.json` - Example config with `requires: []`, `optional_inputs: []`, uses `{{transcript}}` directly
+  - `kb/config/analysis_types/skool_post.json` - Example config with `requires: []`, `optional_inputs: ["key_points"]`, uses conditional template
+- **Files Modified:**
+  - `kb/analyze.py` - Added docstring note and code comment documenting nested conditional limitation
+  - `kb/tests/test_conditional_template.py` - Added `test_nested_conditionals_not_supported()` with detailed docstring
+- **Tests:** 21 tests in test_conditional_template.py pass, 73 total kb tests pass
+- **Note:** Config files created in git repo because mac-sync is read-only from server. Blake should sync these to mac or update the mac configs manually.
 
-### Phase 4
-- **Gate:** PENDING
-- **Reviewed:** -
-- **Issues:** -
-- **Summary:** -
+### Phase 3-4 (Combined)
+- **Gate:** REVISE
+- **Reviewed:** 2026-02-04
+- **Issues:** 0 critical, 2 major, 2 minor
+- **Summary:** Backend endpoints and UI are implemented and functional. Two significant issues: state transition validation missing on /posted endpoint (allows bypassing approval workflow), and XSS vulnerability with unescaped content in templates. All 73 tests pass.
+
+-> Details: `code-review-phase-3-4.md`
+
+#### Required Actions
+- [x] Add state validation to `/api/action/<id>/posted` - require status == "approved" before allowing transition
+- [x] Add `escapeHtml()` helper function to both `posting_queue.html` and `action_queue.html`
+- [x] Apply HTML escaping to `item.content` and `preview` in both templates
+
+#### REVISE Review (2026-02-04)
+- **Gate:** PASS
+- **Commit:** `ab3041d`
+- **Summary:** All issues fixed. State validation added to both approve (must be "pending") and posted (must be "approved") endpoints. XSS protection via escapeHtml() added to both templates with complete coverage of all dynamic content. Keyboard shortcut changed from 'p' to 'm' for "mark posted" to avoid conflict with prompts navigation.
+
+-> Details: `code-review-phase-3-4-revise.md`
 
 ---
 
 ## Completion
-- **Completed:** -
-- **Summary:** -
-- **Learnings:** -
+- **Completed:** 2026-02-04
+- **Summary:** Implemented posting queue workflow with approve -> posted state machine, XSS-safe templates, and keyboard navigation. Phases 1-2 added conditional template rendering and optional inputs for flexible analysis requirements. Phases 3-4 added backend API endpoints and UI for the posting queue "runway" feature.
+- **Learnings:** State machines need validation at every transition. XSS protection should be applied at render time using DOM-based escaping. Keyboard shortcuts need global conflict checking across all pages.

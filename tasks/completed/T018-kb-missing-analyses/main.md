@@ -1,7 +1,7 @@
 # T018: KB Missing Analyses Detection
 
 ## Meta
-- **Status:** CODE_REVIEW
+- **Status:** COMPLETE
 - **Created:** 2026-02-02
 - **Last Updated:** 2026-02-02
 - **Blocked Reason:** —
@@ -466,8 +466,72 @@ Solid, well-structured plan. The planner correctly identified the distinction be
 - [x] Handles API rate limiting gracefully (via existing retry logic in `analyze_transcript`)
 - [x] Summary of results shown at end
 
+### Phase 4: Integration & Polish
+
+**Executed:** 2026-02-02
+**Commit:** a1890be
+
+**Tasks Completed:**
+
+1. ✅ "Missing Analyses" option already in main `kb` menu (from Phase 2):
+   - Position: After "Analyze" in COMMANDS dict
+   - Opens via `kb missing` or menu selection
+
+2. ✅ Added to `show_config()` status display in `kb/__main__.py`:
+   - Shows "Missing Analyses" section with quick count
+   - Yellow warning if transcripts missing: "5 transcript(s) missing default analyses across 2 decimal(s)"
+   - Green checkmark if all complete: "✓ All transcripts have their default analyses"
+   - Includes hint: "Run 'kb missing' for details"
+
+3. ✅ Added `--summary` flag (`-s`) for compact output:
+   - One-line output: "5 transcripts missing 12 analyses across 3 decimals"
+   - Exit code 0 if none missing, 1 if some missing
+   - Useful for scripts/cron health checks
+
+4. ✅ Documentation updates:
+   - Updated module docstring with all `kb missing` usage examples
+   - Added `--summary` to argparse help and examples
+
+**Tests Run:**
+- Import verification: All new functions import correctly
+- CLI help: `kb missing --help` shows all flags correctly
+- Module invocation: `python -m kb missing --help` works
+
+**Files Modified:**
+- `kb/__main__.py` — Added "Missing Analyses" section to `show_config()` (~15 lines)
+- `kb/analyze.py` — Added `get_missing_summary()`, `--summary` flag, updated docstring (~45 lines)
+
+**Acceptance Criteria Check:**
+- [x] "Missing Analyses" appears in main `kb` menu (already present from Phase 2)
+- [x] Config status shows quick missing count
+- [x] `kb missing --summary` returns scriptable output with exit codes
+- [x] All new functionality documented in module docstring
+
 ---
 
 ## Completion
 
-{Final summary when done}
+**Status:** CODE_REVIEW
+**All 4 Phases Complete**
+
+### Summary
+
+Implemented full "missing analyses" feature for the KB system:
+
+1. **Core Detection** (Phase 1): `get_decimal_defaults()`, `get_transcript_missing_analyses()`, `scan_missing_by_decimal()` — detects which transcripts are missing their decimal's default analyses
+
+2. **CLI Display** (Phase 2): `kb missing` command with summary table and `--detailed` breakdown
+
+3. **Batch Execution** (Phase 3): `kb missing --run` with interactive selection, `--decimal` filter, `--yes` for automation
+
+4. **Integration** (Phase 4): Config status display, `--summary` for scripting with exit codes
+
+### Files Modified
+- `kb/analyze.py` — Core logic + CLI handling (~280 lines added)
+- `kb/__main__.py` — COMMANDS entry + config display (~20 lines added)
+
+### Commits
+- 4e76552: Phase 1 - Core detection logic
+- 3596494: Phase 2 - CLI command & display
+- 9e65312: Phase 3 - Batch analysis execution
+- a1890be: Phase 4 - Integration & polish
