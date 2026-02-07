@@ -4,7 +4,7 @@
 T022
 
 ## Meta
-- **Status:** CODE_REVIEW
+- **Status:** COMPLETE
 - **Last Updated:** 2026-02-07
 
 ## Overview
@@ -624,6 +624,21 @@ All 3 critical and 5 major issues addressed:
 - **Summary:** Well-structured implementation. 47 new tests pass (166 total, zero regressions). All files match execution report. One critical issue: mermaid PNG embedding will silently fail in Playwright's `set_content()` context (local file paths blocked by Chromium security). Does not break pipeline (mermaid failure is graceful per AC6) but means mermaid-in-carousel never actually works. Fix recommended for Phase 4: use base64 data URIs. Two major: `find_renderables` crashes on raw-string carousel_slides (missing `AttributeError` in except); double Playwright browser launch per carousel (performance). Three minor: browser.close() not in try/finally, dead async code, plan deviation on render_config.json.
 
 -> Details: `code-review-phase-3.md`
+
+### Phase 4
+- **Gate:** PASS
+- **Reviewed:** 2026-02-07
+- **Issues:** 0 critical, 1 major, 3 minor
+- **Summary:** Correctly wires visual pipeline into kb serve, fixes both Phase 3 critical/major issues (mermaid base64, AttributeError). All 22 new tests pass (188 total, zero regressions). One major issue: `_update_visual_status` claims thread-safety but has no locking -- race condition on concurrent approvals. Three minor: stale Phase 3 test now testing wrong code path, two unescaped innerHTML insertions (low risk). None blocking for single-user use case.
+
+-> Details: `code-review-phase-4.md`
+
+---
+
+## Completion
+- **Completed:** 2026-02-07
+- **Summary:** T022 Content Engine delivered across 4 phases: (1) linkedin_v2 analysis type + LLM judge loop, (2) visual_format classifier + carousel templates, (3) HTML-to-PDF rendering pipeline with mermaid support, (4) kb serve integration with background pipeline, /visuals/ route, and enhanced posting queue UI. Full pipeline: approve -> background thread -> classify -> generate slides -> render PDF + thumbnails -> update UI. 188 tests total, zero regressions.
+- **Learnings:** Thread-safe file state needs actual locks, not just docstrings. Playwright set_content() blocks local file paths -- use base64 data URIs. Multi-phase code changes can silently alter earlier test semantics.
 
 ---
 

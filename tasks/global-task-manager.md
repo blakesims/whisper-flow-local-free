@@ -11,6 +11,7 @@
 | T019 | KB Prompt Quality Feedback System | 2 | 4/4 | COMPLETE | - | - | [main.md](completed/T019-prompt-quality-feedback/main.md) |
 | T020 | KB Posting Queue Extension | 1 | 0/4 | PLAN_REVIEW | - | - | [main.md](active/T020-kb-posting-queue-extension/main.md) |
 | T021 | KB Serve UI -- Layout & JSON Rendering | 1 | 4/4 | COMPLETE | - | - | [main.md](active/T021-kb-serve-ui-layout-rendering/main.md) |
+| T022 | Content Engine — Text to Visual Content & Lead Magnets | 1 | 4/4 | COMPLETE | T020, T021 | - | [main.md](active/T022-content-engine/main.md) |
 
 ## Notes
 - Priority: 1=Highest, 5=Lowest
