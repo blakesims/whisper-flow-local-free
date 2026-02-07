@@ -290,6 +290,10 @@
             min-height: 0;
         }
 
+        .preview-text.rendered-content {
+            white-space: normal;
+        }
+
         .preview-meta-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -708,6 +712,251 @@
             return div.innerHTML;
         }
 
+        // --- Type-Specific Renderers ---
+
+        // Unwrap nested data: some types wrap under a key matching the type name
+        // e.g. guide: {guide: {title, steps}} vs skool_post: {title, post}
+        function unwrapData(data, typeName) {
+            if (!data || typeof data !== 'object') return data;
+            const keys = Object.keys(data);
+            // If there's a single key matching the type name (or mixed with other keys), unwrap it
+            if (typeName && data[typeName] !== undefined) {
+                // For types like guide where everything is nested under the type key
+                if (keys.length === 1 && typeof data[typeName] === 'object' && !Array.isArray(data[typeName])) {
+                    return data[typeName];
+                }
+                // For types like lead_magnet with mixed nesting (some under type key, some flat)
+                if (typeof data[typeName] === 'object' && !Array.isArray(data[typeName])) {
+                    const merged = { ...data[typeName] };
+                    for (const k of keys) {
+                        if (k !== typeName) merged[k] = data[k];
+                    }
+                    return merged;
+                }
+            }
+            return data;
+        }
+
+        // Convert newlines to paragraphs, preserving double-newline as paragraph breaks
+        function textToHtml(text) {
+            if (!text) return '';
+            const escaped = escapeHtml(text);
+            // Split on double newlines for paragraphs
+            const paragraphs = escaped.split(/\n\s*\n/);
+            return paragraphs.map(p => {
+                // Within paragraphs, convert single newlines to <br>
+                return '<p>' + p.replace(/\n/g, '<br>') + '</p>';
+            }).join('');
+        }
+
+        // Render a value: arrays as lists, objects recursively, strings as text
+        function renderValue(val) {
+            if (val === null || val === undefined) return '';
+            if (typeof val === 'string') return textToHtml(val);
+            if (Array.isArray(val)) {
+                if (val.length === 0) return '<p><em>None</em></p>';
+                // Check if array of objects or strings
+                if (typeof val[0] === 'object') {
+                    return '<div class="rendered-list">' + val.map(item => {
+                        const parts = Object.entries(item).map(([k, v]) =>
+                            '<strong>' + escapeHtml(k) + ':</strong> ' + escapeHtml(String(v))
+                        ).join(' &mdash; ');
+                        return '<div class="rendered-list-item">' + parts + '</div>';
+                    }).join('') + '</div>';
+                }
+                return '<ul>' + val.map(item => '<li>' + escapeHtml(String(item)) + '</li>').join('') + '</ul>';
+            }
+            if (typeof val === 'object') {
+                return Object.entries(val).map(([k, v]) =>
+                    '<div class="rendered-section"><div class="rendered-section-label">' + escapeHtml(k.replace(/_/g, ' ')) + '</div>' + renderValue(v) + '</div>'
+                ).join('');
+            }
+            return '<p>' + escapeHtml(String(val)) + '</p>';
+        }
+
+        function renderSkoolPost(data) {
+            let html = '';
+            if (data.title) {
+                html += '<h2 class="rendered-title">' + escapeHtml(data.title) + '</h2>';
+            }
+            if (data.post) {
+                html += '<div class="rendered-body">' + textToHtml(data.post) + '</div>';
+            }
+            if (data.discussion_question) {
+                html += '<div class="rendered-callout"><strong>Discussion Question:</strong> ' + escapeHtml(data.discussion_question) + '</div>';
+            }
+            if (data.core_teaching) {
+                html += '<div class="rendered-callout"><strong>Core Teaching:</strong> ' + escapeHtml(data.core_teaching) + '</div>';
+            }
+            return html;
+        }
+
+        function renderLinkedinPost(data) {
+            let html = '';
+            if (data.hook) {
+                html += '<div class="rendered-hook"><strong>' + escapeHtml(data.hook) + '</strong></div>';
+            }
+            if (data.post) {
+                html += '<div class="rendered-body">' + textToHtml(data.post) + '</div>';
+            }
+            if (data.cta) {
+                html += '<div class="rendered-callout"><strong>CTA:</strong> ' + escapeHtml(data.cta) + '</div>';
+            }
+            if (data.core_insight) {
+                html += '<div class="rendered-callout"><strong>Core Insight:</strong> ' + escapeHtml(data.core_insight) + '</div>';
+            }
+            if (data.audience) {
+                html += '<div class="rendered-section"><div class="rendered-section-label">Target Audience</div><p>' + escapeHtml(data.audience) + '</p></div>';
+            }
+            return html;
+        }
+
+        function renderSkoolWeeklyCatchup(data) {
+            let html = '';
+            if (data.title) {
+                html += '<h2 class="rendered-title">' + escapeHtml(data.title) + '</h2>';
+            }
+            if (data.post) {
+                // Preserve timestamp formatting: [MM:SS] gets monospace treatment
+                const escaped = escapeHtml(data.post);
+                const withTimestamps = escaped.replace(/\[(\d{1,2}:\d{2})\]/g, '<code class="rendered-timestamp">[$1]</code>');
+                // Split on double newlines for paragraphs
+                const paragraphs = withTimestamps.split(/\n\s*\n/);
+                html += '<div class="rendered-body">' + paragraphs.map(p =>
+                    '<p>' + p.replace(/\n/g, '<br>') + '</p>'
+                ).join('') + '</div>';
+            }
+            return html;
+        }
+
+        function renderSummary(data) {
+            // data may be {summary: "string"} (unwrapped to just a string) or a raw string
+            if (typeof data === 'string') {
+                return '<div class="rendered-body">' + textToHtml(data) + '</div>';
+            }
+            if (data.summary && typeof data.summary === 'string') {
+                return '<div class="rendered-body">' + textToHtml(data.summary) + '</div>';
+            }
+            // Fallback for unexpected structure
+            return renderFallback(data);
+        }
+
+        function renderGuide(data) {
+            let html = '';
+            if (data.title) {
+                html += '<h2 class="rendered-title">' + escapeHtml(data.title) + '</h2>';
+            }
+            if (data.prerequisites && data.prerequisites.length > 0) {
+                html += '<div class="rendered-section"><div class="rendered-section-label">Prerequisites</div>';
+                html += '<ul class="rendered-checklist">';
+                data.prerequisites.forEach(function(item) {
+                    html += '<li>' + escapeHtml(item) + '</li>';
+                });
+                html += '</ul></div>';
+            }
+            if (data.steps && data.steps.length > 0) {
+                html += '<div class="rendered-section"><div class="rendered-section-label">Steps</div>';
+                html += '<div class="rendered-steps">';
+                data.steps.forEach(function(step) {
+                    html += '<div class="rendered-step-card">';
+                    html += '<div class="rendered-step-number">Step ' + escapeHtml(String(step.step_number || '')) + '</div>';
+                    html += '<div class="rendered-step-action">' + escapeHtml(step.action || '') + '</div>';
+                    if (step.details) {
+                        html += '<div class="rendered-step-details">' + escapeHtml(step.details) + '</div>';
+                    }
+                    html += '</div>';
+                });
+                html += '</div></div>';
+            }
+            if (data.tips && data.tips.length > 0) {
+                html += '<div class="rendered-section"><div class="rendered-section-label">Tips</div>';
+                html += '<ul>';
+                data.tips.forEach(function(tip) {
+                    html += '<li>' + escapeHtml(tip) + '</li>';
+                });
+                html += '</ul></div>';
+            }
+            return html;
+        }
+
+        function renderLeadMagnet(data) {
+            let html = '';
+            // Lead magnet idea section
+            if (data.idea || data.format || data.hook) {
+                html += '<div class="rendered-section"><div class="rendered-section-label">Lead Magnet</div>';
+                if (data.idea) {
+                    html += '<p><strong>Idea:</strong> ' + escapeHtml(data.idea) + '</p>';
+                }
+                if (data.format) {
+                    html += '<p><strong>Format:</strong> ' + escapeHtml(data.format) + '</p>';
+                }
+                if (data.hook) {
+                    html += '<p><strong>Hook:</strong> ' + escapeHtml(data.hook) + '</p>';
+                }
+                html += '</div>';
+            }
+            // Video titles
+            if (data.video_titles && data.video_titles.length > 0) {
+                html += '<div class="rendered-section"><div class="rendered-section-label">Video Titles</div>';
+                html += '<ol>';
+                data.video_titles.forEach(function(title) {
+                    html += '<li>' + escapeHtml(title) + '</li>';
+                });
+                html += '</ol></div>';
+            }
+            // Hooks
+            if (data.hooks && data.hooks.length > 0) {
+                html += '<div class="rendered-section"><div class="rendered-section-label">Opening Hooks</div>';
+                html += '<ol>';
+                data.hooks.forEach(function(hook) {
+                    html += '<li>' + escapeHtml(hook) + '</li>';
+                });
+                html += '</ol></div>';
+            }
+            // Shorts ideas
+            if (data.shorts_ideas && data.shorts_ideas.length > 0) {
+                html += '<div class="rendered-section"><div class="rendered-section-label">Shorts Ideas</div>';
+                html += '<div class="rendered-list">';
+                data.shorts_ideas.forEach(function(short) {
+                    html += '<div class="rendered-list-item">';
+                    html += '<strong>' + escapeHtml(short.topic || '') + '</strong>';
+                    if (short.timestamp_range) {
+                        html += ' <code class="rendered-timestamp">' + escapeHtml(short.timestamp_range) + '</code>';
+                    }
+                    html += '</div>';
+                });
+                html += '</div></div>';
+            }
+            return html;
+        }
+
+        function renderFallback(data) {
+            if (!data || typeof data !== 'object') {
+                // String or primitive: render as formatted text
+                return '<div class="rendered-body">' + textToHtml(String(data || '')) + '</div>';
+            }
+            let html = '';
+            Object.entries(data).forEach(function(entry) {
+                const key = entry[0];
+                const val = entry[1];
+                html += '<div class="rendered-section">';
+                html += '<div class="rendered-section-label">' + escapeHtml(key.replace(/_/g, ' ')) + '</div>';
+                html += renderValue(val);
+                html += '</div>';
+            });
+            return html;
+        }
+
+        // Renderer dispatch map
+        const RENDERERS = {
+            skool_post: renderSkoolPost,
+            linkedin_post: renderLinkedinPost,
+            skool_weekly_catchup: renderSkoolWeeklyCatchup,
+            summary: renderSummary,
+            guide: renderGuide,
+            lead_magnet: renderLeadMagnet
+        };
+
         // Action type icons
         const ACTION_ICONS = {
             'skool_post': '📝',
@@ -897,6 +1146,23 @@
 
             previewTypeLabel.textContent = item.type;
 
+            // Determine rendered content using type-specific renderer
+            let renderedContent = '';
+            const renderer = RENDERERS[item.type];
+            if (item.raw_data && typeof item.raw_data === 'object') {
+                const unwrapped = unwrapData(item.raw_data, item.type);
+                renderedContent = renderer ? renderer(unwrapped) : renderFallback(unwrapped);
+            } else {
+                // Fallback: try parsing content as JSON, else render as text
+                try {
+                    const parsed = JSON.parse(item.content);
+                    const unwrapped = unwrapData(parsed, item.type);
+                    renderedContent = renderer ? renderer(unwrapped) : renderFallback(unwrapped);
+                } catch (e) {
+                    renderedContent = renderer ? renderer(item.content) : renderFallback(item.content);
+                }
+            }
+
             previewPane.innerHTML = `
                 <div class="preview-content">
                     <div class="preview-title">${escapeHtml(formatActionType(item.type))}</div>
@@ -925,7 +1191,7 @@
 
                     <div class="preview-section-content">
                         <div class="preview-section-title">Content Preview</div>
-                        <div class="preview-text">${escapeHtml(item.content)}</div>
+                        <div class="preview-text rendered-content">${renderedContent}</div>
                     </div>
                 </div>
                 <div class="preview-actions">
