@@ -142,6 +142,7 @@
         .action-item {
             padding: 8px 12px;
             border-bottom: 1px solid var(--surface0);
+            border-left: 3px solid transparent;
             cursor: pointer;
             transition: background 0.1s;
         }
@@ -166,6 +167,8 @@
             display: flex;
             align-items: center;
             gap: 8px;
+            min-width: 0;
+            overflow: hidden;
         }
 
         .action-icon {
@@ -241,7 +244,7 @@
             flex-direction: column;
             flex: 1;
             min-height: 0;
-            overflow-y: auto;
+            overflow: hidden;
         }
 
         .preview-title {
@@ -292,6 +295,148 @@
 
         .preview-text.rendered-content {
             white-space: normal;
+        }
+
+        /* Rendered content elements */
+        .rendered-title {
+            color: var(--sapphire);
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 16px;
+            line-height: 1.4;
+        }
+
+        .rendered-body {
+            margin-bottom: 16px;
+        }
+
+        .rendered-body p {
+            margin-bottom: 10px;
+            line-height: 1.7;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+        }
+
+        .rendered-callout {
+            background: var(--surface0);
+            border-left: 3px solid var(--mauve);
+            padding: 12px 16px;
+            border-radius: 0 6px 6px 0;
+            margin: 12px 0;
+            line-height: 1.6;
+        }
+
+        .rendered-hook {
+            font-size: 15px;
+            margin-bottom: 12px;
+            color: var(--yellow);
+            line-height: 1.5;
+        }
+
+        .rendered-section {
+            margin-bottom: 16px;
+        }
+
+        .rendered-section-label {
+            color: var(--overlay1);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        .rendered-checklist {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .rendered-checklist li {
+            padding: 4px 0 4px 24px;
+            position: relative;
+            line-height: 1.5;
+        }
+
+        .rendered-checklist li::before {
+            content: '\25A1';
+            position: absolute;
+            left: 4px;
+            color: var(--overlay0);
+        }
+
+        .rendered-steps {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .rendered-step-card {
+            background: var(--surface0);
+            border-radius: 6px;
+            padding: 12px 16px;
+            border-left: 3px solid var(--blue);
+        }
+
+        .rendered-step-number {
+            color: var(--blue);
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .rendered-step-action {
+            color: var(--text);
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .rendered-step-details {
+            color: var(--subtext0);
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .rendered-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .rendered-list-item {
+            background: var(--surface0);
+            padding: 8px 12px;
+            border-radius: 4px;
+            line-height: 1.5;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+        }
+
+        .rendered-timestamp {
+            background: var(--surface0);
+            color: var(--peach);
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 12px;
+        }
+
+        /* General rendered content text wrapping */
+        .rendered-content ul, .rendered-content ol {
+            padding-left: 24px;
+            margin-bottom: 12px;
+        }
+
+        .rendered-content li {
+            margin-bottom: 4px;
+            line-height: 1.5;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+        }
+
+        .rendered-content p {
+            word-wrap: break-word;
+            overflow-wrap: break-word;
         }
 
         .preview-meta-grid {
@@ -756,11 +901,12 @@
             if (Array.isArray(val)) {
                 if (val.length === 0) return '<p><em>None</em></p>';
                 // Check if array of objects or strings
-                if (typeof val[0] === 'object') {
+                if (typeof val[0] === 'object' && val[0] !== null) {
                     return '<div class="rendered-list">' + val.map(item => {
-                        const parts = Object.entries(item).map(([k, v]) =>
-                            '<strong>' + escapeHtml(k) + ':</strong> ' + escapeHtml(String(v))
-                        ).join(' &mdash; ');
+                        const parts = Object.entries(item).map(([k, v]) => {
+                            const rendered = (v !== null && typeof v === 'object') ? renderValue(v) : escapeHtml(String(v));
+                            return '<strong>' + escapeHtml(k) + ':</strong> ' + rendered;
+                        }).join(' &mdash; ');
                         return '<div class="rendered-list-item">' + parts + '</div>';
                     }).join('') + '</div>';
                 }
@@ -846,15 +992,15 @@
             if (data.title) {
                 html += '<h2 class="rendered-title">' + escapeHtml(data.title) + '</h2>';
             }
-            if (data.prerequisites && data.prerequisites.length > 0) {
+            if (Array.isArray(data.prerequisites) && data.prerequisites.length > 0) {
                 html += '<div class="rendered-section"><div class="rendered-section-label">Prerequisites</div>';
                 html += '<ul class="rendered-checklist">';
                 data.prerequisites.forEach(function(item) {
-                    html += '<li>' + escapeHtml(item) + '</li>';
+                    html += '<li>' + escapeHtml(String(item)) + '</li>';
                 });
                 html += '</ul></div>';
             }
-            if (data.steps && data.steps.length > 0) {
+            if (Array.isArray(data.steps) && data.steps.length > 0) {
                 html += '<div class="rendered-section"><div class="rendered-section-label">Steps</div>';
                 html += '<div class="rendered-steps">';
                 data.steps.forEach(function(step) {
@@ -868,11 +1014,11 @@
                 });
                 html += '</div></div>';
             }
-            if (data.tips && data.tips.length > 0) {
+            if (Array.isArray(data.tips) && data.tips.length > 0) {
                 html += '<div class="rendered-section"><div class="rendered-section-label">Tips</div>';
                 html += '<ul>';
                 data.tips.forEach(function(tip) {
-                    html += '<li>' + escapeHtml(tip) + '</li>';
+                    html += '<li>' + escapeHtml(String(tip)) + '</li>';
                 });
                 html += '</ul></div>';
             }
@@ -896,25 +1042,25 @@
                 html += '</div>';
             }
             // Video titles
-            if (data.video_titles && data.video_titles.length > 0) {
+            if (Array.isArray(data.video_titles) && data.video_titles.length > 0) {
                 html += '<div class="rendered-section"><div class="rendered-section-label">Video Titles</div>';
                 html += '<ol>';
                 data.video_titles.forEach(function(title) {
-                    html += '<li>' + escapeHtml(title) + '</li>';
+                    html += '<li>' + escapeHtml(String(title)) + '</li>';
                 });
                 html += '</ol></div>';
             }
             // Hooks
-            if (data.hooks && data.hooks.length > 0) {
+            if (Array.isArray(data.hooks) && data.hooks.length > 0) {
                 html += '<div class="rendered-section"><div class="rendered-section-label">Opening Hooks</div>';
                 html += '<ol>';
                 data.hooks.forEach(function(hook) {
-                    html += '<li>' + escapeHtml(hook) + '</li>';
+                    html += '<li>' + escapeHtml(String(hook)) + '</li>';
                 });
                 html += '</ol></div>';
             }
             // Shorts ideas
-            if (data.shorts_ideas && data.shorts_ideas.length > 0) {
+            if (Array.isArray(data.shorts_ideas) && data.shorts_ideas.length > 0) {
                 html += '<div class="rendered-section"><div class="rendered-section-label">Shorts Ideas</div>';
                 html += '<div class="rendered-list">';
                 data.shorts_ideas.forEach(function(short) {
@@ -1081,7 +1227,7 @@
                     <span class="meta-item">
                         <span style="color: var(--yellow)">${escapeHtml(item.relative_time)}</span>
                     </span>
-                    ${item.word_count > 0 ? `<span class="meta-item"><span>~${item.word_count} words</span></span>` : ''}
+                    ${item.word_count > 0 ? `<span class="meta-item"><span>~${escapeHtml(String(item.word_count))} words</span></span>` : ''}
                 </div>
                 <div class="action-preview">${escapeHtml(preview)}...</div>
             `;
@@ -1180,7 +1326,7 @@
                             </div>
                             <div class="preview-meta-item">
                                 <div class="preview-meta-label">Word Count</div>
-                                <div class="preview-meta-value">~${item.word_count} words</div>
+                                <div class="preview-meta-value">~${escapeHtml(String(item.word_count))} words</div>
                             </div>
                             <div class="preview-meta-item">
                                 <div class="preview-meta-label">Destination</div>
