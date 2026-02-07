@@ -957,6 +957,156 @@ def run_analysis_with_deps(
     return result, prerequisites_run
 
 
+def run_with_judge_loop(
+    transcript_data: dict,
+    analysis_type: str,
+    judge_type: str,
+    model: str = DEFAULT_MODEL,
+    max_rounds: int = 1,
+    existing_analysis: dict | None = None,
+    save_path: str | None = None
+) -> tuple[dict, dict]:
+    """
+    Run an analysis type with an LLM judge improvement loop.
+
+    1. Run analysis_type -> produces draft
+    2. Run judge_type (requires analysis_type output) -> structured feedback
+    3. Re-run analysis_type with feedback injected via {{judge_feedback}} -> improved draft
+    4. Judge output preserved alongside final post
+
+    Args:
+        transcript_data: Full transcript data dict
+        analysis_type: Name of the analysis type to run (e.g., 'linkedin_v2')
+        judge_type: Name of the judge analysis type (e.g., 'linkedin_judge')
+        model: Gemini model to use
+        max_rounds: Number of judge improvement rounds (default 1)
+        existing_analysis: Existing analysis results (updated in-place)
+        save_path: Path to transcript file for saving results
+
+    Returns:
+        Tuple of (final_analysis_result, judge_result)
+    """
+    if existing_analysis is None:
+        existing_analysis = transcript_data.get("analysis", {})
+
+    transcript_text = transcript_data.get("transcript", "")
+
+    # Step 1: Run initial analysis
+    console.print(f"\n[bold cyan]Round 0: Generating initial draft...[/bold cyan]")
+    draft_result, prereqs = run_analysis_with_deps(
+        transcript_data=transcript_data,
+        analysis_type=analysis_type,
+        model=model,
+        existing_analysis=existing_analysis
+    )
+
+    if "error" in draft_result:
+        raise ValueError(f"Initial analysis failed: {draft_result.get('error')}")
+
+    # Store the draft in existing_analysis so judge can access it
+    draft_result["_model"] = model
+    draft_result["_analyzed_at"] = datetime.now().isoformat()
+    existing_analysis[analysis_type] = draft_result
+
+    # Save initial draft
+    if save_path:
+        _save_analysis_to_file(save_path, transcript_data, existing_analysis)
+
+    console.print(f"[green]Draft generated.[/green] Character count: {draft_result.get('character_count', 'N/A')}")
+
+    judge_result = None
+
+    for round_num in range(1, max_rounds + 1):
+        # Step 2: Run judge
+        console.print(f"\n[bold cyan]Round {round_num}: Running judge evaluation...[/bold cyan]")
+        judge_result, _ = run_analysis_with_deps(
+            transcript_data=transcript_data,
+            analysis_type=judge_type,
+            model=model,
+            existing_analysis=existing_analysis
+        )
+
+        if "error" in judge_result:
+            console.print(f"[yellow]Judge evaluation failed: {judge_result.get('error')}. Keeping current draft.[/yellow]")
+            break
+
+        # Display judge scores
+        scores = judge_result.get("scores", {})
+        overall = judge_result.get("overall_score", 0)
+        console.print(f"[bold]Judge scores (overall: {overall:.1f}/5.0):[/bold]")
+        for criterion, score in scores.items():
+            color = "green" if score >= 4 else "yellow" if score >= 3 else "red"
+            console.print(f"  [{color}]{criterion}: {score}/5[/{color}]")
+
+        improvements = judge_result.get("improvements", [])
+        if improvements:
+            console.print(f"\n[bold]Improvements suggested: {len(improvements)}[/bold]")
+            for imp in improvements:
+                console.print(f"  [yellow]- {imp.get('criterion', '')}: {imp.get('suggestion', '')[0:100]}...[/yellow]")
+
+        # Store judge output
+        judge_result["_model"] = model
+        judge_result["_analyzed_at"] = datetime.now().isoformat()
+        existing_analysis[judge_type] = judge_result
+
+        # Step 3: Re-run analysis with judge feedback injected
+        console.print(f"\n[bold cyan]Round {round_num}: Improving draft with feedback...[/bold cyan]")
+
+        # Format judge feedback for injection into prompt
+        judge_feedback_text = json.dumps({
+            "scores": judge_result.get("scores", {}),
+            "overall_score": judge_result.get("overall_score", 0),
+            "improvements": judge_result.get("improvements", []),
+            "rewritten_hook": judge_result.get("rewritten_hook")
+        }, indent=2)
+
+        # Build context with judge_feedback for conditional template
+        analysis_def = load_analysis_type(analysis_type)
+        prompt_context = resolve_optional_inputs(analysis_def, existing_analysis, transcript_text)
+        prompt_context["judge_feedback"] = judge_feedback_text
+
+        # Add required prerequisites to context
+        for req in analysis_def.get("requires", []):
+            if req in existing_analysis:
+                prompt_context[req] = format_prerequisite_output(existing_analysis[req])
+
+        # Run the improved analysis
+        improved_result = analyze_transcript(
+            transcript_text=transcript_text,
+            analysis_type=analysis_type,
+            title=transcript_data.get("title", ""),
+            model=model,
+            prerequisite_context=prompt_context
+        )
+
+        if "error" not in improved_result:
+            improved_result["_model"] = model
+            improved_result["_analyzed_at"] = datetime.now().isoformat()
+            improved_result["_judge_improved"] = True
+            improved_result["_judge_round"] = round_num
+            existing_analysis[analysis_type] = improved_result
+            draft_result = improved_result
+
+            console.print(f"[green]Improved draft generated.[/green] Character count: {improved_result.get('character_count', 'N/A')}")
+        else:
+            console.print(f"[yellow]Improvement round failed. Keeping previous draft.[/yellow]")
+            break
+
+    # Save final results
+    if save_path:
+        _save_analysis_to_file(save_path, transcript_data, existing_analysis)
+        console.print(f"\n[green]Results saved to {save_path}[/green]")
+
+    return draft_result, judge_result
+
+
+def _save_analysis_to_file(path: str, transcript_data: dict, analysis: dict):
+    """Save analysis results back to the transcript file."""
+    transcript_data["analysis"] = analysis
+    with open(path, 'w') as f:
+        json.dump(transcript_data, f, indent=2, ensure_ascii=False)
+
+
 def analyze_transcript_file(
     transcript_path: str,
     analysis_types: list[str],
@@ -1296,6 +1446,10 @@ Examples:
                         help=f"Gemini model (default: {DEFAULT_MODEL})")
     parser.add_argument("--force", "-f", action="store_true",
                         help="Force re-run analyses even if already done with same model")
+    parser.add_argument("--judge", action="store_true",
+                        help="Run with LLM judge improvement loop (for linkedin_v2)")
+    parser.add_argument("--judge-rounds", type=int, default=1,
+                        help="Number of judge improvement rounds (default: 1)")
     parser.add_argument("--no-save", action="store_true",
                         help="Don't save results to transcript file")
     parser.add_argument("--list-types", "-l", action="store_true",
@@ -1362,6 +1516,50 @@ Examples:
         else:
             analysis_types = ["summary"]
 
+        # Judge loop mode
+        if args.judge:
+            # Default to linkedin_v2 if no type specified
+            if not args.types:
+                analysis_types = ["linkedin_v2"]
+
+            analysis_type = analysis_types[0]
+            judge_type = "linkedin_judge"
+
+            console.print(Panel(
+                f"[bold]Transcript Analysis (Judge Loop)[/bold]\n"
+                f"File: {args.transcript}\n"
+                f"Analysis: {analysis_type}\n"
+                f"Judge: {judge_type}\n"
+                f"Rounds: {args.judge_rounds}\n"
+                f"Model: {args.model}",
+                border_style="cyan"
+            ))
+
+            try:
+                with open(args.transcript) as f:
+                    transcript_data = json.load(f)
+
+                final_result, judge_result = run_with_judge_loop(
+                    transcript_data=transcript_data,
+                    analysis_type=analysis_type,
+                    judge_type=judge_type,
+                    model=args.model,
+                    max_rounds=args.judge_rounds,
+                    save_path=args.transcript if not args.no_save else None
+                )
+
+                console.print("\n[bold]Final Post:[/bold]")
+                console.print(Panel(final_result.get("post", ""), border_style="green"))
+
+                if judge_result:
+                    overall = judge_result.get("overall_score", 0)
+                    console.print(f"\n[bold]Judge overall score: {overall:.1f}/5.0[/bold]")
+
+            except Exception as e:
+                console.print(f"[red]Error: {e}[/red]")
+                sys.exit(1)
+            return
+
         console.print(Panel(
             f"[bold]Transcript Analysis[/bold]\n"
             f"File: {args.transcript}\n"
@@ -1386,6 +1584,52 @@ Examples:
                     console.print(f"  [red]x {name}[/red]: {result['error']}")
                 else:
                     console.print(f"  [green]done {name}[/green]")
+
+        except Exception as e:
+            console.print(f"[red]Error: {e}[/red]")
+            sys.exit(1)
+        return
+
+    # Judge mode with decimal filter (no direct file path)
+    if args.judge and args.decimal:
+        transcripts = get_all_transcripts(decimal_filter=args.decimal, limit=1)
+        if not transcripts:
+            console.print(f"[red]No transcripts found for decimal: {args.decimal}[/red]")
+            sys.exit(1)
+
+        transcript_path = transcripts[0]["path"]
+        analysis_type = args.types[0] if args.types else "linkedin_v2"
+        judge_type = "linkedin_judge"
+
+        console.print(Panel(
+            f"[bold]Transcript Analysis (Judge Loop)[/bold]\n"
+            f"File: {transcript_path}\n"
+            f"Analysis: {analysis_type}\n"
+            f"Judge: {judge_type}\n"
+            f"Rounds: {args.judge_rounds}\n"
+            f"Model: {args.model}",
+            border_style="cyan"
+        ))
+
+        try:
+            with open(transcript_path) as f:
+                transcript_data = json.load(f)
+
+            final_result, judge_result = run_with_judge_loop(
+                transcript_data=transcript_data,
+                analysis_type=analysis_type,
+                judge_type=judge_type,
+                model=args.model,
+                max_rounds=args.judge_rounds,
+                save_path=transcript_path if not args.no_save else None
+            )
+
+            console.print("\n[bold]Final Post:[/bold]")
+            console.print(Panel(final_result.get("post", ""), border_style="green"))
+
+            if judge_result:
+                overall = judge_result.get("overall_score", 0)
+                console.print(f"\n[bold]Judge overall score: {overall:.1f}/5.0[/bold]")
 
         except Exception as e:
             console.print(f"[red]Error: {e}[/red]")

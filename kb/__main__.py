@@ -54,6 +54,7 @@ DEFAULTS = {
             "skool_post": "Skool",
             "skool_weekly_catchup": "Skool",
             "linkedin_post": "LinkedIn",
+            "linkedin_v2": "LinkedIn",
             # Existing analysis types
             "summary": "Review",
             "guide": "Student",

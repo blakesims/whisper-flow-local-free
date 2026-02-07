@@ -1,0 +1,51 @@
+{
+  "name": "linkedin_judge",
+  "description": "Evaluate a LinkedIn post draft against research-backed quality criteria",
+  "requires": ["linkedin_v2"],
+  "optional_inputs": [],
+  "prompt": "You are a LinkedIn content quality judge. Your job is to evaluate a LinkedIn post draft against specific, research-backed criteria and provide actionable feedback for improvement.\n\nPOST DRAFT TO EVALUATE:\n\n{{linkedin_v2}}\n\nORIGINAL TRANSCRIPT (for context on available material):\n{{transcript}}\n\n---\n\nEvaluate the post on each criterion below. Score each 1-5 (1=poor, 5=excellent). Be HARSH but CONSTRUCTIVE. The goal is to improve the post, not validate it.\n\nCRITERIA:\n\n1. HOOK STRENGTH\n   - Line 1: Is it 8 words or fewer? Does it stop the scroll?\n   - Line 2: Is it 12 words or fewer? Does it tease value?\n   - Does the hook create tension, curiosity, or a specific promise?\n   - Would YOU click \"see more\" based on these two lines alone?\n\n2. STRUCTURE\n   - Are paragraphs 1-2 sentences maximum?\n   - Is there whitespace (double line breaks) between every paragraph?\n   - Is the post scannable on mobile?\n   - Does it follow a clear narrative arc?\n\n3. SPECIFICITY\n   - Does the post include concrete details (tool names, metrics, timeframes)?\n   - Are there real examples, not hypothetical ones?\n   - Could you replace the details with generic terms and lose meaning? (If yes, good specificity)\n   - Technical builder audience wants depth — is there enough?\n\n4. CHARACTER COUNT\n   - Is the post between 1,200 and 1,800 characters?\n   - If outside this range, is it justified by the content?\n\n5. CTA QUALITY\n   - Does the post end with a specific, thoughtful question?\n   - Is it NOT engagement bait (\"Agree?\", \"Comment below!\", \"Tag someone\")?\n   - Would a real person want to answer this question?\n\n6. FORMULA ADHERENCE\n   - Does the post follow a recognizable content formula?\n   - Is the formula well-executed (not forced)?\n\n7. VOICE & AUTHENTICITY\n   - Does it sound like a real person, not a corporate account or AI?\n   - Is there a clear opinion or stance?\n   - Does it show judgment and reasoning?\n\nFor each criterion with a score below 4, provide a SPECIFIC improvement suggestion. Not \"make it better\" — tell exactly what to change and how.",
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "scores": {
+        "type": "object",
+        "description": "Scores per criterion (1-5)",
+        "properties": {
+          "hook_strength": { "type": "integer" },
+          "structure": { "type": "integer" },
+          "specificity": { "type": "integer" },
+          "character_count": { "type": "integer" },
+          "cta_quality": { "type": "integer" },
+          "formula_adherence": { "type": "integer" },
+          "voice_authenticity": { "type": "integer" }
+        }
+      },
+      "overall_score": {
+        "type": "number",
+        "description": "Average score across all criteria (1.0-5.0)"
+      },
+      "improvements": {
+        "type": "array",
+        "description": "List of specific improvement suggestions for criteria scoring below 4",
+        "items": {
+          "type": "object",
+          "properties": {
+            "criterion": { "type": "string" },
+            "current_issue": { "type": "string" },
+            "suggestion": { "type": "string" }
+          }
+        }
+      },
+      "strengths": {
+        "type": "array",
+        "description": "List of what the post does well (criteria scoring 4+)",
+        "items": { "type": "string" }
+      },
+      "rewritten_hook": {
+        "type": "string",
+        "description": "If hook scored below 4, provide a better hook (line 1 + line 2). Otherwise null."
+      }
+    },
+    "required": ["scores", "overall_score", "improvements", "strengths"]
+  }
+}
