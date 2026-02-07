@@ -306,7 +306,7 @@ New function `run_with_judge_loop(decimal, analysis_type, judge_type, max_rounds
 ---
 
 ### Phase 3: Rendering Pipeline (HTML → PDF + Mermaid)
-**Status**: Not Started
+**Status**: CODE_REVIEW
 
 **Objectives:**
 - Install rendering dependencies: Playwright + Chromium, mmdc (mermaid CLI)
@@ -517,6 +517,44 @@ All 3 critical and 5 major issues addressed:
 - [x] AC5: Template is configurable (colors, fonts changeable via config.json) -- verified: both templates load colors/fonts from config.json, test validates all required color keys present
 - [ ] AC6: Blake approves visual design -- REQUIRES Mac + Playwright rendering for visual inspection
 
+### Phase 3: Rendering Pipeline (HTML -> PDF + Mermaid)
+- **Status:** COMPLETE
+- **Started:** 2026-02-07
+- **Completed:** 2026-02-07
+- **Commits:** `0c876cd`
+- **Files Modified:**
+  - `kb/render.py` -- NEW: rendering engine with functions: render_mermaid() (mmdc wrapper), render_html_from_slides() (Jinja2 HTML), render_html_to_pdf() (Playwright sync), render_slide_thumbnails() (per-slide PNGs), render_carousel() (full HTML->PDF+thumbnails), render_pipeline() (orchestrates mermaid+carousel)
+  - `kb/publish.py` -- NEW: batch CLI module with find_renderables() (scans KB_ROOT for carousel_slides analysis), render_one() (single transcript render), argparse CLI (--pending, --regenerate, --dry-run, --decimal)
+  - `kb/__main__.py` -- MODIFY: added 'publish' to COMMANDS dict
+  - `requirements.txt` -- MODIFY: added playwright>=1.40.0
+  - `kb/tests/test_render.py` -- NEW: 47 tests covering config loading, HTML generation (both templates, all slide types, autoescape, XSS prevention), mermaid rendering (mock mmdc, timeout, failure), PDF rendering (mock Playwright, dimensions, content setting, browser close), slide thumbnails (mock, skip missing), carousel full flow, pipeline orchestration (mermaid+carousel, mermaid failure graceful, carousel failure, template defaults), publish CLI (imports, commands registration, dry_run)
+- **Notes:**
+  - Playwright 1.58.0 installed on server with Chromium browser
+  - mmdc 11.12.0 verified at /home/blake/.npm-global/bin/mmdc
+  - Uses Jinja2 autoescape=True per Phase 2 code review recommendation
+  - render_mermaid() gracefully returns None on failure (mmdc not found, syntax error, timeout) -- pipeline continues without mermaid slide
+  - render_html_from_slides() uses select_autoescape(["html"]) for XSS prevention
+  - Both sync and async Playwright wrappers provided (sync used by default, async available for future kb serve integration)
+  - All 166 tests pass (47 new + 119 existing), zero regressions
+
+### Tasks Completed
+- [x] Task 3.1: Created `kb/render.py` with render_mermaid(), render_html_from_slides(), render_html_to_pdf(), render_slide_thumbnails(), render_carousel(), render_pipeline()
+- [x] Task 3.2: Created `kb/publish.py` with `kb publish` CLI command (--pending, --regenerate, --dry-run, --decimal)
+- [x] Task 3.3: Registered 'publish' in COMMANDS dict in `kb/__main__.py`
+- [x] Task 3.4: Added playwright>=1.40.0 to requirements.txt
+- [x] Task 3.5: Wrote 47 tests in `kb/tests/test_render.py`, all passing
+
+### Acceptance Criteria
+- [x] AC1: mmdc installed and working -- verified: mmdc 11.12.0 at /home/blake/.npm-global/bin/mmdc, _find_mmdc() auto-detects it
+- [x] AC2: Playwright installed and working -- verified: Playwright 1.58.0 with Chromium, sync_playwright imports correctly
+- [x] AC3: HTML carousel renders to multi-page PDF at 1080x1350 per page -- verified via mocked Playwright tests (correct dimensions passed to page.pdf())
+- [ ] AC4: Mermaid code generates clean PNG via mmdc -- CANNOT FULLY VERIFY without visual inspection (mocked in tests, mmdc binary verified)
+- [x] AC5: Mermaid PNG embeds correctly as carousel slide -- verified: render_pipeline sets mermaid_image_path on slide data, template renders <img> tag
+- [x] AC6: Failed mermaid render skips slide gracefully -- verified: test_pipeline_mermaid_failure_logs_warning passes, errors list populated
+- [ ] AC7: PDF opens correctly in Preview.app and looks professional -- REQUIRES Mac for visual verification
+- [x] AC8: Output path is configurable via config -- render_pipeline accepts output_dir param, publish.py uses visuals_dir from decimal folder
+- [x] AC9: Individual slide PNGs generated for posting queue thumbnails -- verified: render_slide_thumbnails() generates slide-N.png per slide
+
 ---
 
 ## Code Review Log
@@ -528,6 +566,14 @@ All 3 critical and 5 major issues addressed:
 - **Summary:** Implementation is solid. Judge loop correctly integrates with existing analysis infrastructure. Config files are research-informed and well-structured. Two major issues found (silent `--judge` flag ignore without required args, ~87 lines of duplicated CLI code) but neither blocks Phase 2. All 8 acceptance criteria verified (AC5 deferred -- requires live LLM).
 
 -> Details: `code-review-phase-1.md`
+
+### Phase 2
+- **Gate:** PASS
+- **Reviewed:** 2026-02-07
+- **Issues:** 0 critical, 1 major, 4 minor
+- **Summary:** Solid implementation. All 6 files match execution report. 46 tests pass. Config files follow existing codebase patterns correctly. Templates are professional HTML/CSS at 1080x1350px. One major issue: `summary` slide type in templates but not in carousel_slides schema (dead code, not blocking). Minor: no autoescaping, Google Fonts @import may fail offline, duplicate transcript in prompts (pre-existing pattern), repetitive config reads in tests.
+
+-> Details: `code-review-phase-2.md`
 
 ---
 
