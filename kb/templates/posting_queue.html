@@ -579,6 +579,104 @@
         .mode-btn .key-hint {
             background: rgba(0,0,0,0.2);
         }
+
+        /* Visual status badges */
+        .visual-badge {
+            font-size: 10px;
+            font-weight: 600;
+            padding: 3px 8px;
+            border-radius: 4px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .visual-badge.generating {
+            background: var(--yellow);
+            color: var(--crust);
+        }
+
+        .visual-badge.ready {
+            background: var(--green);
+            color: var(--crust);
+        }
+
+        .visual-badge.text-only {
+            background: var(--surface1);
+            color: var(--subtext0);
+        }
+
+        .visual-badge.failed {
+            background: var(--red);
+            color: var(--crust);
+        }
+
+        .visual-badge.pending {
+            background: var(--surface0);
+            color: var(--overlay0);
+        }
+
+        /* Spinner animation */
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border: 2px solid var(--crust);
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        /* Carousel thumbnail */
+        .carousel-thumbnail {
+            margin-top: 8px;
+            border-radius: 6px;
+            overflow: hidden;
+            max-height: 120px;
+        }
+
+        .carousel-thumbnail img {
+            width: 100%;
+            height: auto;
+            display: block;
+            border-radius: 6px;
+        }
+
+        /* Preview visual section */
+        .preview-visual {
+            margin-bottom: 16px;
+        }
+
+        .preview-visual img {
+            width: 100%;
+            max-height: 300px;
+            object-fit: contain;
+            border-radius: 6px;
+            background: var(--mantle);
+        }
+
+        .pdf-download-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 14px;
+            background: var(--mauve);
+            color: var(--crust);
+            border-radius: 4px;
+            text-decoration: none;
+            font-size: 11px;
+            font-weight: 600;
+            margin-top: 8px;
+        }
+
+        .pdf-download-btn:hover {
+            opacity: 0.85;
+        }
     </style>
 </head>
 <body>
@@ -673,6 +771,7 @@
             'skool_post': '📝',
             'skool_weekly_catchup': '📅',
             'linkedin_post': '💼',
+            'linkedin_v2': '💼',
             'student_guide': '📚',
             'guide': '📚',
             'summary': '📋',
@@ -778,13 +877,21 @@
             const preview = item.content.substring(0, 100);
             const platformClass = PLATFORM_CLASS[item.destination] || '';
 
+            const visualBadge = renderVisualBadge(item.visual_status);
+            const thumbnailHtml = item.thumbnail_url && item.visual_status === 'ready'
+                ? `<div class="carousel-thumbnail"><img src="${escapeHtml(item.thumbnail_url)}" alt="Slide 1" loading="lazy"></div>`
+                : '';
+
             div.innerHTML = `
                 <div class="action-item-header">
                     <div class="action-type">
                         <span class="action-icon">${icon}</span>
                         <span class="action-label">${escapeHtml(formatActionType(item.type))}</span>
                     </div>
-                    <span class="platform-badge ${platformClass}">${escapeHtml(item.destination)}</span>
+                    <div style="display: flex; gap: 6px; align-items: center;">
+                        ${visualBadge}
+                        <span class="platform-badge ${platformClass}">${escapeHtml(item.destination)}</span>
+                    </div>
                 </div>
                 <div class="action-source">
                     from <span class="action-source-title">"${escapeHtml(item.source_title)}"</span>
@@ -797,6 +904,7 @@
                         <span>~${item.word_count} words</span>
                     </span>
                 </div>
+                ${thumbnailHtml}
                 <div class="action-preview">${escapeHtml(preview)}...</div>
             `;
 
@@ -809,6 +917,23 @@
             return type.split('_').map(word =>
                 word.charAt(0).toUpperCase() + word.slice(1)
             ).join(' ');
+        }
+
+        // Render visual status badge HTML
+        function renderVisualBadge(status) {
+            switch (status) {
+                case 'generating':
+                    return '<span class="visual-badge generating"><span class="spinner"></span> Generating</span>';
+                case 'ready':
+                    return '<span class="visual-badge ready">Carousel</span>';
+                case 'text_only':
+                    return '<span class="visual-badge text-only">Text Only</span>';
+                case 'failed':
+                    return '<span class="visual-badge failed">Failed</span>';
+                case 'pending':
+                default:
+                    return '<span class="visual-badge pending">...</span>';
+            }
         }
 
         // Select an item
@@ -838,13 +963,56 @@
 
             previewTypeLabel.textContent = item.type;
 
+            // Build visual section
+            let visualHtml = '';
+            if (item.visual_status === 'ready' && item.thumbnail_url) {
+                visualHtml = `
+                    <div class="preview-section preview-visual">
+                        <div class="preview-section-title">Carousel Preview</div>
+                        <img src="${escapeHtml(item.thumbnail_url)}" alt="Carousel slide 1">
+                        ${item.pdf_url ? `<a href="${escapeHtml(item.pdf_url)}" target="_blank" class="pdf-download-btn">Download PDF</a>` : ''}
+                    </div>
+                `;
+            } else if (item.visual_status === 'generating') {
+                visualHtml = `
+                    <div class="preview-section">
+                        <div class="preview-section-title">Visual</div>
+                        <div style="padding: 16px; background: var(--mantle); border-radius: 6px; text-align: center; color: var(--yellow);">
+                            <span class="spinner" style="border-color: var(--yellow); border-top-color: transparent;"></span>
+                            Generating carousel...
+                        </div>
+                    </div>
+                `;
+            } else if (item.visual_status === 'text_only') {
+                visualHtml = `
+                    <div class="preview-section">
+                        <div class="preview-section-title">Visual</div>
+                        <div style="padding: 12px; background: var(--mantle); border-radius: 6px; color: var(--subtext0); font-size: 12px;">
+                            Text-only post (no carousel)
+                        </div>
+                    </div>
+                `;
+            } else if (item.visual_status === 'failed') {
+                visualHtml = `
+                    <div class="preview-section">
+                        <div class="preview-section-title">Visual</div>
+                        <div style="padding: 12px; background: var(--mantle); border-radius: 6px; color: var(--red); font-size: 12px;">
+                            Visual generation failed. Post is still ready for text-only publishing.
+                        </div>
+                    </div>
+                `;
+            }
+
             previewPane.innerHTML = `
                 <div class="preview-content">
                     <div class="preview-title">${escapeHtml(formatActionType(item.type))}</div>
                     <div class="preview-subtitle">
                         ${escapeHtml(item.source_title)}
                         <span class="platform-badge ${platformClass}" style="margin-left: 8px;">${escapeHtml(item.destination)}</span>
+                        ${renderVisualBadge(item.visual_status)}
                     </div>
+
+                    ${visualHtml}
 
                     <div class="preview-section">
                         <div class="preview-meta-grid">
