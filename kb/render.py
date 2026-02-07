@@ -19,6 +19,7 @@ Usage:
     result = render_pipeline(decimal, analysis_results, config)
 """
 
+import base64
 import json
 import logging
 import os
@@ -454,8 +455,15 @@ def render_pipeline(
                     mermaid_out_dir,
                 )
                 if mermaid_path:
-                    # Embed the image path in the slide data for template
-                    slide["mermaid_image_path"] = mermaid_path
+                    # Convert local file path to base64 data URI for Playwright
+                    # (Chromium security blocks local file:// paths in set_content)
+                    try:
+                        with open(mermaid_path, "rb") as img_f:
+                            img_data = base64.b64encode(img_f.read()).decode("ascii")
+                        slide["mermaid_image_path"] = f"data:image/png;base64,{img_data}"
+                    except (IOError, OSError) as read_err:
+                        logger.warning("Could not read mermaid PNG for base64: %s", read_err)
+                        slide["mermaid_image_path"] = mermaid_path
                 else:
                     errors.append(
                         f"Mermaid render failed for slide {slide.get('slide_number')}. "

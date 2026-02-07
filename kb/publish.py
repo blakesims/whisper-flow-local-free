@@ -102,7 +102,7 @@ def find_renderables(
                     "visuals_dir": str(visuals_dir),
                 })
 
-            except (json.JSONDecodeError, KeyError) as e:
+            except (json.JSONDecodeError, KeyError, AttributeError) as e:
                 logger.warning("Could not read %s: %s", json_file, e)
 
     return renderables
