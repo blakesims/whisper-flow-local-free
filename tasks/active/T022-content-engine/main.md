@@ -350,7 +350,7 @@ New function `run_with_judge_loop(decimal, analysis_type, judge_type, max_rounds
 ---
 
 ### Phase 4: KB Serve Integration + `kb publish` CLI
-**Status**: Not Started
+**Status**: CODE_REVIEW
 
 **Objectives:**
 - **Async pipeline on approve:** When Blake hits 'a' in kb serve, the full pipeline runs in a background thread (NOT synchronous in Flask request). The approve endpoint returns immediately with status "approved, generating visuals...". Pipeline status tracked in action-state.json (`visual_status: "generating" | "ready" | "failed"`). Posting queue polls for completion.
@@ -555,6 +555,48 @@ All 3 critical and 5 major issues addressed:
 - [x] AC8: Output path is configurable via config -- render_pipeline accepts output_dir param, publish.py uses visuals_dir from decimal folder
 - [x] AC9: Individual slide PNGs generated for posting queue thumbnails -- verified: render_slide_thumbnails() generates slide-N.png per slide
 
+### Phase 4: KB Serve Integration + kb publish CLI Enhancement
+- **Status:** COMPLETE
+- **Started:** 2026-02-07
+- **Completed:** 2026-02-07
+- **Commits:** `1c9ed80`, `2307a27`, `4f151e7`, `cd0d13e`
+- **Files Modified:**
+  - `kb/render.py` -- MODIFY: added base64 import, convert mermaid PNG to data URI before embedding in HTML (fixes Chromium local file path blocking)
+  - `kb/publish.py` -- MODIFY: added AttributeError to find_renderables() except clause
+  - `kb/__main__.py` -- MODIFY: removed linkedin_post from default action_mapping (replaced by linkedin_v2)
+  - `kb/serve.py` -- MODIFY: added run_visual_pipeline() background thread function, _update_visual_status() helper, _find_transcript_file() helper, /visuals/<path> route, visual_status/thumbnail_url/pdf_url in posting queue API, approve endpoint triggers background pipeline thread, fixed ACTION_ID_PATTERN regex to allow digits in analysis names
+  - `kb/templates/posting_queue.html` -- MODIFY: added visual status badges (generating spinner, ready, text_only, failed), carousel thumbnail display, PDF download button, linkedin_v2 in ACTION_ICONS, visual section in preview pane
+  - `kb/tests/test_serve_integration.py` -- NEW: 22 tests covering visual status state machine, /visuals/ route, posting queue API visual fields, approve thread trigger, mermaid base64 conversion, action mapping transition, AttributeError fix, run_visual_pipeline function
+- **Notes:**
+  - ACTION_ID_PATTERN regex had to be fixed: `[a-z_]+` -> `[a-z0-9_]+` to support `linkedin_v2` action IDs
+  - Cannot verify live LLM-dependent features on server (no GEMINI_API_KEY) -- full testing requires Mac environment
+  - Background pipeline uses threading.Thread(daemon=True) per videos.py precedent
+  - visual_status values: "pending" (default), "generating", "ready", "text_only", "failed"
+  - Mermaid base64 conversion falls back gracefully to raw file path if PNG can't be read
+  - All 188 tests pass (22 new + 166 existing), zero regressions
+
+### Tasks Completed
+- [x] Task 4.1: Fix mermaid base64 in render.py -- PNG to data URI conversion before HTML embedding
+- [x] Task 4.2: Fix AttributeError in publish.py -- added to except clause in find_renderables()
+- [x] Task 4.3: Remove linkedin_post from action_mapping -- replaced by linkedin_v2
+- [x] Task 4.4: Wire full pipeline in kb serve -- run_visual_pipeline() background thread on approve
+- [x] Task 4.5: Add /visuals/ Flask route -- serves PDFs and thumbnails from KB_ROOT with traversal prevention
+- [x] Task 4.6: Update posting queue UI -- visual status badges, thumbnails, PDF download, spinner
+- [x] Task 4.7: Write 22 tests -- all passing, zero regressions
+
+### Acceptance Criteria
+- [x] AC1: Approving a post returns immediately (< 1s) -- verified: test_approve_returns_immediately passes, pipeline runs in daemon thread
+- [x] AC2: visual_status tracked in action-state.json -- verified: 5 tests cover generating/ready/failed/text_only/noop transitions
+- [x] AC3: Posting queue shows "Generating..." spinner -- verified: renderVisualBadge() returns spinner HTML for "generating" status
+- [x] AC4: Posting queue shows carousel thumbnail when ready -- verified: test_posting_queue_includes_visual_status, thumbnail_url field populated
+- [x] AC5: Posting queue shows "Text Only" badge -- verified: renderVisualBadge() returns text-only badge, test_sets_text_only_for_non_carousel passes
+- [x] AC6: PDF download works via /visuals/ route -- verified: test_serves_existing_file, pdf_url in posting queue response
+- [x] AC7: `kb publish --pending` processes all approved posts without visuals -- verified: Phase 3 implementation + find_renderables scans for missing visuals
+- [x] AC8: `kb publish --regenerate` re-renders with current templates -- verified: Phase 3 implementation with include_rendered=True
+- [x] AC9: `kb publish --dry-run` shows what would be generated -- verified: Phase 3 implementation
+- [x] AC10: Failed renders flagged in UI, not blocking -- verified: test_sets_failed_on_render_error, UI shows failed badge with explanation
+- [x] AC11: linkedin_v2 appears in action queue; old linkedin_post items don't -- verified: 4 tests in TestActionMappingTransition
+
 ---
 
 ## Code Review Log
@@ -574,6 +616,14 @@ All 3 critical and 5 major issues addressed:
 - **Summary:** Solid implementation. All 6 files match execution report. 46 tests pass. Config files follow existing codebase patterns correctly. Templates are professional HTML/CSS at 1080x1350px. One major issue: `summary` slide type in templates but not in carousel_slides schema (dead code, not blocking). Minor: no autoescaping, Google Fonts @import may fail offline, duplicate transcript in prompts (pre-existing pattern), repetitive config reads in tests.
 
 -> Details: `code-review-phase-2.md`
+
+### Phase 3
+- **Gate:** PASS
+- **Reviewed:** 2026-02-07
+- **Issues:** 1 critical, 2 major, 3 minor
+- **Summary:** Well-structured implementation. 47 new tests pass (166 total, zero regressions). All files match execution report. One critical issue: mermaid PNG embedding will silently fail in Playwright's `set_content()` context (local file paths blocked by Chromium security). Does not break pipeline (mermaid failure is graceful per AC6) but means mermaid-in-carousel never actually works. Fix recommended for Phase 4: use base64 data URIs. Two major: `find_renderables` crashes on raw-string carousel_slides (missing `AttributeError` in except); double Playwright browser launch per carousel (performance). Three minor: browser.close() not in try/finally, dead async code, plan deviation on render_config.json.
+
+-> Details: `code-review-phase-3.md`
 
 ---
 
