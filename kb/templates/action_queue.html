@@ -53,7 +53,7 @@
         /* Tmux-style layout */
         .tmux-container {
             display: grid;
-            grid-template-columns: 1fr 400px;
+            grid-template-columns: 320px 1fr;
             grid-template-rows: 1fr auto;
             height: 100vh;
             gap: 1px;
@@ -88,6 +88,14 @@
             flex: 1;
             overflow-y: auto;
             padding: 0;
+            min-height: 0;
+        }
+
+        /* Preview pane body needs flex layout for sticky action bar */
+        .pane-body.preview-body {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
         }
 
         /* Section headers */
@@ -132,7 +140,7 @@
 
         /* Action items */
         .action-item {
-            padding: 16px;
+            padding: 8px 12px;
             border-bottom: 1px solid var(--surface0);
             cursor: pointer;
             transition: background 0.1s;
@@ -150,8 +158,8 @@
         .action-item-header {
             display: flex;
             justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 8px;
+            align-items: center;
+            margin-bottom: 0;
         }
 
         .action-type {
@@ -167,20 +175,28 @@
         .action-label {
             font-weight: 600;
             color: var(--text);
+            font-size: 12px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .action-destination {
-            font-size: 11px;
+            font-size: 10px;
             color: var(--overlay0);
             background: var(--surface0);
-            padding: 2px 8px;
+            padding: 1px 6px;
             border-radius: 4px;
+            flex-shrink: 0;
         }
 
         .action-source {
             color: var(--subtext0);
-            font-size: 12px;
-            margin-bottom: 8px;
+            font-size: 11px;
+            margin-top: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .action-source-title {
@@ -188,10 +204,7 @@
         }
 
         .action-meta {
-            display: flex;
-            gap: 16px;
-            font-size: 11px;
-            color: var(--overlay0);
+            display: none;
         }
 
         .meta-item {
@@ -201,26 +214,7 @@
         }
 
         .action-preview {
-            margin-top: 12px;
-            padding: 12px;
-            background: var(--mantle);
-            border-radius: 6px;
-            font-size: 12px;
-            color: var(--subtext1);
-            line-height: 1.6;
-            max-height: 80px;
-            overflow: hidden;
-            position: relative;
-        }
-
-        .action-preview::after {
-            content: '';
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            height: 30px;
-            background: linear-gradient(transparent, var(--mantle));
+            display: none;
         }
 
         /* Right pane - Preview */
@@ -243,6 +237,11 @@
 
         .preview-content {
             padding: 20px;
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
         }
 
         .preview-title {
@@ -270,6 +269,14 @@
             margin-bottom: 8px;
         }
 
+        .preview-section-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            overflow: hidden;
+        }
+
         .preview-text {
             background: var(--mantle);
             padding: 16px;
@@ -277,9 +284,10 @@
             font-size: 13px;
             line-height: 1.7;
             color: var(--text);
-            max-height: 400px;
+            flex: 1;
             overflow-y: auto;
             white-space: pre-wrap;
+            min-height: 0;
         }
 
         .preview-meta-grid {
@@ -312,7 +320,10 @@
         .preview-actions {
             display: flex;
             gap: 8px;
-            margin-top: 20px;
+            padding: 12px 20px;
+            background: var(--mantle);
+            border-top: 1px solid var(--surface0);
+            flex-shrink: 0;
         }
 
         .preview-actions .btn {
@@ -638,7 +649,7 @@
                 <span><span class="pane-index">1:</span> preview</span>
                 <span id="preview-type-label" style="color: var(--sapphire);"></span>
             </div>
-            <div class="pane-body" id="preview-pane">
+            <div class="pane-body preview-body" id="preview-pane">
                 <div class="preview-empty">
                     <div class="preview-empty-icon">📋</div>
                     <div>Select an item to preview</div>
@@ -912,29 +923,28 @@
                         </div>
                     </div>
 
-                    <div class="preview-section">
+                    <div class="preview-section-content">
                         <div class="preview-section-title">Content Preview</div>
                         <div class="preview-text">${escapeHtml(item.content)}</div>
                     </div>
-
-                    <div class="preview-actions">
-                        <button class="btn btn-primary" onclick="copyToClipboard()">
-                            <span>&#128203; Copy</span>
-                            <span class="key">c</span>
-                        </button>
-                        <button class="btn btn-secondary" onclick="approveItem()" style="background: var(--sapphire); color: var(--crust);">
-                            <span>Approve</span>
-                            <span class="key">a</span>
-                        </button>
-                        <button class="btn btn-secondary" onclick="markDone()">
-                            <span>Done</span>
-                            <span class="key">d</span>
-                        </button>
-                        <button class="btn btn-secondary" onclick="skipItem()">
-                            <span>Skip</span>
-                            <span class="key">s</span>
-                        </button>
-                    </div>
+                </div>
+                <div class="preview-actions">
+                    <button class="btn btn-primary" onclick="copyToClipboard()">
+                        <span>&#128203; Copy</span>
+                        <span class="key">c</span>
+                    </button>
+                    <button class="btn btn-secondary" onclick="approveItem()" style="background: var(--sapphire); color: var(--crust);">
+                        <span>Approve</span>
+                        <span class="key">a</span>
+                    </button>
+                    <button class="btn btn-secondary" onclick="markDone()">
+                        <span>Done</span>
+                        <span class="key">d</span>
+                    </button>
+                    <button class="btn btn-secondary" onclick="skipItem()">
+                        <span>Skip</span>
+                        <span class="key">s</span>
+                    </button>
                 </div>
             `;
         }
