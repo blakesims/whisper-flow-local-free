@@ -240,6 +240,12 @@ def scan_actionable_items() -> list[dict]:
                     else:
                         content = str(analysis_data)
 
+                    # Build raw_data: analysis dict minus _ prefixed metadata keys
+                    if isinstance(analysis_data, dict):
+                        raw_data = {k: v for k, v in analysis_data.items() if not k.startswith("_")}
+                    else:
+                        raw_data = None
+
                     # Calculate word count (handle both string and fallback)
                     if isinstance(content, str):
                         word_count = len(content.split()) if content else 0
@@ -254,6 +260,7 @@ def scan_actionable_items() -> list[dict]:
                         "source_title": data.get("title", "Untitled"),
                         "source_decimal": data.get("decimal", ""),
                         "content": content,
+                        "raw_data": raw_data,
                         "word_count": word_count,
                         "analyzed_at": analyzed_at,
                         "model": model,
@@ -378,6 +385,7 @@ def get_action_content(action_id: str):
             return jsonify({
                 "id": item["id"],
                 "content": item["content"],
+                "raw_data": item.get("raw_data"),
                 "type": item["type"],
                 "destination": item["destination"],
                 "source_title": item["source_title"],
