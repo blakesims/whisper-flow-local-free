@@ -480,6 +480,55 @@ All 3 critical and 5 major issues addressed:
 - [x] AC7: `linkedin_v2` appears in kb serve action queue via action_mapping -- verified
 - [x] AC8: Old `linkedin_post` still works unchanged -- verified
 
+### Phase 2: Visual Classifier + Carousel Templates
+- **Status:** COMPLETE
+- **Started:** 2026-02-07
+- **Completed:** 2026-02-07
+- **Commits:** `24d0292`
+- **Files Modified:**
+  - `kb/config/analysis_types/visual_format.json` -- NEW: classifier config, requires linkedin_v2, outputs CAROUSEL/TEXT_ONLY + include_mermaid flag + confidence + reasoning + mermaid_type
+  - `kb/config/analysis_types/carousel_slides.json` -- NEW: slide breakdown config, requires linkedin_v2, outputs JSON array of {slide_number, type, content, words}. Supports hook/content/mermaid/cta slide types
+  - `kb/carousel_templates/config.json` -- NEW: configurable colors, fonts, dimensions (1080x1350), brand settings, two template definitions (dark-purple, light)
+  - `kb/carousel_templates/dark-purple.html` -- NEW: primary Jinja2 template, dark purple (#2D1B69) gradient background, Inter font, supports all 5 slide types (hook, content, mermaid, cta, summary), page breaks between slides, brand footer with slide indicators
+  - `kb/carousel_templates/light.html` -- NEW: secondary template, white background with dark text, same structure as dark-purple
+  - `kb/tests/test_carousel_templates.py` -- NEW: 46 tests covering config validation (visual_format, carousel_slides, carousel config) and Jinja2 template rendering (both templates, all slide types, mermaid with/without image, edge cases)
+- **Notes:**
+  - Config files also copied to mac-sync path: `~/lem/mac-sync/Obsidian/zen-ai/knowledge-base/transcripts/config/analysis_types/`
+  - Templates use Google Fonts (Inter) loaded via @import -- requires internet for rendering (Phase 3 Playwright will have access)
+  - Content slide numbering uses a Jinja2 list-append trick to count only content-type slides (not hook/mermaid/cta)
+  - Mermaid slides gracefully degrade: if mermaid_image_path is set, render `<img>` tag; otherwise show raw code as monospace text
+  - All 119 tests pass (46 new + 73 existing)
+  - Cannot verify AC1 (visual_format classifies 5+ posts) or AC6 (Blake approves visual design) without live LLM and visual review on Mac
+
+### Tasks Completed
+- [x] Task 2.1: Created `visual_format.json` analysis type config (CAROUSEL/TEXT_ONLY classifier with include_mermaid flag)
+- [x] Task 2.2: Created `carousel_slides.json` analysis type config (requires linkedin_v2, outputs structured slide array)
+- [x] Task 2.3: Created `kb/carousel_templates/` directory with `config.json` (dimensions, colors, fonts, brand)
+- [x] Task 2.4: Created `dark-purple.html` primary Jinja2 carousel template
+- [x] Task 2.5: Created `light.html` secondary Jinja2 carousel template
+- [x] Task 2.6: Wrote 46 tests, all passing
+- [x] Task 2.7: Copied configs to mac-sync path
+
+### Acceptance Criteria
+- [ ] AC1: `visual_format` correctly classifies 5+ posts as CAROUSEL or TEXT_ONLY -- CANNOT VERIFY without LLM (config validated, prompt covers classification rules)
+- [ ] AC2: `visual_format` flags workflow posts with `include_mermaid: true` -- CANNOT VERIFY without LLM (prompt explicitly covers pipeline/workflow/cycle detection)
+- [x] AC3: Carousel template renders clean HTML at 1080x1350px per slide -- verified via Jinja2 rendering tests (dimensions in CSS, page breaks between slides)
+- [x] AC4: Slide count stays within 6-10 range -- config enforces range, prompt instructs 6-10 slides, test verifies 6-slide minimum rendering
+- [x] AC5: Template is configurable (colors, fonts changeable via config.json) -- verified: both templates load colors/fonts from config.json, test validates all required color keys present
+- [ ] AC6: Blake approves visual design -- REQUIRES Mac + Playwright rendering for visual inspection
+
+---
+
+## Code Review Log
+
+### Phase 1
+- **Gate:** PASS
+- **Reviewed:** 2026-02-07
+- **Issues:** 0 critical, 2 major, 2 minor
+- **Summary:** Implementation is solid. Judge loop correctly integrates with existing analysis infrastructure. Config files are research-informed and well-structured. Two major issues found (silent `--judge` flag ignore without required args, ~87 lines of duplicated CLI code) but neither blocks Phase 2. All 8 acceptance criteria verified (AC5 deferred -- requires live LLM).
+
+-> Details: `code-review-phase-1.md`
+
 ---
 
 ## Notes & Updates
