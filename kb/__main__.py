@@ -254,6 +254,11 @@ COMMANDS = {
         "description": "Scan video sources and link to transcripts",
         "module": "kb.videos",
     },
+    "publish": {
+        "label": "Publish",
+        "description": "Render carousel visuals (PDF + thumbnails) for approved posts",
+        "module": "kb.publish",
+    },
 }
 
 
