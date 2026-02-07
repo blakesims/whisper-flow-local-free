@@ -4,7 +4,7 @@
 T022
 
 ## Meta
-- **Status:** EXECUTING_PHASE_1
+- **Status:** CODE_REVIEW
 - **Last Updated:** 2026-02-07
 
 ## Overview
@@ -440,6 +440,45 @@ All 3 critical and 5 major issues addressed:
   - Consider thread safety if approving multiple posts quickly (see plan-review.md recommendations)
 
 -> Details: `plan-review.md`
+
+---
+
+## Execution Log
+
+### Phase 1: New LinkedIn Analysis Type + LLM Judge
+- **Status:** COMPLETE
+- **Started:** 2026-02-07
+- **Completed:** 2026-02-07
+- **Commits:** `4119790`
+- **Files Modified:**
+  - `kb/config/analysis_types/linkedin_v2.json` -- NEW: research-backed prompt with 10 content formulas, structural constraints (8-word hook, 1200-1800 chars), conditional `{{#if judge_feedback}}` block, optional_inputs: key_points + summary
+  - `kb/config/analysis_types/linkedin_judge.json` -- NEW: 7-criterion evaluation prompt (hook_strength, structure, specificity, character_count, cta_quality, formula_adherence, voice_authenticity), requires: linkedin_v2, outputs scores + improvements + rewritten_hook
+  - `kb/analyze.py` -- MODIFY: added `run_with_judge_loop()` (generate -> judge -> improve cycle), `_save_analysis_to_file()` helper, `--judge` and `--judge-rounds` CLI flags with both direct-file and decimal-filter paths
+  - `kb/__main__.py` -- MODIFY: added `linkedin_v2: LinkedIn` to action_mapping defaults
+  - `tasks/active/T022-content-engine/main.md` -- status updates
+- **Notes:**
+  - Config files also copied to runtime KB_ROOT path (`~/lem/mac-sync/Obsidian/.../config/analysis_types/`) since that is the live config directory
+  - Created `~/.config/kb/config.yaml` on server to point to correct KB_ROOT path for testing
+  - Cannot run live LLM tests on server (no google-genai package, no GEMINI_API_KEY) -- full testing requires Mac environment
+  - All code-path tests pass: config loading, template rendering (with and without judge_feedback), CLI argument parsing, function signatures
+  - Old `linkedin_post` analysis type verified unchanged and still loadable
+
+### Tasks Completed
+- [x] Task 1.1: Created `linkedin_v2.json` with research-informed prompt (10 formulas, structural constraints, conditional judge feedback)
+- [x] Task 1.2: Created `linkedin_judge.json` with 7 scoring criteria and structured improvement output
+- [x] Task 1.3: Added `run_with_judge_loop()` function to `kb/analyze.py`
+- [x] Task 1.4: Added `--judge` and `--judge-rounds` CLI flags, both direct-file and decimal-filter modes
+- [x] Task 1.5: Added `linkedin_v2` to action_mapping in `kb/__main__.py`
+
+### Acceptance Criteria
+- [x] AC1: `kb analyze -t linkedin_v2 -d 50.XX.XX` -- CLI path verified (reaches API call correctly, blocked by no API key on server)
+- [x] AC2: `kb analyze -t linkedin_v2 --judge -d 50.XX.XX` -- CLI path verified (enters judge loop, blocked by no API key)
+- [x] AC3: Post structural constraints in prompt (8-word hook, 1200-1800 chars, short paragraphs) -- verified in config
+- [x] AC4: Judge produces structured feedback with scores per criterion and improvement suggestions -- verified in output schema
+- [ ] AC5: Improved post measurably better than round 1 -- CANNOT VERIFY without LLM (requires Mac + API key)
+- [x] AC6: Judge output preserved alongside final post -- verified in `run_with_judge_loop` code (both stored in existing_analysis)
+- [x] AC7: `linkedin_v2` appears in kb serve action queue via action_mapping -- verified
+- [x] AC8: Old `linkedin_post` still works unchanged -- verified
 
 ---
 
