@@ -132,38 +132,12 @@ app = Flask(__name__, template_folder=str(Path(__file__).parent / "templates"))
 
 # --- Action State Management ---
 
-def load_action_state() -> dict:
-    """Load action state from ~/.kb/action-state.json.
-
-    If the file is corrupted, backs it up and returns empty state.
-    """
-    if not ACTION_STATE_PATH.exists():
-        return {"actions": {}}
-
-    try:
-        with open(ACTION_STATE_PATH) as f:
-            state = json.load(f)
-
-        # Validate structure
-        if not isinstance(state, dict) or "actions" not in state:
-            raise ValueError("Invalid state structure")
-
-        return state
-    except (json.JSONDecodeError, IOError, ValueError) as e:
-        # Backup corrupted file before resetting
-        if ACTION_STATE_PATH.exists():
-            backup_path = ACTION_STATE_PATH.with_suffix('.backup')
-            shutil.copy(ACTION_STATE_PATH, backup_path)
-            print(f"[KB Serve] Warning: Corrupted action state file, backup saved to {backup_path}")
-
-        return {"actions": {}}
-
-
-def save_action_state(state: dict):
-    """Save action state to ~/.kb/action-state.json."""
-    ACTION_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(ACTION_STATE_PATH, 'w') as f:
-        json.dump(state, f, indent=2)
+from kb.serve_state import (
+    load_action_state,
+    save_action_state,
+    load_prompt_feedback,
+    save_prompt_feedback,
+)
 
 
 def migrate_approved_to_draft() -> int:
@@ -188,36 +162,6 @@ def migrate_approved_to_draft() -> int:
         save_action_state(state)
         logger.info("Migrated %d approved items to draft state", count)
     return count
-
-
-# --- Prompt Feedback Storage ---
-
-def load_prompt_feedback() -> dict:
-    """Load prompt feedback from ~/.kb/prompt-feedback.json.
-
-    Returns dict with 'flags' list. Creates empty structure if file doesn't exist.
-    """
-    if not PROMPT_FEEDBACK_PATH.exists():
-        return {"flags": []}
-
-    try:
-        with open(PROMPT_FEEDBACK_PATH) as f:
-            feedback = json.load(f)
-
-        # Validate structure
-        if not isinstance(feedback, dict) or "flags" not in feedback:
-            return {"flags": []}
-
-        return feedback
-    except (json.JSONDecodeError, IOError):
-        return {"flags": []}
-
-
-def save_prompt_feedback(feedback: dict):
-    """Save prompt feedback to ~/.kb/prompt-feedback.json."""
-    PROMPT_FEEDBACK_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(PROMPT_FEEDBACK_PATH, 'w') as f:
-        json.dump(feedback, f, indent=2)
 
 
 # --- Visual Pipeline (Background Thread) ---
