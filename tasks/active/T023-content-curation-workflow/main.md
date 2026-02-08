@@ -367,17 +367,26 @@ ready → published (copy/export)
 - **Status:** COMPLETE
 - **Started:** 2026-02-08
 - **Completed:** 2026-02-08
-- **Commits:** `d292bde`
+- **Commits:** `d292bde`, `fee7666` (revise)
 - **Files Modified:**
   - `kb/analyze.py` -- Refactored `run_with_judge_loop()` for versioned saves; added `_get_starting_round()`, `_build_history_from_existing()`, `_build_score_history()`, `_update_alias()` helpers; added `AUTO_JUDGE_TYPES` mapping and `run_analysis_with_auto_judge()` wrapper; updated CLI `main()` to route linkedin_v2 through auto-judge pipeline
-  - `kb/serve.py` -- Added `VERSIONED_KEY_PATTERN` regex; added filter in `scan_actionable_items()` to skip versioned keys; added `migrate_approved_to_draft()` function
+  - `kb/serve.py` -- Added `VERSIONED_KEY_PATTERN` regex (built from AUTO_JUDGE_TYPES); added filter in `scan_actionable_items()` to skip versioned keys; added `migrate_approved_to_draft()` function
   - `kb/config/analysis_types/linkedin_v2.json` -- Updated `judge_feedback` template section to reference JSON array history format
-  - `kb/tests/test_judge_versioning.py` -- NEW: 34 tests covering versioned saves, alias updates, history injection, backward compat, key filtering, migration, template verification, transcript access
+  - `kb/tests/test_judge_versioning.py` -- 39 tests covering versioned saves, alias updates, history injection, backward compat (including unversioned judge), key filtering, migration, migrate CLI, template verification, transcript access
+  - `kb/migrate.py` -- NEW: `kb migrate --reset-approved` CLI command
+  - `kb/__main__.py` -- Added `migrate` command to COMMANDS
 - **Notes:**
   - D8 verified: `{{transcript}}` in linkedin_judge.json already resolves via `resolve_optional_inputs()` which always includes transcript. No modification needed.
   - D7/Task 6: `linkedin_post` was already removed from DEFAULTS action_mapping in T022. No change needed.
   - Backward compat migration: when existing unversioned linkedin_v2 detected, it is saved as `_0` and the loop continues from round 1. The new draft at round 1 receives the old draft as history.
-  - VERSIONED_KEY_PATTERN is broad (`^.+_\d+$|^.+_\d+_\d+$`) to catch versioned keys for any analysis type. Verified no existing analysis type names end with `_\d+`.
+
+#### Revision (code review fixes)
+- **C1 fixed:** Decimal-path CLI (`kb analyze -t linkedin_v2 -d X`) now routes to auto-judge regardless of `--judge` flag. Restructured the decimal block to check AUTO_JUDGE_TYPES first.
+- **M1 fixed:** `VERSIONED_KEY_PATTERN` now built from `AUTO_JUDGE_TYPES` prefixes via `_build_versioned_key_pattern()`. Only matches `linkedin_v2_N`, `linkedin_judge_N`, `linkedin_v2_N_N`.
+- **M2 fixed:** Added `kb migrate --reset-approved` CLI command (`kb/migrate.py`), registered in `COMMANDS`.
+- **Minor #4 fixed:** Removed redundant `existing_analysis[analysis_type] = draft_result` before `_update_alias()`.
+- **Minor #1 fixed:** Added `test_backward_compat_existing_unversioned_with_judge` covering both draft + judge migration to `_0`.
+- **New tests:** `test_pattern_does_not_match_unknown_types_ending_in_digits`, `TestMigrateCLI` (3 tests).
 
 ### Tasks Completed
 - [x] Task 1.1: Refactored run_with_judge_loop() for versioned saves (linkedin_v2_0, linkedin_judge_0, etc.)
@@ -388,18 +397,30 @@ ready → published (copy/export)
 - [x] Task 1.6: linkedin_post already retired from action_mapping (done in T022)
 - [x] Task 1.7: Backward compat: existing linkedin_v2 without _round handled gracefully
 - [x] Task 1.8: Pattern filter in scan_actionable_items() skips versioned keys
-- [x] Task 1.9: Migration mechanism: migrate_approved_to_draft() added
+- [x] Task 1.9: Migration mechanism: `kb migrate --reset-approved` CLI command
 
 ### Acceptance Criteria
-- [x] AC1: `kb analyze -t linkedin_v2 -d X` generates linkedin_v2_0 + linkedin_judge_0 automatically -- verified via run_analysis_with_auto_judge() routing to run_with_judge_loop()
+- [x] AC1: `kb analyze -t linkedin_v2 -d X` generates linkedin_v2_0 + linkedin_judge_0 automatically -- both transcript-path and decimal-path route to auto-judge
 - [x] AC2: linkedin_v2 alias points to latest with _round, _history metadata -- verified via _update_alias() and test_sets_round_and_history
 - [x] AC3: --judge flag still works but is no-op for linkedin_v2 -- verified via CLI logic: has_auto_judge types bypass --judge check
 - [x] AC4: Judge receives transcript text -- verified: linkedin_judge.json uses {{transcript}}, resolve_optional_inputs always includes it
 - [x] AC5: History injection: round 2+ receives full JSON array -- verified via test_history_injection_format
-- [x] AC6: Existing linkedin_v2 results without _round handled -- verified via test_backward_compat_existing_unversioned
+- [x] AC6: Existing linkedin_v2 results without _round handled -- verified via test_backward_compat_existing_unversioned and _with_judge
 - [x] AC7: linkedin_post retired from default action_mapping -- already done in T022
-- [x] AC8: Versioned keys not in scan_actionable_items() -- verified via test_scan_skips_versioned_keys
-- [x] AC9: All tests pass -- 222 tests (188 original + 34 new)
+- [x] AC8: Versioned keys not in scan_actionable_items() -- verified via specific-prefix pattern and test_pattern_does_not_match_unknown_types_ending_in_digits
+- [x] AC9: All tests pass -- 227 tests (188 original + 39 new)
+
+---
+
+## Code Review Log
+
+### Phase 1
+- **Gate:** REVISE
+- **Reviewed:** 2026-02-08
+- **Issues:** 1 critical, 2 major, 4 minor
+- **Summary:** Solid versioned judge loop refactoring with clean alias management and strong test suite, but auto-judge is unreachable from the decimal-path CLI invocation, the VERSIONED_KEY_PATTERN regex is overly broad, and migrate_approved_to_draft() is dead code.
+
+-> Details: `code-review-phase-1.md`
 
 ---
 
