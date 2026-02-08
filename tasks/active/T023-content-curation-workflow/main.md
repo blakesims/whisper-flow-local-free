@@ -4,7 +4,7 @@
 T023
 
 ## Meta
-- **Status:** EXECUTING_PHASE_1
+- **Status:** CODE_REVIEW
 - **Last Updated:** 2026-02-08
 
 ## Overview
@@ -363,7 +363,43 @@ ready → published (copy/export)
 
 ## Execution Log
 
-*(To be filled during execution)*
+### Phase 1: Judge Versioning + Auto-Judge Pipeline
+- **Status:** COMPLETE
+- **Started:** 2026-02-08
+- **Completed:** 2026-02-08
+- **Commits:** `d292bde`
+- **Files Modified:**
+  - `kb/analyze.py` -- Refactored `run_with_judge_loop()` for versioned saves; added `_get_starting_round()`, `_build_history_from_existing()`, `_build_score_history()`, `_update_alias()` helpers; added `AUTO_JUDGE_TYPES` mapping and `run_analysis_with_auto_judge()` wrapper; updated CLI `main()` to route linkedin_v2 through auto-judge pipeline
+  - `kb/serve.py` -- Added `VERSIONED_KEY_PATTERN` regex; added filter in `scan_actionable_items()` to skip versioned keys; added `migrate_approved_to_draft()` function
+  - `kb/config/analysis_types/linkedin_v2.json` -- Updated `judge_feedback` template section to reference JSON array history format
+  - `kb/tests/test_judge_versioning.py` -- NEW: 34 tests covering versioned saves, alias updates, history injection, backward compat, key filtering, migration, template verification, transcript access
+- **Notes:**
+  - D8 verified: `{{transcript}}` in linkedin_judge.json already resolves via `resolve_optional_inputs()` which always includes transcript. No modification needed.
+  - D7/Task 6: `linkedin_post` was already removed from DEFAULTS action_mapping in T022. No change needed.
+  - Backward compat migration: when existing unversioned linkedin_v2 detected, it is saved as `_0` and the loop continues from round 1. The new draft at round 1 receives the old draft as history.
+  - VERSIONED_KEY_PATTERN is broad (`^.+_\d+$|^.+_\d+_\d+$`) to catch versioned keys for any analysis type. Verified no existing analysis type names end with `_\d+`.
+
+### Tasks Completed
+- [x] Task 1.1: Refactored run_with_judge_loop() for versioned saves (linkedin_v2_0, linkedin_judge_0, etc.)
+- [x] Task 1.2: linkedin_v2 alias always points to latest with _round and _history metadata
+- [x] Task 1.3: Added run_analysis_with_auto_judge() wrapper; CLI auto-judges linkedin_v2
+- [x] Task 1.4: Verified judge has transcript access via {{transcript}} (no-op, already works)
+- [x] Task 1.5: History injection: improvement rounds receive full JSON array of all prior rounds
+- [x] Task 1.6: linkedin_post already retired from action_mapping (done in T022)
+- [x] Task 1.7: Backward compat: existing linkedin_v2 without _round handled gracefully
+- [x] Task 1.8: Pattern filter in scan_actionable_items() skips versioned keys
+- [x] Task 1.9: Migration mechanism: migrate_approved_to_draft() added
+
+### Acceptance Criteria
+- [x] AC1: `kb analyze -t linkedin_v2 -d X` generates linkedin_v2_0 + linkedin_judge_0 automatically -- verified via run_analysis_with_auto_judge() routing to run_with_judge_loop()
+- [x] AC2: linkedin_v2 alias points to latest with _round, _history metadata -- verified via _update_alias() and test_sets_round_and_history
+- [x] AC3: --judge flag still works but is no-op for linkedin_v2 -- verified via CLI logic: has_auto_judge types bypass --judge check
+- [x] AC4: Judge receives transcript text -- verified: linkedin_judge.json uses {{transcript}}, resolve_optional_inputs always includes it
+- [x] AC5: History injection: round 2+ receives full JSON array -- verified via test_history_injection_format
+- [x] AC6: Existing linkedin_v2 results without _round handled -- verified via test_backward_compat_existing_unversioned
+- [x] AC7: linkedin_post retired from default action_mapping -- already done in T022
+- [x] AC8: Versioned keys not in scan_actionable_items() -- verified via test_scan_skips_versioned_keys
+- [x] AC9: All tests pass -- 222 tests (188 original + 34 new)
 
 ---
 
