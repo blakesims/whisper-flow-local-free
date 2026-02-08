@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 
 # Import paths from __main__ to maintain single source of truth
-from kb.__main__ import load_config, get_paths, DEFAULTS
+from kb.config import load_config, get_paths, DEFAULTS
 
 # Load paths from config
 _config = load_config()

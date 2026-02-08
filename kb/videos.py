@@ -41,7 +41,7 @@ from kb.core import (
     print_status,
     load_registry,
 )
-from kb.__main__ import load_config, expand_path
+from kb.config import load_config, expand_path
 
 console = Console()
 

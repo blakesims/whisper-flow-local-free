@@ -60,7 +60,7 @@ VERSIONED_KEY_PATTERN = _build_versioned_key_pattern()
 # Add project root for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from kb.__main__ import load_config, get_paths
+from kb.config import load_config, get_paths
 
 # Load paths from config
 _config = load_config()

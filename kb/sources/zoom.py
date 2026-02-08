@@ -49,7 +49,7 @@ from kb.core import (
     transcribe_to_kb, load_registry, save_registry, print_status,
     slugify, format_timestamp, KB_ROOT, DEFAULT_WHISPER_MODEL
 )
-from kb.__main__ import load_config
+from kb.config import load_config
 
 console = Console()
 

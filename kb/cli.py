@@ -27,7 +27,7 @@ from questionary import Style
 
 # Import from core to avoid duplication
 from kb.core import load_registry, save_registry, KB_ROOT, CONFIG_DIR
-from kb.__main__ import load_config
+from kb.config import load_config
 
 console = Console()
 

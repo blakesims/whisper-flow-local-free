@@ -462,20 +462,20 @@ class TestActionMappingTransition:
 
     def test_linkedin_v2_in_defaults(self):
         """linkedin_v2 should be in default action_mapping."""
-        from kb.__main__ import DEFAULTS
+        from kb.config import DEFAULTS
         mapping = DEFAULTS["serve"]["action_mapping"]
         assert "linkedin_v2" in mapping
         assert mapping["linkedin_v2"] == "LinkedIn"
 
     def test_linkedin_post_not_in_defaults(self):
         """linkedin_post should NOT be in default action_mapping."""
-        from kb.__main__ import DEFAULTS
+        from kb.config import DEFAULTS
         mapping = DEFAULTS["serve"]["action_mapping"]
         assert "linkedin_post" not in mapping
 
     def test_old_linkedin_post_items_not_in_queue(self, tmp_path):
         """Old linkedin_post should not appear in default action_mapping."""
-        from kb.__main__ import DEFAULTS
+        from kb.config import DEFAULTS
         from kb.serve import get_destination_for_action
 
         # Check defaults only — user config.yaml may still have linkedin_post

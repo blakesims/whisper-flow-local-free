@@ -21,7 +21,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from kb.__main__ import load_config, get_paths
+from kb.config import load_config, get_paths
 
 console = Console()
 logger = logging.getLogger(__name__)

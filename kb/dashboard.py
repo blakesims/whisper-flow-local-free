@@ -18,7 +18,7 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from kb.__main__ import load_config, get_paths, DEFAULTS, CONFIG_FILE
+from kb.config import load_config, get_paths, DEFAULTS, CONFIG_FILE
 from kb.core import load_registry, KB_ROOT, CONFIG_DIR
 
 

@@ -37,7 +37,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 import questionary
 from questionary import Style
 
-from kb.__main__ import load_config, get_paths, DEFAULTS
+from kb.config import load_config, get_paths, DEFAULTS
 from kb.core import load_registry
 
 console = Console()
