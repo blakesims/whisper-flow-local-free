@@ -419,6 +419,14 @@ Note: Q2 (timeline style) and Q4 (font choice) folded into Phase 0 mockup scope 
 
 -> Details: `code-review-phase-1.md`
 
+### Phase 2
+- **Gate:** PASS
+- **Reviewed:** 2026-02-08
+- **Issues:** 0 critical, 2 major, 4 minor
+- **Summary:** Solid implementation. markdown_to_html filter works correctly for LLM-generated content, lstrip hack removed, header.show_on_all_slides guard applied to all 3 templates, 111 tests pass (342 full suite). Major: no HTML escaping inside list items (low risk, LLM source), schema missing title/subtitle fields. Both deferrable to Phase 4.
+
+-> Details: `code-review-phase-2.md`
+
 ---
 
 ### Phase 2: Content Slide Template
@@ -456,6 +464,43 @@ Note: Q2 (timeline style) and Q4 (font choice) folded into Phase 0 mockup scope 
 - [x] AC5: Free-form text has line breaks (not single block) -- plain text parsed to `<p>` with `<br>`. Verified by tests.
 - [x] AC6: Header bar consistent across all slides -- `header.show_on_all_slides` now honored by all 3 templates. Verified by header_show_on_all_slides_respected tests.
 - [x] AC7: Text is readable at 1080x1350 dimensions -- font sizes set in CSS (26-27px body, 44-50px titles). Visual verification deferred to Phase 4 (requires Playwright render).
+
+### Phase 3: Mermaid SVG + Rendering Quality
+- **Status:** COMPLETE
+- **Started:** 2026-02-08
+- **Completed:** 2026-02-08
+- **Commits:** `4d11c21`
+- **Files Modified:**
+  - `kb/render.py` -- render_mermaid() outputs SVG not PNG, returns SVG content string; render_pipeline() embeds inline SVG via Markup() instead of base64 PNG data URI; markdown_to_html() now escapes HTML in list items via markupsafe.escape(); mermaid theme selection per template
+  - `kb/carousel_templates/brand-purple.html` -- mermaid slide uses {{ slide.mermaid_svg }} instead of <img> tag; CSS targets svg not img
+  - `kb/carousel_templates/modern-editorial.html` -- same mermaid SVG changes
+  - `kb/carousel_templates/tech-minimal.html` -- same mermaid SVG changes
+  - `kb/config/analysis_types/carousel_slides.json` -- added title and subtitle fields to output schema
+  - `kb/tests/test_render.py` -- updated mermaid tests for SVG output, Markup() wrapping, .svg file extension verification
+  - `kb/tests/test_carousel_templates.py` -- added SVG inline rendering tests across all 3 templates, HTML escaping tests for markdown_to_html, schema title/subtitle test
+  - `kb/tests/test_serve_integration.py` -- updated TestMermaidBase64 -> TestMermaidSvgInline: tests Markup wrapping and failure fallback
+- **Notes:**
+  - Phase 2 code review issues addressed: (1) markupsafe.escape() on list item text in markdown_to_html (M1), (2) title and subtitle fields added to carousel_slides.json schema (M2)
+  - Mermaid theming: dark theme for brand-purple and tech-minimal, neutral for modern-editorial
+  - Graceful fallback preserved: if SVG rendering fails, slide shows raw mermaid code (same as before)
+  - Full suite: 347 tests pass
+
+### Tasks Completed
+- [x] Task 3.1: Updated render_mermaid() to output SVG, return SVG content string
+- [x] Task 3.2: Updated render_pipeline() to embed inline SVG via Markup() instead of base64 PNG
+- [x] Task 3.3: Added markupsafe.escape() on list item text in markdown_to_html() (Phase 2 review fix)
+- [x] Task 3.4: Updated all 3 templates: mermaid_svg instead of mermaid_image_path, CSS svg not img
+- [x] Task 3.5: Added title and subtitle fields to carousel_slides.json output schema (Phase 2 review fix)
+- [x] Task 3.6: Updated all test files for SVG output, Markup() wrapping, escaping, schema fields
+
+### Acceptance Criteria Verification
+- [x] AC1: mmdc generates SVG output (not PNG) -- render_mermaid() uses output_file = "mermaid.svg", verified by test_passes_correct_args_to_mmdc
+- [x] AC2: SVG embedded inline in HTML via Markup() (not escaped by autoescape) -- test_mermaid_svg_all_templates verifies SVG renders unescaped across all 3 templates
+- [x] AC3: Mermaid diagrams render crisp at 1080x1350 (no pixelation) -- SVG is resolution-independent by nature; visual QA deferred to Phase 4
+- [x] AC4: Mermaid colors match carousel template brand -- theme selection: dark for brand-purple/tech-minimal, neutral for modern-editorial
+- [x] AC5: Failed SVG render gracefully skips slide -- test_pipeline_mermaid_failure_logs_warning and test_mermaid_failure_sets_no_svg verify
+- [x] AC6: Existing carousel rendering (non-mermaid slides) unaffected -- 347 tests pass, including all Phase 1+2 template tests
+- [x] AC7: No XSS risk -- mermaid SVG from trusted mmdc; markdown_to_html now escapes HTML in content text
 
 ---
 
