@@ -438,12 +438,18 @@ class TestActionMappingTransition:
         assert "linkedin_post" not in mapping
 
     def test_old_linkedin_post_items_not_in_queue(self, tmp_path):
-        """Old linkedin_post items should not appear in action queue."""
-        from kb.serve import get_action_mapping, get_destination_for_action
+        """Old linkedin_post should not appear in default action_mapping."""
+        from kb.__main__ import DEFAULTS
+        from kb.serve import get_destination_for_action
 
-        mapping = get_action_mapping()
-        dest = get_destination_for_action("audio", "linkedin_post", mapping)
-        assert dest is None, "linkedin_post should not have a destination in mapping"
+        # Check defaults only — user config.yaml may still have linkedin_post
+        mapping = DEFAULTS["serve"]["action_mapping"]
+        # Build the expanded mapping the same way serve.py does
+        expanded = {}
+        for pattern, dest in mapping.items():
+            expanded[("*", pattern)] = dest
+        dest = get_destination_for_action("audio", "linkedin_post", expanded)
+        assert dest is None, "linkedin_post should not have a destination in default mapping"
 
     def test_linkedin_v2_has_destination(self):
         """linkedin_v2 should map to 'LinkedIn' destination."""
