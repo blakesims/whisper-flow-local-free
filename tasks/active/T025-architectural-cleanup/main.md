@@ -6,7 +6,7 @@ T025
 ## Meta
 - **Status:** COMPLETE
 - **Last Updated:** 2026-02-08
-- **Current Sub-phase:** Phase 4 complete (code review PASS). Phase 5 (Split serve.py) not yet planned.
+- **Current Sub-phase:** All phases (1-5) COMPLETE. All code reviews PASS. Phase 6 (test coverage) is optional future work.
 - **Priority:** 3 (important but not blocking current work)
 
 ## Overview
@@ -454,6 +454,95 @@ python3 -m pytest kb/tests/ -v
 - [x] AC6: All `patch('kb.analyze.run_with_judge_loop', ...)` patterns in tests still work -- verified (tests pass)
 - [x] AC7: `kb/serve.py` module-level import succeeds -- verified via `from kb.serve import app`
 
+### Phase 5 Sub-phase 5.1: Extract state persistence to `kb/serve_state.py`
+- **Status:** COMPLETE
+- **Started:** 2026-02-08
+- **Completed:** 2026-02-08
+- **Commits:** `7a81f45`
+- **Files Created:**
+  - `kb/serve_state.py` -- NEW module (~100 lines), 4 state persistence functions with optional path param + lazy import from kb.serve
+- **Files Modified:**
+  - `kb/serve.py` -- removed 4 function definitions (~62 lines), added import from `kb.serve_state` for re-export. ACTION_STATE_PATH and PROMPT_FEEDBACK_PATH remain defined in serve.py.
+- **Notes:** Each function accepts optional `path` parameter; when None, lazy-imports the path constant from `kb.serve`. This preserves 74+ test patches targeting `kb.serve.ACTION_STATE_PATH`. Test baseline unchanged: 395 pass, 2 pre-existing failures.
+- **Blockers:** None
+
+### Tasks Completed (Phase 5 Sub-phase 5.1)
+- [x] Task 5.1.1: Read kb/serve.py -- identified 4 functions (lines 135-220) and 2 constants (lines 71-72)
+- [x] Task 5.1.2: Created `kb/serve_state.py` with load_action_state, save_action_state, load_prompt_feedback, save_prompt_feedback
+- [x] Task 5.1.3: Replaced 4 function defs in `kb/serve.py` with `from kb.serve_state import ...`
+- [x] Task 5.1.4: Full test suite passed (395 pass, 2 pre-existing failures)
+- [x] Task 5.1.5: Verified re-exports from both `kb.serve` and `kb.serve_state`
+- [x] Task 5.1.6: Committed `7a81f45`
+
+### Acceptance Criteria (Phase 5 Sub-phase 5.1)
+- [x] AC1: `kb/serve_state.py` exists with 4 functions -- verified
+- [x] AC2: Functions accept optional `path` param, lazy-import from `kb.serve` when None -- verified by inspection
+- [x] AC3: `ACTION_STATE_PATH` and `PROMPT_FEEDBACK_PATH` remain defined in `kb/serve.py` -- verified (lines 71-72)
+- [x] AC4: All 4 functions re-exported from `kb/serve.py` -- verified via `from kb.serve import load_action_state, save_action_state, ACTION_STATE_PATH`
+- [x] AC5: 395 tests pass (same 2 pre-existing failures) -- verified
+
+### Phase 5 Sub-phase 5.2: Extract scanner + action mapping to `kb/serve_scanner.py`
+- **Status:** COMPLETE
+- **Started:** 2026-02-08
+- **Completed:** 2026-02-08
+- **Commits:** `f0d58c5`
+- **Files Created:**
+  - `kb/serve_scanner.py` -- NEW module (~230 lines), 3 constants + 6 functions for scanning/action mapping
+- **Files Modified:**
+  - `kb/serve.py` -- removed 3 constant definitions, 1 internal function (_build_versioned_key_pattern), 6 function definitions (~222 lines removed), added import from `kb.serve_scanner` for re-export
+- **Notes:** Functions needing `KB_ROOT` or `_config` accept optional parameters and lazy-import from `kb.serve` when None (same pattern as serve_state.py). `_build_versioned_key_pattern()` imports `AUTO_JUDGE_TYPES` directly from `kb.analyze` (not via lazy import -- it runs at module init to compute `VERSIONED_KEY_PATTERN`). Pure functions (get_destination_for_action, get_action_status, format_relative_time, validate_action_id) have no lazy imports. Test baseline unchanged: 395 pass, 2 pre-existing failures.
+- **Blockers:** None
+
+### Tasks Completed (Phase 5 Sub-phase 5.2)
+- [x] Task 5.2.1: Read kb/serve.py -- identified all 3 constants + 6 functions + 1 internal builder function
+- [x] Task 5.2.2: Created `kb/serve_scanner.py` with ACTION_ID_SEP, ACTION_ID_PATTERN, VERSIONED_KEY_PATTERN, get_action_mapping, get_destination_for_action, scan_actionable_items, get_action_status, format_relative_time, validate_action_id
+- [x] Task 5.2.3: Replaced definitions in `kb/serve.py` with `from kb.serve_scanner import ...`
+- [x] Task 5.2.4: Full test suite passed (395 pass, 2 pre-existing failures)
+- [x] Task 5.2.5: Verified re-exports from both `kb.serve` and `kb.serve_scanner`
+- [x] Task 5.2.6: Committed `f0d58c5`
+
+### Acceptance Criteria (Phase 5 Sub-phase 5.2)
+- [x] AC1: `kb/serve_scanner.py` exists with 3 constants + 6 functions -- verified
+- [x] AC2: `get_action_mapping` accepts optional `config` param, lazy-imports `_config` from `kb.serve` when None -- verified by inspection
+- [x] AC3: `scan_actionable_items` accepts optional `kb_root` param, lazy-imports `KB_ROOT` from `kb.serve` when None -- verified by inspection
+- [x] AC4: `_build_versioned_key_pattern()` imports `AUTO_JUDGE_TYPES` from `kb.analyze` -- verified
+- [x] AC5: `KB_ROOT` and `_config` remain defined in `kb/serve.py` -- verified
+- [x] AC6: All constants + functions re-exported from `kb/serve.py` -- verified via `from kb.serve import scan_actionable_items, VERSIONED_KEY_PATTERN, ACTION_ID_SEP`
+- [x] AC7: 395 tests pass (same 2 pre-existing failures) -- verified
+
+### Phase 5 Sub-phase 5.3: Extract visual pipeline to `kb/serve_visual.py`
+- **Status:** COMPLETE
+- **Started:** 2026-02-08
+- **Completed:** 2026-02-08
+- **Commits:** `451331d`
+- **Files Modified:**
+  - `kb/serve_visual.py` -- NEW: contains `_update_visual_status`, `_find_transcript_file`, `run_visual_pipeline`
+  - `kb/serve.py` -- replaced 3 function defs (162 lines) with import from `kb.serve_visual`
+  - `kb/tests/test_serve_integration.py` -- fixed patch target `kb.serve._update_visual_status` -> `kb.serve_visual._update_visual_status`
+- **Notes:**
+  - `_find_transcript_file` accepts optional `kb_root` param; lazy-imports `KB_ROOT` from `kb.serve` when None
+  - `_update_visual_status` imports `load_action_state`/`save_action_state` directly from `kb.serve_state` (no circular dep)
+  - `run_visual_pipeline` retains its existing lazy imports for `kb.analyze` and `kb.render`
+
+### Tasks Completed (Phase 5 Sub-phase 5.3)
+- [x] Task 5.3.1: Read serve.py, identified functions at lines 97-258
+- [x] Task 5.3.2: Created `kb/serve_visual.py` with 3 functions + proper imports
+- [x] Task 5.3.3: Replaced 3 function defs in `kb/serve.py` with `from kb.serve_visual import ...`
+- [x] Task 5.3.4: Fixed test patch `kb.serve._update_visual_status` -> `kb.serve_visual._update_visual_status`
+- [x] Task 5.3.5: Tests pass: 395 passed, 2 failed (pre-existing)
+- [x] Task 5.3.6: Re-exports verified from both `kb.serve` and `kb.serve_visual`
+- [x] Task 5.3.7: Committed as `451331d`
+- [x] Task 5.3.8: Updated main.md
+
+### Acceptance Criteria (Phase 5 Sub-phase 5.3)
+- [x] AC1: `kb/serve_visual.py` exists with 3 functions -- verified
+- [x] AC2: `_find_transcript_file` accepts optional `kb_root` param, lazy-imports from `kb.serve` when None -- verified
+- [x] AC3: `_update_visual_status` imports `load_action_state`/`save_action_state` from `kb.serve_state` directly -- verified
+- [x] AC4: `run_visual_pipeline` retains lazy imports for `kb.analyze` and `kb.render` -- verified
+- [x] AC5: All 3 functions re-exported from `kb/serve.py` -- verified via import test
+- [x] AC6: Test patch updated to `kb.serve_visual._update_visual_status` -- verified (line 626)
+- [x] AC7: 395 tests pass (same 2 pre-existing failures) -- verified
+
 ---
 
 ## Code Review Log
@@ -489,6 +578,14 @@ python3 -m pytest kb/tests/ -v
 - **Summary:** Clean extraction of 11 functions + 1 constant into kb/prompts.py and kb/judge.py. All ACs verified. Zero new test failures (confirmed via git stash baseline comparison). Circular import strategy is sound. Re-exports maintain full backward compat.
 
 -> Details: `code-review-phase-4.md`
+
+### Phase 5 (Split serve.py)
+- **Gate:** PASS
+- **Reviewed:** 2026-02-08
+- **Issues:** 0 critical, 1 major (dead imports shutil/Optional left in serve.py), 3 minor (dead variables in serve_visual.py, unused analyze_transcript_file import, import placement inconsistency)
+- **Summary:** Solid extraction of 13 functions + 3 constants from the 2,372-line kb/serve.py into 3 focused utility modules. Parameterized lazy-import pattern correctly preserves 74+ test patch targets. One test patch updated (serve_visual._update_visual_status). Test baseline maintained: 395 pass, 2 pre-existing failures.
+
+-> Details: `code-review-phase-5.md`
 
 ---
 
@@ -1144,6 +1241,327 @@ python3 -m pytest kb/tests/ -v
 
 ---
 
+## Phase 5 Plan: Split `kb/serve.py` (MEDIUM RISK)
+
+### Objective
+
+Split the 2,372-line `kb/serve.py` god file into focused modules by extracting non-route utility functions while keeping all Flask route handlers in `kb/serve.py`. Zero behavior change -- pure structural refactor.
+
+### Recommendation: Do NOT Convert to Flask Package
+
+The original task doc proposed converting `kb/serve.py` into `kb/serve/__init__.py` with `routes/` subdirectory. After thorough analysis, this is **not recommended** for these reasons:
+
+1. **Every test and external consumer imports `from kb.serve import app`** -- 6 test files (test_serve_integration, test_iteration_view, test_browse, test_slide_editing, test_staging, test_action_mapping) plus `kb/publish.py` and `kb/migrate.py`. Converting to a package changes the import semantics.
+2. **COMMANDS dict in `__main__.py` references `"module": "kb.serve"`** -- changing to a package requires COMMANDS update.
+3. **Route handlers are tightly coupled to shared state** (`_config`, `KB_ROOT`, `ACTION_STATE_PATH`, `load_action_state()`, `save_action_state()`, `ACTION_ID_SEP`, `AUTO_JUDGE_TYPES`). Splitting routes across files would require passing these through or creating a shared state module, adding complexity for minimal gain.
+4. **The real value is extracting non-route utilities** -- the scanner, visual pipeline, state management, and action mapping are the cleanly separable pieces. Route handlers are inherently coupled to Flask and to each other via shared state.
+
+**Recommended approach:** Extract 3 utility modules from `kb/serve.py`, keep all route handlers in `kb/serve.py`, re-export extracted symbols for backward compatibility.
+
+### Current State Analysis
+
+`kb/serve.py` contains **68 top-level definitions** across **7 distinct responsibility groups** totaling 2,372 lines:
+
+| Responsibility | Functions/Constants | Lines | Dependencies |
+|---|---|---|---|
+| Module-level state/config | `_config`, `_paths`, `KB_ROOT`, `CONFIG_DIR`, `ACTION_STATE_PATH`, `PROMPT_FEEDBACK_PATH`, `ACTION_ID_SEP`, `ACTION_ID_PATTERN`, `VERSIONED_KEY_PATTERN`, `_build_versioned_key_pattern()` | ~72 | `kb.config`, `kb.analyze.AUTO_JUDGE_TYPES` |
+| Action mapping | `get_action_mapping()`, `get_destination_for_action()` | ~53 | `_config` (module-level) |
+| State persistence | `load_action_state()`, `save_action_state()`, `migrate_approved_to_draft()`, `load_prompt_feedback()`, `save_prompt_feedback()` | ~76 | `ACTION_STATE_PATH`, `PROMPT_FEEDBACK_PATH`, json, shutil |
+| Visual pipeline | `_update_visual_status()`, `_find_transcript_file()`, `run_visual_pipeline()` | ~157 | `load_action_state`, `save_action_state`, `ACTION_ID_SEP`, `KB_ROOT`, lazy: `kb.analyze`, `kb.render` |
+| Scanner | `scan_actionable_items()`, `get_action_status()`, `format_relative_time()`, `validate_action_id()` | ~134 | `KB_ROOT`, `ACTION_ID_SEP`, `ACTION_ID_PATTERN`, `VERSIONED_KEY_PATTERN`, `get_action_mapping()`, `get_destination_for_action()` |
+| Route handlers (39 routes) | All `@app.route` decorated functions | ~1,830 | Everything above + Flask + pyperclip |
+| CLI | `check_and_auto_scan()`, `main()` | ~41 | `app`, `kb.videos` |
+
+### External Consumers (Who imports from `kb.serve`)
+
+| Consumer | What it imports | Import Style |
+|---|---|---|
+| `kb/publish.py:126` | `load_action_state`, `ACTION_ID_SEP` | Lazy (inside function) |
+| `kb/migrate.py:38` | `migrate_approved_to_draft` | Lazy (inside function) |
+| `kb/tests/test_serve_integration.py` | `app`, `_update_visual_status`, `get_destination_for_action`, `get_action_mapping`, `run_visual_pipeline` | Lazy (inside test methods) |
+| `kb/tests/test_action_mapping.py` | `get_destination_for_action`, `get_action_mapping` | Lazy; also patches `kb.serve._config` |
+| `kb/tests/test_judge_versioning.py` | `VERSIONED_KEY_PATTERN`, `scan_actionable_items`, `migrate_approved_to_draft` | Lazy |
+| `kb/tests/test_browse.py` | `app`; also patches `kb.serve.KB_ROOT` | Lazy |
+| `kb/tests/test_iteration_view.py` | `app` | Lazy |
+| `kb/tests/test_slide_editing.py` | `app` | Lazy |
+| `kb/tests/test_staging.py` | `app` | Lazy |
+
+### Module-Level Patch Targets in Tests
+
+Tests patch these `kb.serve` module-level variables:
+- `kb.serve.KB_ROOT` -- patched in `test_browse.py` (11 occurrences)
+- `kb.serve._config` -- patched in `test_action_mapping.py` (5 occurrences)
+
+These patches must continue to target the `kb.serve` namespace for correct behavior, so any extracted functions that read `KB_ROOT` or `_config` must either: (a) take them as parameters, or (b) be re-exported in `kb.serve` where the patches land. See design decisions below.
+
+### What to Extract
+
+Three utility modules, extracted in order of increasing dependency complexity:
+
+1. **`kb/serve_state.py`** (~76 lines) -- Action state and prompt feedback persistence
+2. **`kb/serve_scanner.py`** (~187 lines) -- Actionable item scanning + action mapping
+3. **`kb/serve_visual.py`** (~157 lines) -- Visual pipeline (background thread)
+
+### Why NOT `kb/state.py`, `kb/scanner.py`, `kb/visual.py`
+
+The `kb/` namespace already has many modules. Using the `serve_` prefix:
+- Makes the relationship to `serve.py` obvious
+- Avoids naming collisions (e.g., `kb/scanner.py` could be confused with general KB scanning)
+- Follows the same pattern used by `kb/transcription.py` (domain-specific wrapper)
+
+### Scope
+
+- **In:** Extracting state persistence, scanner, and visual pipeline to 3 new modules. Re-exporting all symbols from `kb/serve.py` for backward compatibility. Running tests after each extraction.
+- **Out:** NOT converting to Flask package. NOT splitting route handlers into multiple files. NOT changing any behavior. NOT updating test import targets (re-exports handle it). NOT extracting CLI (`main()` / `check_and_auto_scan()` are trivial and tightly coupled to Flask app startup).
+
+### Sub-Phases
+
+#### Sub-phase 5.1: Extract state persistence to `kb/serve_state.py`
+
+- **Objective:** Move action state and prompt feedback persistence functions to a dedicated module. These have zero dependency on Flask, routes, or the scanner -- they are pure file I/O utilities.
+- **Tasks:**
+  - [ ] Task 5.1.1: Create `kb/serve_state.py` containing:
+    - Constants: `ACTION_STATE_PATH`, `PROMPT_FEEDBACK_PATH` (currently L71-72)
+    - `load_action_state()` (L135-159, 25 lines)
+    - `save_action_state()` (L162-166, 5 lines)
+    - `migrate_approved_to_draft()` (L169-190, 22 lines)
+    - `load_prompt_feedback()` (L195-213, 19 lines)
+    - `save_prompt_feedback()` (L216-220, 5 lines)
+    - Imports needed: `json`, `shutil`, `logging`, `pathlib.Path`
+    - Module docstring: "Action state and prompt feedback persistence for kb serve."
+  - [ ] Task 5.1.2: In `kb/serve.py`, replace the 5 function definitions + 2 constants with imports from `kb.serve_state`:
+    ```python
+    from kb.serve_state import (
+        ACTION_STATE_PATH, PROMPT_FEEDBACK_PATH,
+        load_action_state, save_action_state,
+        migrate_approved_to_draft,
+        load_prompt_feedback, save_prompt_feedback,
+    )
+    ```
+    This re-export ensures all external consumers (`kb/publish.py`, `kb/migrate.py`, tests) that import from `kb.serve` continue to work unchanged.
+  - [ ] Task 5.1.3: Run full test suite: `python3 -m pytest kb/tests/ -v`
+  - [ ] Task 5.1.4: Verify re-exports work: `python3 -c "from kb.serve import load_action_state, save_action_state, ACTION_STATE_PATH; print('OK')"` AND `python3 -c "from kb.serve_state import load_action_state, save_action_state; print('OK')"`
+- **Acceptance Criteria:**
+  - [ ] `kb/serve_state.py` exists with 5 functions + 2 constants
+  - [ ] `kb/serve_state.py` imports ONLY from stdlib (json, shutil, logging, pathlib)
+  - [ ] All 5 functions + 2 constants re-exported from `kb/serve.py`
+  - [ ] All tests pass (same baseline as Phase 4: 395 pass, 2 pre-existing failures)
+  - [ ] `from kb.serve import load_action_state, ACTION_STATE_PATH` still works
+  - [ ] `from kb.publish import publish` still works (it lazy-imports `load_action_state` from `kb.serve`)
+- **Files:**
+  - `kb/serve_state.py` -- NEW file, ~76 lines
+  - `kb/serve.py` -- MODIFY: remove ~76 lines of function bodies, add 7-line import
+- **Dependencies:** Phases 1-4 COMPLETE
+- **Risk:** LOW. These are pure file I/O functions with no Flask, no route, no external API dependency.
+
+#### Sub-phase 5.2: Extract scanner to `kb/serve_scanner.py`
+
+- **Objective:** Move the scanning and action mapping logic to a dedicated module. This includes the scanner, action mapping, action status helpers, and related constants.
+- **Tasks:**
+  - [ ] Task 5.2.1: Create `kb/serve_scanner.py` containing:
+    - Constants: `ACTION_ID_SEP`, `ACTION_ID_PATTERN`, `VERSIONED_KEY_PATTERN`, `_build_versioned_key_pattern()` (L37-58)
+    - `get_action_mapping()` (L74-102, 29 lines)
+    - `get_destination_for_action()` (L105-128, 24 lines)
+    - `scan_actionable_items()` (L390-489, 100 lines)
+    - `get_action_status()` (L492-500, 9 lines)
+    - `format_relative_time()` (L503-524, 22 lines)
+    - `validate_action_id()` (L585-587, 3 lines)
+    - Imports needed: `re`, `json`, `logging`, `pathlib.Path`, `datetime.datetime`, `typing.Optional`
+    - **Key design point:** `scan_actionable_items()` and `get_action_mapping()` depend on `KB_ROOT` and `_config` which are module-level state in `kb/serve.py`. These functions should accept these as parameters with defaults that read from the module-level variables, OR they should import them from `kb.serve`. See open question #1.
+  - [ ] Task 5.2.2: Handle the `KB_ROOT` and `_config` dependency. Two options (see Open Question #1):
+    - **Option A (Parameterize):** Change `scan_actionable_items(kb_root=None)` and `get_action_mapping(config=None)` to accept optional parameters. If None, import from `kb.serve` lazily. Tests that currently patch `kb.serve.KB_ROOT` and `kb.serve._config` would still work because the route handlers in `kb/serve.py` call these functions without arguments, and the defaults would read from `kb.serve`.
+    - **Option B (Import from config):** `kb/serve_scanner.py` imports `KB_ROOT` from `kb.config` directly and `_config` from `kb.config.load_config()`. Tests would need their patches updated to target `kb.serve_scanner.KB_ROOT` etc.
+  - [ ] Task 5.2.3: In `kb/serve.py`, replace the function definitions + constants with imports from `kb.serve_scanner`:
+    ```python
+    from kb.serve_scanner import (
+        ACTION_ID_SEP, ACTION_ID_PATTERN, VERSIONED_KEY_PATTERN,
+        get_action_mapping, get_destination_for_action,
+        scan_actionable_items, get_action_status,
+        format_relative_time, validate_action_id,
+    )
+    ```
+  - [ ] Task 5.2.4: Run full test suite: `python3 -m pytest kb/tests/ -v`
+  - [ ] Task 5.2.5: Verify re-exports work: `python3 -c "from kb.serve import scan_actionable_items, VERSIONED_KEY_PATTERN, ACTION_ID_SEP; print('OK')"` AND `python3 -c "from kb.serve_scanner import scan_actionable_items, VERSIONED_KEY_PATTERN; print('OK')"`
+  - [ ] Task 5.2.6: Verify test patches still work: `python3 -m pytest kb/tests/test_action_mapping.py kb/tests/test_browse.py -v`
+- **Acceptance Criteria:**
+  - [ ] `kb/serve_scanner.py` exists with 7 functions + 3 constants/patterns
+  - [ ] All functions + constants re-exported from `kb/serve.py`
+  - [ ] All tests pass (same baseline)
+  - [ ] `patch('kb.serve._config', ...)` in test_action_mapping.py still works
+  - [ ] `patch('kb.serve.KB_ROOT', ...)` in test_browse.py still works
+  - [ ] `from kb.serve import VERSIONED_KEY_PATTERN` still works (test_judge_versioning.py)
+- **Files:**
+  - `kb/serve_scanner.py` -- NEW file, ~187 lines
+  - `kb/serve.py` -- MODIFY: remove ~187 lines, add 9-line import
+- **Dependencies:** Sub-phase 5.1 COMPLETE (scanner uses `load_action_state` from serve_state)
+- **Risk:** MEDIUM. The `KB_ROOT` and `_config` dependency requires careful handling to not break test patches. The re-export strategy in `kb/serve.py` means patches targeting `kb.serve.KB_ROOT` and `kb.serve._config` still work because the route handlers reference these names in the `kb.serve` module namespace.
+
+**Critical design note on `KB_ROOT` and `_config` patching:**
+
+The scanner functions (`scan_actionable_items`, `get_action_mapping`) reference module-level variables `KB_ROOT` and `_config`. When we move these functions to `kb/serve_scanner.py`, the functions will reference `kb.serve_scanner.KB_ROOT` etc. But tests patch `kb.serve.KB_ROOT`. This creates a mismatch.
+
+**Solution:** Keep `KB_ROOT` and `_config` definitions in `kb/serve.py` (do NOT move them). The scanner functions should accept them as parameters:
+```python
+def scan_actionable_items(kb_root=None, config=None):
+    """..."""
+    if kb_root is None:
+        from kb.serve import KB_ROOT
+        kb_root = KB_ROOT
+    ...
+```
+Route handlers in `kb/serve.py` call `scan_actionable_items()` without arguments, which triggers the lazy import from `kb.serve` where the patched values live. Direct callers (test_judge_versioning.py) that import `scan_actionable_items` from `kb.serve` get the re-exported function, and when they call it without arguments, it reads from `kb.serve.KB_ROOT` -- matching the test patches.
+
+Alternatively, the scanner functions could read `KB_ROOT` and `_config` at call time from `kb.serve` via lazy import. Either way, the tests continue to work.
+
+#### Sub-phase 5.3: Extract visual pipeline to `kb/serve_visual.py`
+
+- **Objective:** Move the visual pipeline (background thread) functions to a dedicated module. These handle carousel rendering in background threads.
+- **Tasks:**
+  - [ ] Task 5.3.1: Create `kb/serve_visual.py` containing:
+    - `_update_visual_status()` (L225-232, 8 lines)
+    - `_find_transcript_file()` (L235-255, 21 lines)
+    - `run_visual_pipeline()` (L258-385, 128 lines)
+    - Imports needed: `json`, `logging`, `pathlib.Path`, `datetime.datetime`
+    - Dependencies on extracted modules: `from kb.serve_state import load_action_state, save_action_state`
+    - Dependencies on `kb.serve`: `KB_ROOT`, `ACTION_ID_SEP` (via lazy import or parameter)
+    - Lazy imports inside `run_visual_pipeline()`: `from kb.analyze import run_analysis_with_deps, analyze_transcript_file, _save_analysis_to_file, DEFAULT_MODEL` and `from kb.render import render_pipeline` (already lazy in current code)
+  - [ ] Task 5.3.2: Handle `KB_ROOT` and `ACTION_ID_SEP` dependency the same way as scanner (lazy import from `kb.serve` or parameterization).
+  - [ ] Task 5.3.3: In `kb/serve.py`, replace the function definitions with imports from `kb.serve_visual`:
+    ```python
+    from kb.serve_visual import (
+        _update_visual_status, _find_transcript_file,
+        run_visual_pipeline,
+    )
+    ```
+  - [ ] Task 5.3.4: Run full test suite: `python3 -m pytest kb/tests/ -v`
+  - [ ] Task 5.3.5: Verify re-exports work: `python3 -c "from kb.serve import run_visual_pipeline, _update_visual_status; print('OK')"` AND `python3 -c "from kb.serve_visual import run_visual_pipeline; print('OK')"`
+- **Acceptance Criteria:**
+  - [ ] `kb/serve_visual.py` exists with 3 functions
+  - [ ] All 3 functions re-exported from `kb/serve.py`
+  - [ ] All tests pass (same baseline)
+  - [ ] `from kb.serve import _update_visual_status` still works (test_serve_integration.py)
+  - [ ] `from kb.serve import run_visual_pipeline` still works (test_serve_integration.py)
+- **Files:**
+  - `kb/serve_visual.py` -- NEW file, ~157 lines
+  - `kb/serve.py` -- MODIFY: remove ~157 lines, add 4-line import
+- **Dependencies:** Sub-phase 5.1 COMPLETE (visual pipeline uses `load_action_state`, `save_action_state`)
+- **Risk:** LOW-MEDIUM. The lazy imports from `kb.analyze` and `kb.render` inside `run_visual_pipeline()` are already the correct pattern and transfer cleanly. The `KB_ROOT` dependency needs the same treatment as the scanner.
+
+#### Sub-phase 5.4: Verify and clean up
+
+- **Objective:** Final verification that everything works end-to-end.
+- **Tasks:**
+  - [ ] Task 5.4.1: Run full test suite: `python3 -m pytest kb/tests/ -v`
+  - [ ] Task 5.4.2: Verify Flask app starts: `python3 -c "from kb.serve import app; print('Routes:', len(app.url_map._rules))"`
+  - [ ] Task 5.4.3: Verify all external imports work:
+    - `python3 -c "from kb.serve import load_action_state, ACTION_ID_SEP; print('publish OK')"`
+    - `python3 -c "from kb.serve import migrate_approved_to_draft; print('migrate OK')"`
+    - `python3 -c "from kb.serve import VERSIONED_KEY_PATTERN, scan_actionable_items; print('judge_versioning OK')"`
+    - `python3 -c "from kb.serve import get_action_mapping, get_destination_for_action; print('action_mapping OK')"`
+    - `python3 -c "from kb.serve import _update_visual_status, run_visual_pipeline; print('visual OK')"`
+  - [ ] Task 5.4.4: Verify COMMANDS entry still works: `python3 -c "from kb.__main__ import COMMANDS; print('serve' in COMMANDS)"`
+- **Acceptance Criteria:**
+  - [ ] All tests pass (same baseline: 395 pass, 2 pre-existing failures)
+  - [ ] Flask app creates successfully with all 39 routes
+  - [ ] All external imports resolve correctly
+  - [ ] `kb serve` COMMANDS entry unchanged
+- **Files:** None (verification only)
+- **Dependencies:** Sub-phases 5.1-5.3 COMPLETE
+
+### Post-Split File Sizes (Estimated)
+
+| File | Before | After | Change |
+|---|---|---|---|
+| `kb/serve.py` | 2,372 lines | ~1,952 lines | -420 lines (functions removed, import re-exports added) |
+| `kb/serve_state.py` | NEW | ~76 lines | State persistence |
+| `kb/serve_scanner.py` | NEW | ~187 lines | Scanner + action mapping |
+| `kb/serve_visual.py` | NEW | ~157 lines | Visual pipeline |
+
+Note: `kb/serve.py` at ~1,952 lines is still large, but the remaining code is 39 Flask route handlers + Flask app setup + CLI entry point. Route handlers are inherently coupled to the Flask app and to shared state. Further splitting (e.g., into blueprints) would require a Flask package conversion which is higher risk for lower reward at this point.
+
+### Import Dependency Graph (After Split)
+
+```
+kb/serve_state.py     (stdlib only: json, shutil, logging, pathlib)
+     ^
+     |
+kb/serve_scanner.py   (stdlib + kb.serve_state; lazy: kb.serve for KB_ROOT/_config)
+     ^
+     |
+kb/serve_visual.py    (stdlib + kb.serve_state; lazy: kb.serve for KB_ROOT/ACTION_ID_SEP,
+     |                 kb.analyze, kb.render)
+     |
+kb/serve.py           (Flask + all above via imports; keeps routes + app + CLI)
+```
+
+No circular imports at module load time. The `serve_scanner -> kb.serve` and `serve_visual -> kb.serve` lazy imports resolve at function call time, after all modules are fully loaded.
+
+### Decision Matrix
+
+#### Open Questions (Need Human Input)
+| # | Question | Options | Impact | Resolution |
+|---|----------|---------|--------|------------|
+| 1 | How should extracted functions access `KB_ROOT` and `_config` (module-level state that stays in `kb/serve.py`)? | A) **Parameterize**: Functions accept optional `kb_root=None`, `config=None` parameters; default to lazy-importing from `kb.serve` B) **Lazy import always**: Functions always do `from kb.serve import KB_ROOT` inside function body C) **Move KB_ROOT/_config to serve_state.py**: Centralize state; update patches | A) is most testable (callers can pass explicit values), but adds function signature noise. B) is simplest, but slightly magical. C) requires updating 16 test patch targets (11 `KB_ROOT`, 5 `_config`). | OPEN |
+| 2 | File naming: `serve_state.py` / `serve_scanner.py` / `serve_visual.py` vs shorter names like `state.py` / `scanner.py` / `visual.py`? | A) `serve_` prefix (clear relationship to serve.py) B) No prefix (shorter, relies on context) C) Subdirectory `serve/` (package approach, rejected above for routes but could be used for utilities only -- `kb/serve/state.py` etc.) | Naming preference only. No functional impact. | OPEN |
+
+#### Decisions Made (Autonomous)
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Do NOT convert to Flask package | Keep as `kb/serve.py` | Too many import consumers, COMMANDS entry, and test patches reference `kb.serve`. Converting would require updating ~100 import lines across 8 test files + 2 source files, with risk of breaking patches. |
+| Re-export all moved functions from `kb/serve.py` | Yes | Backward compatibility. External consumers and tests import from `kb.serve`. The re-export pattern worked well in Phase 4 (analyze.py split). |
+| Extract state persistence first | Yes | It has zero dependencies on other serve.py functions. Scanner and visual pipeline depend on it. Natural foundation. |
+| Keep route handlers in `kb/serve.py` | Yes | 39 route handlers are tightly coupled to Flask `app`, shared state, and each other. Splitting them across files adds complexity (Blueprint registration, cross-file state sharing) without meaningful benefit. The ~1,950 remaining lines are all routes + CLI -- dense but cohesive. |
+| Keep `_config` and `KB_ROOT` definitions in `kb/serve.py` | Yes | Tests patch `kb.serve._config` and `kb.serve.KB_ROOT`. Moving these would break all test patches (16 occurrences). |
+| Order: state -> scanner -> visual | Yes | Dependency chain: scanner uses `load_action_state` from state; visual uses `load_action_state`/`save_action_state` from state. |
+| Keep `check_and_auto_scan()` and `main()` in `kb/serve.py` | Yes | They are trivial (41 lines combined) and tightly coupled to Flask `app.run()` and startup logic. Not worth extracting. |
+| Keep `app = Flask(...)` in `kb/serve.py` | Yes | The app instance must be in the same module as route decorators. Moving it would require Blueprint refactoring. |
+
+### Test Baseline
+```bash
+# Current baseline (confirmed during Phase 4):
+# 395 passed, 2 failed (pre-existing carousel template tests)
+python3 -m pytest kb/tests/ -v
+```
+
+### Test Files Affected
+
+All tests import `from kb.serve import app` (or other symbols) lazily inside test methods. The re-export strategy means **zero test file changes are required**. Tests will continue to import from `kb.serve` and get the re-exported functions.
+
+| Test File | Imports from `kb.serve` | Patches `kb.serve.*` | Change Needed |
+|---|---|---|---|
+| `test_serve_integration.py` | `app`, `_update_visual_status`, `get_destination_for_action`, `get_action_mapping`, `run_visual_pipeline` | None | None (re-exports) |
+| `test_action_mapping.py` | `get_destination_for_action`, `get_action_mapping` | `kb.serve._config` (5x) | None (re-exports; `_config` stays in kb.serve) |
+| `test_judge_versioning.py` | `VERSIONED_KEY_PATTERN`, `scan_actionable_items`, `migrate_approved_to_draft` | None | None (re-exports) |
+| `test_browse.py` | `app` | `kb.serve.KB_ROOT` (11x) | None (re-exports; `KB_ROOT` stays in kb.serve) |
+| `test_iteration_view.py` | `app` | None | None |
+| `test_slide_editing.py` | `app` | None | None |
+| `test_staging.py` | `app` | None | None |
+
+### Risk Assessment
+- **Risk:** MEDIUM overall (LOW for state, MEDIUM for scanner, LOW-MEDIUM for visual)
+- **Rollback:** Delete 3 new files, revert import changes in `kb/serve.py`. Git makes this trivial.
+- **Key risk:** The `KB_ROOT`/`_config` dependency between scanner functions and `kb/serve.py` module-level state. Requires careful handling to preserve test patching behavior.
+- **Mitigation:** Run full test suite after each sub-phase. The re-export pattern is proven (worked in Phase 4).
+
+### Phase 5 Plan Review
+- **Gate:** NEEDS_WORK
+- **Reviewed:** 2026-02-08
+- **Summary:** Plan has accurate line numbers and logical groupings, but a critical defect: moving `ACTION_STATE_PATH` to `serve_state.py` will break 74+ test patches that target `kb.serve.ACTION_STATE_PATH`. The re-export strategy does NOT fix patch targets for variables used by extracted functions (they resolve from their new module namespace, not from `kb.serve`). The plan correctly identifies this class of problem for `KB_ROOT`/`_config` in the scanner section but fails to apply the same analysis to `ACTION_STATE_PATH` in Sub-phase 5.1 and `_update_visual_status` in Sub-phase 5.3. Patch count claim of "16" is severely wrong (actual: 162). Both open questions resolved autonomously.
+- **Issues:** 2 critical, 2 major, 4 minor
+- **Open Questions Finalized:**
+  - Q1: Use Option A (parameterize with lazy-import defaults) -- apply universally to ALL module-level variables
+  - Q2: Use `serve_` prefix naming (Option A)
+- **Required Fixes Before Execution:**
+  1. Keep `ACTION_STATE_PATH` + `PROMPT_FEEDBACK_PATH` defined in `kb/serve.py`; `serve_state.py` functions accept them as parameters
+  2. Handle `_update_visual_status` patch in test_serve_integration.py (update 1 test or restructure lazy import)
+  3. Correct patch count from 16 to 162
+  4. Fix scanner dependency claim (scan_actionable_items does NOT call load_action_state)
+  5. Add `AUTO_JUDGE_TYPES` to serve_scanner.py imports (needed by `_build_versioned_key_pattern`)
+
+--> Details: `plan-review-phase5.md`
+
+---
+
 ## Proposed Phases (Full T025 -- Phases 2-6 for future work)
 
 ### Phase 2: Delete confirmed dead code (LOW RISK)
@@ -1182,4 +1600,6 @@ python3 -m pytest kb/tests/ -v
 - **`_legacy/` and `mvp-example/`** — keep for now, not hurting anything
 
 ## Completion
-- **Status:** Not started
+- **Completed:** 2026-02-08
+- **Summary:** Phases 1-5 delivered: extracted kb/config.py, deleted 2,462 lines dead code, created kb/transcription.py wrapper, split kb/analyze.py into kb/prompts.py + kb/judge.py, split kb/serve.py into kb/serve_state.py + kb/serve_scanner.py + kb/serve_visual.py. All 5 phases passed code review. Test suite baseline maintained throughout (395 pass, 2 pre-existing failures). Phase 6 (test coverage for kb/core.py) remains as optional future work.
+- **Learnings:** Parameterized lazy imports are the key pattern for extracting from god files without breaking test patches. Always verify dead imports are cleaned up in the source file after extraction.

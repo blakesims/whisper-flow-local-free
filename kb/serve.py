@@ -16,13 +16,10 @@ import os
 import json
 import logging
 import re
-import shutil
 import argparse
 import threading
 from pathlib import Path
 from datetime import datetime
-from typing import Optional
-
 from flask import Flask, render_template, jsonify, request, send_from_directory
 import pyperclip
 
