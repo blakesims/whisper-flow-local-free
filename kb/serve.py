@@ -1016,6 +1016,14 @@ def save_edit(action_id: str):
 
         # Update edit count in action state
         state["actions"][action_id]["edit_count"] = next_edit
+
+        # Invalidate stale visuals: if item is "ready", reset to "staged"
+        # so user must re-render after editing (Phase 3 code review fix)
+        if current_status == "ready":
+            state["actions"][action_id]["status"] = "staged"
+            state["actions"][action_id]["visual_status"] = "stale"
+            logger.info("[KB Serve] Visual status invalidated for %s after edit", action_id)
+
         save_action_state(state)
 
         return jsonify({
@@ -1072,6 +1080,302 @@ def generate_visuals(action_id: str):
     logger.info("[KB Serve] Visual pipeline started from staging for %s", action_id)
 
     return jsonify({"success": True, "message": "Visual generation started"})
+
+
+@app.route('/api/templates')
+def get_templates():
+    """List available carousel templates.
+
+    Reads template names and descriptions from carousel_templates/config.json.
+    Returns list of templates with the current default marked.
+    """
+    try:
+        from kb.render import load_carousel_config
+        config = load_carousel_config()
+    except (FileNotFoundError, ImportError) as e:
+        return jsonify({"error": f"Could not load carousel config: {e}"}), 500
+
+    templates_config = config.get("templates", {})
+    default_template = config.get("defaults", {}).get("template", "brand-purple")
+
+    templates = []
+    for name, tpl in templates_config.items():
+        templates.append({
+            "name": name,
+            "description": tpl.get("description", ""),
+            "file": tpl.get("file", ""),
+            "is_default": name == default_template,
+        })
+
+    return jsonify({
+        "templates": templates,
+        "default": default_template,
+    })
+
+
+@app.route('/api/action/<action_id>/slides')
+def get_slides(action_id: str):
+    """Return carousel slide data from transcript JSON.
+
+    Returns the carousel_slides analysis data for editing.
+    Each slide has type, content, slide_number, etc.
+    """
+    if not validate_action_id(action_id):
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    # Find transcript file
+    transcript_path = _find_transcript_file(action_id)
+    if not transcript_path:
+        return jsonify({"error": "Transcript file not found"}), 404
+
+    try:
+        with open(str(transcript_path)) as f:
+            transcript_data = json.load(f)
+
+        analysis = transcript_data.get("analysis", {})
+        carousel_slides = analysis.get("carousel_slides")
+
+        if not carousel_slides:
+            return jsonify({"error": "No carousel_slides data found"}), 404
+
+        # Extract slides data -- handle nested output format
+        slides_output = carousel_slides.get("output", carousel_slides)
+        if isinstance(slides_output, str):
+            try:
+                slides_output = json.loads(slides_output)
+            except (json.JSONDecodeError, TypeError):
+                return jsonify({"error": "carousel_slides output not parseable"}), 500
+
+        if not isinstance(slides_output, dict) or "slides" not in slides_output:
+            if "slides" in carousel_slides:
+                slides_output = {
+                    "slides": carousel_slides["slides"],
+                    "total_slides": carousel_slides.get("total_slides", len(carousel_slides["slides"])),
+                    "has_mermaid": carousel_slides.get("has_mermaid", False),
+                }
+            else:
+                return jsonify({"error": "No slides data in carousel_slides"}), 404
+
+        slides = slides_output.get("slides", [])
+
+        return jsonify({
+            "action_id": action_id,
+            "slides": slides,
+            "total_slides": len(slides),
+            "has_mermaid": slides_output.get("has_mermaid", False),
+        })
+
+    except (json.JSONDecodeError, IOError) as e:
+        logger.error("[KB Serve] Failed to load slides: %s", e)
+        return jsonify({"error": "Failed to load slides"}), 500
+
+
+@app.route('/api/action/<action_id>/save-slides', methods=['POST'])
+def save_slides(action_id: str):
+    """Save edited slide data back to transcript JSON.
+
+    Updates the carousel_slides analysis data with edited slide content.
+    Slide types are read-only; only title and content fields are updated.
+    Also invalidates visual_status to "stale" since slides changed.
+
+    Request body: { "slides": [ { slide_number, type, title, content, ... } ] }
+    """
+    if not validate_action_id(action_id):
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    # Must be staged or ready to save slide edits
+    state = load_action_state()
+    current_status = state["actions"].get(action_id, {}).get("status", "pending")
+    if current_status not in ("staged", "ready"):
+        return jsonify({"error": f"Cannot edit slides with status '{current_status}'. Item must be staged or ready."}), 400
+
+    data = request.get_json()
+    if not data or "slides" not in data:
+        return jsonify({"error": "Request body must contain 'slides' field"}), 400
+
+    edited_slides = data["slides"]
+    if not isinstance(edited_slides, list):
+        return jsonify({"error": "'slides' must be a list"}), 400
+
+    # Find transcript file
+    transcript_path = _find_transcript_file(action_id)
+    if not transcript_path:
+        return jsonify({"error": "Transcript file not found"}), 404
+
+    try:
+        with open(str(transcript_path)) as f:
+            transcript_data = json.load(f)
+
+        analysis = transcript_data.get("analysis", {})
+        carousel_slides = analysis.get("carousel_slides", {})
+
+        # Get existing slides data
+        slides_output = carousel_slides.get("output", carousel_slides)
+        if isinstance(slides_output, str):
+            try:
+                slides_output = json.loads(slides_output)
+            except (json.JSONDecodeError, TypeError):
+                return jsonify({"error": "carousel_slides output not parseable"}), 500
+
+        if not isinstance(slides_output, dict):
+            slides_output = {}
+
+        existing_slides = slides_output.get("slides", carousel_slides.get("slides", []))
+
+        # Update existing slides with edits (preserving type, only updating title/content)
+        for edited in edited_slides:
+            slide_num = edited.get("slide_number")
+            if slide_num is None:
+                continue
+
+            # Find matching existing slide
+            for existing in existing_slides:
+                if existing.get("slide_number") == slide_num:
+                    # Update content fields only; type is read-only
+                    if "title" in edited:
+                        existing["title"] = edited["title"]
+                    if "content" in edited:
+                        existing["content"] = edited["content"]
+                    break
+
+        # Save back to transcript
+        if "output" in carousel_slides and isinstance(carousel_slides["output"], dict):
+            carousel_slides["output"]["slides"] = existing_slides
+        elif "output" in carousel_slides and isinstance(carousel_slides["output"], str):
+            # Was a string, now make it a dict
+            carousel_slides["output"] = {
+                "slides": existing_slides,
+                "total_slides": len(existing_slides),
+                "has_mermaid": slides_output.get("has_mermaid", False),
+            }
+        else:
+            carousel_slides["slides"] = existing_slides
+
+        carousel_slides["_slides_edited_at"] = datetime.now().isoformat()
+        analysis["carousel_slides"] = carousel_slides
+
+        with open(str(transcript_path), 'w') as f:
+            json.dump(transcript_data, f, indent=2, ensure_ascii=False)
+
+        # Invalidate visuals since slides changed
+        if current_status == "ready":
+            state["actions"][action_id]["status"] = "staged"
+        state["actions"][action_id]["visual_status"] = "stale"
+        save_action_state(state)
+        logger.info("[KB Serve] Slides saved and visual status invalidated for %s", action_id)
+
+        return jsonify({
+            "success": True,
+            "slides_count": len(existing_slides),
+        })
+
+    except (json.JSONDecodeError, IOError) as e:
+        logger.error("[KB Serve] Failed to save slides: %s", e)
+        return jsonify({"error": "Failed to save slides"}), 500
+
+
+@app.route('/api/action/<action_id>/render', methods=['POST'])
+def render_action(action_id: str):
+    """Re-render carousel with specified template.
+
+    Triggers a re-render of the carousel using the current slide data
+    and the specified template name. Runs in background thread.
+
+    Request body: { "template": "brand-purple" } (optional, defaults to config default)
+    """
+    if not validate_action_id(action_id):
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    # Must be staged or ready
+    state = load_action_state()
+    current_status = state["actions"].get(action_id, {}).get("status", "pending")
+    if current_status not in ("staged", "ready"):
+        return jsonify({"error": f"Cannot render for item with status '{current_status}'. Item must be staged or ready."}), 400
+
+    # Check not already generating
+    visual_status = state["actions"].get(action_id, {}).get("visual_status", "")
+    if visual_status == "generating":
+        return jsonify({"error": "Render already in progress"}), 400
+
+    # Get template name from request
+    data = request.get_json() or {}
+    template_name = data.get("template")
+
+    # Find transcript file
+    transcript_path = _find_transcript_file(action_id)
+    if not transcript_path:
+        return jsonify({"error": "Transcript file not found"}), 404
+
+    # Start render in background thread
+    def _run_render():
+        try:
+            _update_visual_status(action_id, "generating")
+
+            with open(str(transcript_path)) as f:
+                transcript_data = json.load(f)
+
+            analysis = transcript_data.get("analysis", {})
+            carousel_slides = analysis.get("carousel_slides", {})
+
+            # Extract slides data
+            slides_output = carousel_slides.get("output", carousel_slides)
+            if isinstance(slides_output, str):
+                try:
+                    slides_output = json.loads(slides_output)
+                except (json.JSONDecodeError, TypeError):
+                    _update_visual_status(action_id, "failed", {"error": "carousel_slides output not parseable"})
+                    return
+
+            if not isinstance(slides_output, dict) or "slides" not in slides_output:
+                if "slides" in carousel_slides:
+                    slides_output = {
+                        "slides": carousel_slides["slides"],
+                        "total_slides": carousel_slides.get("total_slides", len(carousel_slides["slides"])),
+                        "has_mermaid": carousel_slides.get("has_mermaid", False),
+                    }
+                else:
+                    _update_visual_status(action_id, "failed", {"error": "No slides data"})
+                    return
+
+            # Build output dir
+            decimal_dir = Path(str(transcript_path)).parent
+            visuals_dir = decimal_dir / "visuals"
+
+            from kb.render import render_pipeline
+            result = render_pipeline(slides_output, str(visuals_dir), template_name=template_name)
+
+            if result.get("pdf_path"):
+                visual_data = {
+                    "format": "CAROUSEL",
+                    "pdf_path": result["pdf_path"],
+                    "thumbnail_paths": result.get("thumbnail_paths", []),
+                    "errors": result.get("errors", []),
+                    "template": template_name or "default",
+                }
+                _update_visual_status(action_id, "ready", visual_data)
+
+                # Update action status to ready
+                st = load_action_state()
+                if action_id in st["actions"]:
+                    st["actions"][action_id]["status"] = "ready"
+                    save_action_state(st)
+
+                logger.info("[KB Serve] Re-render complete for %s", action_id)
+            else:
+                _update_visual_status(action_id, "failed", {
+                    "error": "Render produced no PDF",
+                    "errors": result.get("errors", []),
+                })
+
+        except Exception as e:
+            logger.error("[KB Serve] Render failed for %s: %s", action_id, e)
+            _update_visual_status(action_id, "failed", {"error": str(e)})
+
+    thread = threading.Thread(target=_run_render, daemon=True)
+    thread.start()
+    logger.info("[KB Serve] Re-render started for %s (template=%s)", action_id, template_name or "default")
+
+    return jsonify({"success": True, "message": "Render started", "template": template_name or "default"})
 
 
 @app.route('/api/action/<action_id>/edit-history')

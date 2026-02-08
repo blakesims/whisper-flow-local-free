@@ -4,7 +4,8 @@
 T023
 
 ## Meta
-- **Status:** CODE_REVIEW
+- **Status:** EXECUTING_PHASE_4
+- **Last Updated:** 2026-02-08
 - **Last Updated:** 2026-02-08
 
 ## Overview
@@ -285,7 +286,7 @@ ready → published (copy/export)
 ---
 
 ### Phase 4: Slide Editing + Template Selection
-**Status**: Not Started
+**Status**: EXECUTING
 
 **Objectives:**
 - After visual generation, allow editing individual carousel slides in kb serve
@@ -482,6 +483,14 @@ ready → published (copy/export)
 - **Summary:** Solid implementation. Approve rewire correctly gates visual pipeline for AUTO_JUDGE_TYPES, four new endpoints are well-structured with proper validation, HTML template uses escapeHtml consistently, and 25 meaningful tests cover the key behaviors. 277/277 tests pass. Major issue (no server-side guard against concurrent iterations) is mitigated by client-side guard.
 
 -> Details: `code-review-phase-2.md`
+
+### Phase 3
+- **Gate:** PASS
+- **Reviewed:** 2026-02-08
+- **Issues:** 0 critical, 2 major, 3 minor
+- **Summary:** Solid staging area implementation with correct edit versioning, proper visual pipeline reuse, and 23 meaningful tests. 342/342 tests pass. Major issues: save-edit on "ready" items does not invalidate stale visuals; generate-visuals has a race window before visual_status is set to "generating". Neither blocks Phase 4.
+
+-> Details: `code-review-phase-3.md`
 
 ---
 

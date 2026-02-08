@@ -767,6 +767,162 @@
         }
 
         .btn-save:hover { background: var(--blue); }
+
+        /* Slide editor */
+        .slides-section {
+            margin-top: 16px;
+            border-top: 1px solid var(--surface0);
+            padding-top: 12px;
+        }
+
+        .slides-section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .slides-section-title {
+            color: var(--overlay0);
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 600;
+        }
+
+        .slide-card {
+            background: var(--mantle);
+            border: 1px solid var(--surface0);
+            border-radius: 6px;
+            margin-bottom: 8px;
+            overflow: hidden;
+        }
+
+        .slide-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            background: var(--surface0);
+            font-size: 11px;
+        }
+
+        .slide-type-badge {
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .slide-type-badge.hook { background: var(--peach); color: var(--crust); }
+        .slide-type-badge.content { background: var(--blue); color: var(--crust); }
+        .slide-type-badge.mermaid { background: var(--mauve); color: var(--crust); }
+        .slide-type-badge.cta { background: var(--green); color: var(--crust); }
+
+        .slide-number {
+            color: var(--overlay0);
+            font-size: 10px;
+        }
+
+        .slide-card-body {
+            padding: 8px 12px;
+        }
+
+        .slide-field {
+            margin-bottom: 6px;
+        }
+
+        .slide-field-label {
+            color: var(--overlay0);
+            font-size: 10px;
+            margin-bottom: 2px;
+        }
+
+        .slide-textarea {
+            width: 100%;
+            background: var(--base);
+            color: var(--text);
+            border: 1px solid var(--surface0);
+            border-radius: 4px;
+            padding: 6px 8px;
+            font-size: 12px;
+            font-family: inherit;
+            line-height: 1.5;
+            resize: vertical;
+            outline: none;
+            min-height: 40px;
+        }
+
+        .slide-textarea:focus {
+            border-color: var(--sapphire);
+        }
+
+        .slide-textarea.modified {
+            border-color: var(--yellow);
+        }
+
+        .slide-textarea[readonly] {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        /* Template selector */
+        .template-selector {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+            padding: 8px 12px;
+            background: var(--mantle);
+            border-radius: 6px;
+        }
+
+        .template-selector-label {
+            color: var(--subtext0);
+            font-size: 11px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .template-select {
+            flex: 1;
+            background: var(--surface0);
+            color: var(--text);
+            border: 1px solid var(--surface1);
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 11px;
+            font-family: inherit;
+            outline: none;
+            cursor: pointer;
+        }
+
+        .template-select:focus {
+            border-color: var(--sapphire);
+        }
+
+        /* Re-render button */
+        .btn-render {
+            background: var(--mauve);
+            color: var(--crust);
+            font-weight: 600;
+        }
+
+        .btn-render:hover { background: var(--lavender); }
+
+        /* Stale visual status */
+        .visual-status.stale {
+            background: rgba(249, 226, 175, 0.15);
+            color: var(--yellow);
+            border: 1px solid rgba(249, 226, 175, 0.3);
+        }
+
+        /* Slides container scrollable */
+        .slides-container {
+            max-height: 400px;
+            overflow-y: auto;
+        }
     </style>
 </head>
 <body>
@@ -845,6 +1001,10 @@
         let selectedEntity = null;
         let iterationsData = null;  // from /api/action/<id>/iterations
         let selectedRoundIndex = -1; // which round is active in the detail pane
+        let templatesData = null;   // from /api/templates
+        let slidesData = null;      // from /api/action/<id>/slides
+        let selectedTemplate = null; // selected template name
+        let slidesModified = false;  // track if slides have been edited
 
         // XSS protection helper
         function escapeHtml(text) {
@@ -1003,6 +1163,8 @@
             // Show staging view for staged/ready items, iteration view for others
             if (selectedEntity.status === 'staged' || selectedEntity.status === 'ready') {
                 await fetchIterations(selectedEntity.id);
+                await fetchTemplates();
+                await fetchSlides(selectedEntity.id);
                 renderStagingView();
             } else {
                 await fetchIterations(selectedEntity.id);
@@ -1330,6 +1492,12 @@
                         <span>Visuals ready</span>
                     </div>
                 `;
+            } else if (visualStatus === 'stale') {
+                visualStatusHtml = `
+                    <div class="visual-status stale">
+                        Visuals stale (content edited since last render)
+                    </div>
+                `;
             } else if (visualStatus === 'failed') {
                 visualStatusHtml = `
                     <div class="visual-status failed">
@@ -1364,8 +1532,12 @@
             // Determine which buttons are available
             const isReady = status === 'ready' || visualStatus === 'ready' || visualStatus === 'text_only';
             const isGenerating = visualStatus === 'generating';
-            const canGenerate = status === 'staged' && !isGenerating;
+            const canGenerate = (status === 'staged' || visualStatus === 'stale') && !isGenerating;
             const canPublish = isReady;
+
+            // Build template selector and slide editor
+            const templateSelectorHtml = buildTemplateSelectorHtml();
+            const slideEditorHtml = buildSlideEditorHtml();
 
             pane.innerHTML = `
                 <div class="iteration-view">
@@ -1380,6 +1552,7 @@
                     </div>
 
                     ${visualStatusHtml}
+                    ${templateSelectorHtml}
 
                     <div class="post-section">
                         <div class="post-section-title">
@@ -1389,6 +1562,8 @@
                         <textarea id="staging-editor" class="staging-textarea">${escapeHtml(postText)}</textarea>
                     </div>
 
+                    ${slideEditorHtml}
+
                     <div class="actions-bar">
                         <button class="btn btn-save" id="btn-save" onclick="saveEdit()" disabled>
                             <span>Save</span>
@@ -1397,6 +1572,9 @@
                         <button class="btn btn-generate" onclick="generateVisuals()" ${canGenerate ? '' : 'disabled'}>
                             <span>${isGenerating ? 'Generating...' : 'Generate Visuals'}</span>
                             <span class="key">g</span>
+                        </button>
+                        <button class="btn btn-render" onclick="reRender()" ${canGenerate ? '' : 'disabled'}>
+                            <span>Re-render</span>
                         </button>
                         <button class="btn btn-publish" onclick="publishItem()" ${canPublish ? '' : 'disabled'}>
                             <span>Publish</span>
@@ -1417,6 +1595,17 @@
                 textModified = textarea.value !== originalText;
                 textarea.classList.toggle('modified', textModified);
                 saveBtn.disabled = !textModified;
+            });
+
+            // Attach slide textarea change tracking
+            const slideTextareas = document.querySelectorAll('.slide-textarea:not([readonly])');
+            const saveSlidesBtn = document.getElementById('btn-save-slides');
+            slideTextareas.forEach(ta => {
+                ta.addEventListener('input', () => {
+                    slidesModified = true;
+                    ta.classList.add('modified');
+                    if (saveSlidesBtn) saveSlidesBtn.disabled = false;
+                });
             });
 
             // If generating, start polling for completion
@@ -1576,6 +1765,196 @@
                 console.error('Publish failed:', error);
                 showToast('Publish failed');
             }
+        }
+
+        // Fetch available templates
+        async function fetchTemplates() {
+            if (templatesData) return; // cache
+            try {
+                const response = await fetch('/api/templates');
+                templatesData = await response.json();
+                selectedTemplate = templatesData.default;
+            } catch (error) {
+                console.error('Failed to fetch templates:', error);
+            }
+        }
+
+        // Fetch slides for selected entity
+        async function fetchSlides(actionId) {
+            try {
+                const response = await fetch(`/api/action/${actionId}/slides`);
+                if (response.ok) {
+                    slidesData = await response.json();
+                    slidesModified = false;
+                } else {
+                    slidesData = null;
+                }
+            } catch (error) {
+                console.error('Failed to fetch slides:', error);
+                slidesData = null;
+            }
+        }
+
+        // Save slide edits
+        async function saveSlides() {
+            if (!selectedEntity || !slidesData || !slidesModified) return;
+
+            // Collect edited slides from DOM
+            const slideCards = document.querySelectorAll('.slide-card');
+            const editedSlides = [];
+
+            slideCards.forEach(card => {
+                const slideNum = parseInt(card.dataset.slideNumber);
+                const titleInput = card.querySelector('.slide-title-input');
+                const contentInput = card.querySelector('.slide-content-input');
+
+                if (titleInput || contentInput) {
+                    const edited = { slide_number: slideNum };
+                    if (titleInput) edited.title = titleInput.value;
+                    if (contentInput) edited.content = contentInput.value;
+                    editedSlides.push(edited);
+                }
+            });
+
+            try {
+                const response = await fetch(`/api/action/${selectedEntity.id}/save-slides`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ slides: editedSlides }),
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    showToast(`Slides saved (${data.slides_count} slides)`);
+                    slidesModified = false;
+                    // Refresh slides data
+                    await fetchSlides(selectedEntity.id);
+                    // Refresh queue to update visual status
+                    await fetchQueue();
+                    // Re-find entity
+                    const updated = queueData.items.find(i => i.id === selectedEntity.id);
+                    if (updated) selectedEntity = updated;
+                } else {
+                    showToast(data.error || 'Save slides failed');
+                }
+            } catch (error) {
+                console.error('Save slides failed:', error);
+                showToast('Save slides failed');
+            }
+        }
+
+        // Re-render with selected template
+        async function reRender() {
+            if (!selectedEntity) return;
+            const status = selectedEntity.status;
+            if (status !== 'staged' && status !== 'ready') return;
+
+            const vs = selectedEntity.visual_status || '';
+            if (vs === 'generating') return;
+
+            const templateName = selectedTemplate || null;
+
+            try {
+                const response = await fetch(`/api/action/${selectedEntity.id}/render`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ template: templateName }),
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    showToast(`Rendering with ${data.template}...`);
+                    selectedEntity.visual_status = 'generating';
+                    renderStagingView();
+                    renderEntityList();
+                    pollVisualGeneration();
+                } else {
+                    showToast(data.error || 'Render failed');
+                }
+            } catch (error) {
+                console.error('Render failed:', error);
+                showToast('Render failed');
+            }
+        }
+
+        // Build slide editor HTML
+        function buildSlideEditorHtml() {
+            if (!slidesData || !slidesData.slides || slidesData.slides.length === 0) {
+                return '';
+            }
+
+            let slidesHtml = '';
+            for (const slide of slidesData.slides) {
+                const slideType = slide.type || 'content';
+                const slideNum = slide.slide_number || 0;
+                const title = slide.title || '';
+                const content = slide.content || '';
+                const isMermaid = slideType === 'mermaid';
+
+                // Mermaid slides: content is read-only (diagram code)
+                const contentReadonly = isMermaid ? 'readonly' : '';
+                const contentRows = content.split('\n').length;
+                const rows = Math.max(2, Math.min(6, contentRows));
+
+                slidesHtml += `
+                    <div class="slide-card" data-slide-number="${slideNum}">
+                        <div class="slide-card-header">
+                            <span class="slide-type-badge ${slideType}">${escapeHtml(slideType)}</span>
+                            <span class="slide-number">Slide ${slideNum}</span>
+                        </div>
+                        <div class="slide-card-body">
+                            <div class="slide-field">
+                                <div class="slide-field-label">Title</div>
+                                <textarea class="slide-textarea slide-title-input" rows="1">${escapeHtml(title)}</textarea>
+                            </div>
+                            <div class="slide-field">
+                                <div class="slide-field-label">Content${isMermaid ? ' (read-only)' : ''}</div>
+                                <textarea class="slide-textarea slide-content-input" rows="${rows}" ${contentReadonly}>${escapeHtml(content)}</textarea>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            return `
+                <div class="slides-section">
+                    <div class="slides-section-header">
+                        <span class="slides-section-title">Carousel Slides (${slidesData.slides.length})</span>
+                        <button class="btn btn-save" id="btn-save-slides" onclick="saveSlides()" disabled>
+                            Save Slides
+                        </button>
+                    </div>
+                    <div class="slides-container">
+                        ${slidesHtml}
+                    </div>
+                </div>
+            `;
+        }
+
+        // Build template selector HTML
+        function buildTemplateSelectorHtml() {
+            if (!templatesData || !templatesData.templates || templatesData.templates.length === 0) {
+                return '';
+            }
+
+            let optionsHtml = '';
+            for (const tpl of templatesData.templates) {
+                const selected = tpl.name === selectedTemplate ? 'selected' : '';
+                const defLabel = tpl.is_default ? ' (default)' : '';
+                optionsHtml += `<option value="${escapeHtml(tpl.name)}" ${selected}>${escapeHtml(tpl.name)}${defLabel} — ${escapeHtml(tpl.description)}</option>`;
+            }
+
+            return `
+                <div class="template-selector">
+                    <span class="template-selector-label">Template:</span>
+                    <select class="template-select" id="template-select" onchange="selectedTemplate = this.value">
+                        ${optionsHtml}
+                    </select>
+                    <button class="btn btn-render" onclick="reRender()">
+                        Re-render
+                    </button>
+                </div>
+            `;
         }
 
         // Update status bar
