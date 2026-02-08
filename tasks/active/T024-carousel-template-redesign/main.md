@@ -4,8 +4,7 @@
 T024
 
 ## Meta
-- **Status:** EXECUTING_PHASE_4
-- **Phase 4 Started:** 2026-02-08
+- **Status:** CODE_REVIEW
 - **Last Updated:** 2026-02-08
 
 ## Overview
@@ -510,6 +509,45 @@ Note: Q2 (timeline style) and Q4 (font choice) folded into Phase 0 mockup scope 
 - [x] AC5: Failed SVG render gracefully skips slide -- test_pipeline_mermaid_failure_logs_warning and test_mermaid_failure_sets_no_svg verify
 - [x] AC6: Existing carousel rendering (non-mermaid slides) unaffected -- 347 tests pass, including all Phase 1+2 template tests
 - [x] AC7: No XSS risk -- mermaid SVG from trusted mmdc; markdown_to_html now escapes HTML in content text
+
+### Phase 4: Polish + Template Variants
+- **Status:** COMPLETE
+- **Started:** 2026-02-08
+- **Completed:** 2026-02-08
+- **Commits:** `0b7b2e7`
+- **Files Modified:**
+  - `kb/carousel_templates/config.json` -- added mermaid_theme per template, brand.cta_text
+  - `kb/carousel_templates/brand-purple.html` -- CTA button text from config, overflow:hidden on mermaid container
+  - `kb/carousel_templates/modern-editorial.html` -- kicker from brand.tagline, pull-accent from slide.title, CTA from config, overflow:hidden
+  - `kb/carousel_templates/tech-minimal.html` -- generic terminal tabs, code-comment from slide.title, removed hardcoded topic, CTA from config, overflow:hidden
+  - `kb/render.py` -- mermaid_theme from config (not hardcoded if/else), render_mermaid slide_number param for unique filenames, docstring fix
+  - `kb/config/analysis_types/carousel_slides.json` -- prompt now mentions title and subtitle fields
+  - `kb/tests/test_carousel_templates.py` -- 27 new tests: end-to-end render (3 templates x 8 tests), mermaid theme config (4), CTA text (1), prompt fields (1)
+- **Notes:**
+  - Fonts already have offline fallbacks in config.json (system-ui, sans-serif, Georgia) and display=swap in Google Fonts URLs
+  - Dead summary slide type already absent from all 3 new templates (only in _archive/)
+  - Test autoescape already fixed in Phase 2
+  - 397 tests pass (up from 370)
+
+### Tasks Completed
+- [x] Task 4.1: Fix hardcoded strings -- CTA button text from brand.cta_text, kicker from brand.tagline, pull-accent from slide.title, terminal decorations made generic
+- [x] Task 4.2: mermaid_theme in config.json per template, render.py uses config instead of if/else
+- [x] Task 4.3: Font fallback stacks -- already in place (system-ui, serif, monospace) with display=swap
+- [x] Task 4.4: overflow:hidden on .mermaid-container in all 3 templates
+- [x] Task 4.5: carousel_slides.json prompt now mentions title and subtitle fields
+- [x] Task 4.6: Dead summary slide type confirmed absent from new templates (only in _archive/)
+- [x] Task 4.7: Test autoescape already fixed in Phase 2
+- [x] Task 4.8: render_mermaid output filename unique per slide via slide_number param
+- [x] Task 4.9: 27 new end-to-end tests added across all 3 templates
+- [x] Task 4.10: Full test suite passes -- 397 tests
+
+### Acceptance Criteria Verification
+- [x] AC1: Fonts load reliably (with offline fallback) -- all config.json font stacks include system-ui/sans-serif/serif/monospace fallbacks, Google Fonts URLs use display=swap
+- [x] AC2: Old templates archived, new templates are default -- dark-purple.html and light.html in _archive/, brand-purple is config default
+- [x] AC3: Full carousel renders correctly end-to-end -- TestEndToEndRender verifies all slide types across all 3 templates via render_html_from_slides
+- [x] AC4: Blake approves visual quality -- DEFERRED (requires human visual review of rendered PDFs)
+- [x] AC5: Template selector in kb serve lists new templates -- config.json has 3 templates, serve.py reads from config
+- [x] AC6: Dead summary slide type removed -- confirmed absent from all 3 templates, test_no_summary_slide_type verifies
 
 ---
 
