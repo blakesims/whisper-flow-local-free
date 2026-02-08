@@ -1175,51 +1175,51 @@ def run_with_judge_loop(
 
     console.print(f"[green]Draft generated (round {current_round}).[/green] Character count: {draft_result.get('character_count', 'N/A')}")
 
-    judge_result = None
+    # Step 2: Always judge the initial draft
+    console.print(f"\n[bold cyan]Round {current_round}: Running judge evaluation...[/bold cyan]")
+    judge_result, _ = run_analysis_with_deps(
+        transcript_data=transcript_data,
+        analysis_type=judge_type,
+        model=model,
+        existing_analysis=existing_analysis
+    )
 
-    for i in range(max_rounds):
-        # Step 2: Run judge on the current draft
-        console.print(f"\n[bold cyan]Round {current_round}: Running judge evaluation...[/bold cyan]")
-        judge_result, _ = run_analysis_with_deps(
-            transcript_data=transcript_data,
-            analysis_type=judge_type,
-            model=model,
-            existing_analysis=existing_analysis
-        )
-
-        if "error" in judge_result:
-            console.print(f"[yellow]Judge evaluation failed: {judge_result.get('error')}. Keeping current draft.[/yellow]")
-            break
-
-        # Display judge scores
-        scores = judge_result.get("scores", {})
-        overall = judge_result.get("overall_score", 0)
-        console.print(f"[bold]Judge scores (overall: {overall:.1f}/5.0):[/bold]")
-        for criterion, score in scores.items():
-            color = "green" if score >= 4 else "yellow" if score >= 3 else "red"
-            console.print(f"  [{color}]{criterion}: {score}/5[/{color}]")
-
-        improvements = judge_result.get("improvements", [])
-        if improvements:
-            console.print(f"\n[bold]Improvements suggested: {len(improvements)}[/bold]")
-            for imp in improvements:
-                console.print(f"  [yellow]- {imp.get('criterion', '')}: {imp.get('suggestion', '')[0:100]}...[/yellow]")
-
-        # Save judge as versioned key
-        judge_result["_model"] = model
-        judge_result["_analyzed_at"] = datetime.now().isoformat()
-        versioned_judge_key = f"{judge_type}_{current_round}"
-        existing_analysis[versioned_judge_key] = judge_result
-        # Also store under the base judge key so run_analysis_with_deps can find it
-        existing_analysis[judge_type] = judge_result
-
-        # Update alias history with new judge score
-        _update_alias(existing_analysis, analysis_type, judge_type, draft_result, current_round)
-
+    if "error" in judge_result:
+        console.print(f"[yellow]Judge evaluation failed: {judge_result.get('error')}. Keeping current draft.[/yellow]")
         if save_path:
             _save_analysis_to_file(save_path, transcript_data, existing_analysis)
+        return draft_result, judge_result
 
-        # Step 3: Generate improved draft (next round)
+    # Display judge scores
+    scores = judge_result.get("scores", {})
+    overall = judge_result.get("overall_score", 0)
+    console.print(f"[bold]Judge scores (overall: {overall:.1f}/5.0):[/bold]")
+    for criterion, score in scores.items():
+        color = "green" if score >= 4 else "yellow" if score >= 3 else "red"
+        console.print(f"  [{color}]{criterion}: {score}/5[/{color}]")
+
+    improvements = judge_result.get("improvements", [])
+    if improvements:
+        console.print(f"\n[bold]Improvements suggested: {len(improvements)}[/bold]")
+        for imp in improvements:
+            console.print(f"  [yellow]- {imp.get('criterion', '')}: {imp.get('suggestion', '')[0:100]}...[/yellow]")
+
+    # Save judge as versioned key
+    judge_result["_model"] = model
+    judge_result["_analyzed_at"] = datetime.now().isoformat()
+    versioned_judge_key = f"{judge_type}_{current_round}"
+    existing_analysis[versioned_judge_key] = judge_result
+    # Also store under the base judge key so run_analysis_with_deps can find it
+    existing_analysis[judge_type] = judge_result
+
+    # Update alias history with new judge score
+    _update_alias(existing_analysis, analysis_type, judge_type, draft_result, current_round)
+
+    if save_path:
+        _save_analysis_to_file(save_path, transcript_data, existing_analysis)
+
+    # Step 3: Improvement rounds (only if max_rounds > 0)
+    for i in range(max_rounds):
         current_round += 1
         console.print(f"\n[bold cyan]Round {current_round}: Improving draft with feedback...[/bold cyan]")
 
@@ -1262,6 +1262,34 @@ def run_with_judge_loop(
                 _save_analysis_to_file(save_path, transcript_data, existing_analysis)
 
             console.print(f"[green]Improved draft generated (round {current_round}).[/green] Character count: {improved_result.get('character_count', 'N/A')}")
+
+            # Judge the improved draft
+            console.print(f"\n[bold cyan]Round {current_round}: Running judge evaluation...[/bold cyan]")
+            judge_result, _ = run_analysis_with_deps(
+                transcript_data=transcript_data,
+                analysis_type=judge_type,
+                model=model,
+                existing_analysis=existing_analysis
+            )
+
+            if "error" not in judge_result:
+                scores = judge_result.get("scores", {})
+                overall = judge_result.get("overall_score", 0)
+                console.print(f"[bold]Judge scores (overall: {overall:.1f}/5.0):[/bold]")
+                for criterion, score in scores.items():
+                    color = "green" if score >= 4 else "yellow" if score >= 3 else "red"
+                    console.print(f"  [{color}]{criterion}: {score}/5[/{color}]")
+
+                judge_result["_model"] = model
+                judge_result["_analyzed_at"] = datetime.now().isoformat()
+                existing_analysis[f"{judge_type}_{current_round}"] = judge_result
+                existing_analysis[judge_type] = judge_result
+                _update_alias(existing_analysis, analysis_type, judge_type, draft_result, current_round)
+
+                if save_path:
+                    _save_analysis_to_file(save_path, transcript_data, existing_analysis)
+            else:
+                console.print(f"[yellow]Judge evaluation failed for round {current_round}.[/yellow]")
         else:
             console.print(f"[yellow]Improvement round failed. Keeping previous draft.[/yellow]")
             current_round -= 1  # Revert round increment
@@ -1741,8 +1769,8 @@ Examples:
                         help="Force re-run analyses even if already done with same model")
     parser.add_argument("--judge", action="store_true",
                         help="Run with LLM judge improvement loop (for linkedin_v2)")
-    parser.add_argument("--judge-rounds", type=int, default=1,
-                        help="Number of judge improvement rounds (default: 1)")
+    parser.add_argument("--judge-rounds", type=int, default=0,
+                        help="Number of judge improvement rounds (default: 0, draft+judge only)")
     parser.add_argument("--no-save", action="store_true",
                         help="Don't save results to transcript file")
     parser.add_argument("--list-types", "-l", action="store_true",

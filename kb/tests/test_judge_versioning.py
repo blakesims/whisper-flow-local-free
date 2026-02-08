@@ -204,10 +204,16 @@ class TestRunWithJudgeLoopVersioned:
             "improvements": [{"criterion": "hook", "suggestion": "fix"}],
         }
         improved = {"post": "Improved text", "character_count": 120}
+        judge_r1 = {
+            "overall_score": 4.0,
+            "scores": {"hook_strength": 4},
+            "improvements": [],
+        }
 
         mock_deps.side_effect = [
             (draft, []),    # Initial draft
-            (judge, []),    # Judge evaluation
+            (judge, []),    # Judge evaluation (always runs)
+            (judge_r1, []), # Judge evaluation for improved draft
         ]
         mock_analyze.return_value = improved  # Improved draft
 
@@ -337,11 +343,19 @@ class TestRunWithJudgeLoopVersioned:
 
     @patch("kb.analyze.run_analysis_with_deps")
     def test_no_judge_rounds(self, mock_deps):
-        """max_rounds=0 should just produce the initial draft."""
+        """max_rounds=0 should produce draft + judge, no improvement."""
         from kb.analyze import run_with_judge_loop
 
         draft = {"post": "Draft text", "character_count": 100}
-        mock_deps.return_value = (draft, [])
+        judge = {
+            "overall_score": 3.5,
+            "scores": {"hook_strength": 3},
+            "improvements": [{"criterion": "hook", "suggestion": "fix"}],
+        }
+        mock_deps.side_effect = [
+            (draft, []),   # Initial draft
+            (judge, []),   # Judge evaluation (always runs)
+        ]
 
         data = self._make_transcript_data()
         final, judge_result = run_with_judge_loop(
@@ -354,11 +368,12 @@ class TestRunWithJudgeLoopVersioned:
 
         analysis = data["analysis"]
 
-        # Should have draft _0 and alias, no judge
+        # Should have draft _0, judge _0, and alias — but no improvement round
         assert "linkedin_v2_0" in analysis
-        assert "linkedin_judge_0" not in analysis
+        assert "linkedin_judge_0" in analysis
+        assert "linkedin_v2_1" not in analysis
         assert analysis["linkedin_v2"]["_round"] == 0
-        assert judge_result is None
+        assert judge_result is not None
 
     @patch("kb.analyze.run_analysis_with_deps")
     @patch("kb.analyze.analyze_transcript")
@@ -374,10 +389,16 @@ class TestRunWithJudgeLoopVersioned:
             "rewritten_hook": "Better hook",
         }
         improved = {"post": "Draft 1", "character_count": 120}
+        judge_r1 = {
+            "overall_score": 4.0,
+            "scores": {"hook_strength": 4},
+            "improvements": [],
+        }
 
         mock_deps.side_effect = [
             (draft, []),    # Initial draft
-            (judge, []),    # Judge
+            (judge, []),    # Judge (always runs)
+            (judge_r1, []), # Judge for improved draft
         ]
         mock_analyze.return_value = improved
 
@@ -445,10 +466,16 @@ class TestRunWithJudgeLoopVersioned:
             "improvements": [],
         }
         improved = {"post": "Better text", "character_count": 110}
+        judge_r1 = {
+            "overall_score": 4.0,
+            "scores": {"hook_strength": 4},
+            "improvements": [],
+        }
 
         mock_deps.side_effect = [
             (draft, []),
-            (judge, []),
+            (judge, []),    # Judge (always runs)
+            (judge_r1, []), # Judge for improved draft
         ]
         mock_analyze.return_value = improved
 
