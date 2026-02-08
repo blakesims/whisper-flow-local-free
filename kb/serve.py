@@ -39,6 +39,13 @@ ACTION_ID_SEP = "--"
 # Regex for validating action IDs: transcript_id--analysis_name
 ACTION_ID_PATTERN = re.compile(r'^[\w\.\-]+--[a-z0-9_]+$')
 
+# Pattern to match versioned analysis keys that should be filtered from scan results.
+# These are internal storage keys, not actionable items:
+# - linkedin_v2_0, linkedin_v2_1, ... (versioned drafts)
+# - linkedin_judge_0, linkedin_judge_1, ... (versioned judge evaluations)
+# - linkedin_v2_1_0, linkedin_v2_2_1, ... (edit sub-versions)
+VERSIONED_KEY_PATTERN = re.compile(r'^.+_\d+$|^.+_\d+_\d+$')
+
 # Add project root for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -146,6 +153,30 @@ def save_action_state(state: dict):
     ACTION_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(ACTION_STATE_PATH, 'w') as f:
         json.dump(state, f, indent=2)
+
+
+def migrate_approved_to_draft() -> int:
+    """Reset existing approved items to draft state.
+
+    One-time migration for T023: all previously approved items are reset
+    to 'draft' so they go through the new iteration workflow. The approval
+    timestamp is preserved in '_previously_approved_at'.
+
+    Returns:
+        Number of items migrated.
+    """
+    state = load_action_state()
+    count = 0
+    for action_id, action_data in state.get("actions", {}).items():
+        if action_data.get("status") == "approved":
+            action_data["_previously_approved_at"] = action_data.get("completed_at", "")
+            action_data["status"] = "draft"
+            action_data.pop("completed_at", None)
+            count += 1
+    if count > 0:
+        save_action_state(state)
+        logger.info("Migrated %d approved items to draft state", count)
+    return count
 
 
 # --- Prompt Feedback Storage ---
@@ -373,6 +404,10 @@ def scan_actionable_items() -> list[dict]:
                 # Check for actionable analyses
                 analysis = data.get("analysis", {})
                 for analysis_name in analysis.keys():
+                    # Skip versioned keys (internal storage, not actionable)
+                    if VERSIONED_KEY_PATTERN.match(analysis_name):
+                        continue
+
                     destination = get_destination_for_action(input_type, analysis_name, action_mapping)
                     if destination is None:
                         continue  # Not actionable
