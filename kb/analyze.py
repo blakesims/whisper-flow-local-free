@@ -1162,7 +1162,6 @@ def run_with_judge_loop(
     existing_analysis[versioned_draft_key] = draft_result
 
     # Update alias to point to latest
-    existing_analysis[analysis_type] = draft_result
     _update_alias(existing_analysis, analysis_type, judge_type, draft_result, current_round)
 
     # Save after draft
@@ -1911,24 +1910,30 @@ Examples:
             sys.exit(1)
         return
 
-    # Judge mode with decimal filter (no direct file path)
-    if args.judge and args.decimal:
-        transcripts = get_all_transcripts(decimal_filter=args.decimal, limit=1)
-        if not transcripts:
-            console.print(f"[red]No transcripts found for decimal: {args.decimal}[/red]")
-            sys.exit(1)
-
-        transcript_path = transcripts[0]["path"]
-
-        # Use auto-judge for types that support it
+    # Decimal filter mode (no direct file path)
+    # Auto-judge types (e.g., linkedin_v2) route to auto-judge regardless of --judge flag.
+    # --judge flag only affects non-auto-judge types.
+    if args.decimal:
+        # Determine types
         if args.types:
             analysis_types = args.types
         else:
-            analysis_types = ["linkedin_v2"]
+            # Default: if --judge passed use linkedin_v2, otherwise use default types
+            if args.judge:
+                analysis_types = ["linkedin_v2"]
+            else:
+                analysis_types = None  # Will be handled below
 
-        has_auto_judge = any(t in AUTO_JUDGE_TYPES for t in analysis_types)
+        has_auto_judge = analysis_types and any(t in AUTO_JUDGE_TYPES for t in analysis_types)
 
         if has_auto_judge:
+            transcripts = get_all_transcripts(decimal_filter=args.decimal, limit=1)
+            if not transcripts:
+                console.print(f"[red]No transcripts found for decimal: {args.decimal}[/red]")
+                sys.exit(1)
+
+            transcript_path = transcripts[0]["path"]
+
             console.print(Panel(
                 f"[bold]Transcript Analysis (Auto-Judge)[/bold]\n"
                 f"File: {transcript_path}\n"
@@ -1961,44 +1966,53 @@ Examples:
                 sys.exit(1)
             return
 
-        # Fallback: explicit judge loop for non-auto-judge types
-        analysis_type = analysis_types[0]
-        judge_type = "linkedin_judge"
+        # Fallback: explicit --judge with non-auto-judge types
+        if args.judge and analysis_types:
+            transcripts = get_all_transcripts(decimal_filter=args.decimal, limit=1)
+            if not transcripts:
+                console.print(f"[red]No transcripts found for decimal: {args.decimal}[/red]")
+                sys.exit(1)
 
-        console.print(Panel(
-            f"[bold]Transcript Analysis (Judge Loop)[/bold]\n"
-            f"File: {transcript_path}\n"
-            f"Analysis: {analysis_type}\n"
-            f"Judge: {judge_type}\n"
-            f"Rounds: {args.judge_rounds}\n"
-            f"Model: {args.model}",
-            border_style="cyan"
-        ))
+            transcript_path = transcripts[0]["path"]
+            analysis_type = analysis_types[0]
+            judge_type = "linkedin_judge"
 
-        try:
-            with open(transcript_path) as f:
-                transcript_data = json.load(f)
+            console.print(Panel(
+                f"[bold]Transcript Analysis (Judge Loop)[/bold]\n"
+                f"File: {transcript_path}\n"
+                f"Analysis: {analysis_type}\n"
+                f"Judge: {judge_type}\n"
+                f"Rounds: {args.judge_rounds}\n"
+                f"Model: {args.model}",
+                border_style="cyan"
+            ))
 
-            final_result, judge_result = run_with_judge_loop(
-                transcript_data=transcript_data,
-                analysis_type=analysis_type,
-                judge_type=judge_type,
-                model=args.model,
-                max_rounds=args.judge_rounds,
-                save_path=transcript_path if not args.no_save else None
-            )
+            try:
+                with open(transcript_path) as f:
+                    transcript_data = json.load(f)
 
-            console.print("\n[bold]Final Post:[/bold]")
-            console.print(Panel(final_result.get("post", ""), border_style="green"))
+                final_result, judge_result = run_with_judge_loop(
+                    transcript_data=transcript_data,
+                    analysis_type=analysis_type,
+                    judge_type=judge_type,
+                    model=args.model,
+                    max_rounds=args.judge_rounds,
+                    save_path=transcript_path if not args.no_save else None
+                )
 
-            if judge_result:
-                overall = judge_result.get("overall_score", 0)
-                console.print(f"\n[bold]Judge overall score: {overall:.1f}/5.0[/bold]")
+                console.print("\n[bold]Final Post:[/bold]")
+                console.print(Panel(final_result.get("post", ""), border_style="green"))
 
-        except Exception as e:
-            console.print(f"[red]Error: {e}[/red]")
-            sys.exit(1)
-        return
+                if judge_result:
+                    overall = judge_result.get("overall_score", 0)
+                    console.print(f"\n[bold]Judge overall score: {overall:.1f}/5.0[/bold]")
+
+            except Exception as e:
+                console.print(f"[red]Error: {e}[/red]")
+                sys.exit(1)
+            return
+
+        # No auto-judge types and no --judge flag: fall through to interactive mode
 
     # Interactive mode (default)
     run_interactive_mode(

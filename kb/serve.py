@@ -30,7 +30,7 @@ from kb.videos import (
     load_inventory, save_inventory, scan_videos, INVENTORY_PATH,
     queue_transcription, get_queue_status, start_worker, load_queue
 )
-from kb.analyze import list_analysis_types, load_analysis_type, ANALYSIS_TYPES_DIR
+from kb.analyze import list_analysis_types, load_analysis_type, ANALYSIS_TYPES_DIR, AUTO_JUDGE_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -40,11 +40,22 @@ ACTION_ID_SEP = "--"
 ACTION_ID_PATTERN = re.compile(r'^[\w\.\-]+--[a-z0-9_]+$')
 
 # Pattern to match versioned analysis keys that should be filtered from scan results.
-# These are internal storage keys, not actionable items:
+# These are internal storage keys, not actionable items.
+# Built from AUTO_JUDGE_TYPES to only match known versioned prefixes:
 # - linkedin_v2_0, linkedin_v2_1, ... (versioned drafts)
 # - linkedin_judge_0, linkedin_judge_1, ... (versioned judge evaluations)
 # - linkedin_v2_1_0, linkedin_v2_2_1, ... (edit sub-versions)
-VERSIONED_KEY_PATTERN = re.compile(r'^.+_\d+$|^.+_\d+_\d+$')
+def _build_versioned_key_pattern():
+    """Build regex pattern from AUTO_JUDGE_TYPES to match versioned keys."""
+    prefixes = set()
+    for analysis_type, judge_type in AUTO_JUDGE_TYPES.items():
+        prefixes.add(re.escape(analysis_type))
+        prefixes.add(re.escape(judge_type))
+    prefix_group = "|".join(sorted(prefixes))
+    # Match: prefix_N or prefix_N_N (versioned drafts, judges, and edit sub-versions)
+    return re.compile(rf'^(?:{prefix_group})_\d+(?:_\d+)?$')
+
+VERSIONED_KEY_PATTERN = _build_versioned_key_pattern()
 
 # Add project root for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

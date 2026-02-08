@@ -284,6 +284,58 @@ class TestRunWithJudgeLoopVersioned:
         assert analysis["linkedin_v2"]["_round"] == 2
 
     @patch("kb.analyze.run_analysis_with_deps")
+    @patch("kb.analyze.analyze_transcript")
+    def test_backward_compat_existing_unversioned_with_judge(self, mock_analyze, mock_deps):
+        """Existing linkedin_v2 + linkedin_judge without _round should both be migrated to _0."""
+        from kb.analyze import run_with_judge_loop
+
+        judge = {
+            "overall_score": 4.0,
+            "scores": {"hook_strength": 4},
+            "improvements": [],
+        }
+        improved = {"post": "Improved text", "character_count": 120}
+
+        mock_deps.return_value = (judge, [])   # Judge evaluation
+        mock_analyze.return_value = improved   # Improved draft
+
+        data = self._make_transcript_data()
+        # Pre-existing unversioned results (both draft and judge)
+        data["analysis"]["linkedin_v2"] = {
+            "post": "Old draft",
+            "_model": "gemini-2.0-flash",
+            "_analyzed_at": "2026-02-07T10:00:00",
+        }
+        data["analysis"]["linkedin_judge"] = {
+            "overall_score": 3.2,
+            "scores": {"hook_strength": 3},
+            "improvements": [{"criterion": "hook", "suggestion": "fix"}],
+        }
+
+        final, judge_result = run_with_judge_loop(
+            transcript_data=data,
+            analysis_type="linkedin_v2",
+            judge_type="linkedin_judge",
+            max_rounds=1,
+            existing_analysis=data["analysis"]
+        )
+
+        analysis = data["analysis"]
+
+        # Old results should be preserved as _0
+        assert "linkedin_v2_0" in analysis
+        assert analysis["linkedin_v2_0"]["post"] == "Old draft"
+        assert "linkedin_judge_0" in analysis
+        assert analysis["linkedin_judge_0"]["overall_score"] == 3.2
+        assert analysis["linkedin_judge_0"]["scores"]["hook_strength"] == 3
+
+        # Round 1: new draft generated
+        assert "linkedin_v2_1" in analysis
+
+        # Alias should point to latest round
+        assert analysis["linkedin_v2"]["_round"] == 2
+
+    @patch("kb.analyze.run_analysis_with_deps")
     def test_no_judge_rounds(self, mock_deps):
         """max_rounds=0 should just produce the initial draft."""
         from kb.analyze import run_with_judge_loop
@@ -480,6 +532,16 @@ class TestVersionedKeyFiltering:
         assert not VERSIONED_KEY_PATTERN.match("summary")
         assert not VERSIONED_KEY_PATTERN.match("skool_post")
 
+    def test_pattern_does_not_match_unknown_types_ending_in_digits(self):
+        """Future analysis types ending in digits should NOT be filtered."""
+        from kb.serve import VERSIONED_KEY_PATTERN
+        # These are hypothetical analysis types that end with _digits
+        # but are NOT versioned keys of known auto-judge types
+        assert not VERSIONED_KEY_PATTERN.match("analysis_2025")
+        assert not VERSIONED_KEY_PATTERN.match("data_42")
+        assert not VERSIONED_KEY_PATTERN.match("report_3")
+        assert not VERSIONED_KEY_PATTERN.match("skool_post_1")
+
     def test_scan_skips_versioned_keys(self, tmp_path):
         """scan_actionable_items should skip versioned keys."""
         from kb.serve import scan_actionable_items, VERSIONED_KEY_PATTERN
@@ -581,6 +643,42 @@ class TestMigrationApprovedToDraft:
             count = migrate_approved_to_draft()
 
         assert count == 0
+
+
+class TestMigrateCLI:
+    """Tests for the kb migrate CLI command."""
+
+    def test_migrate_module_importable(self):
+        """kb.migrate should be importable and have a main function."""
+        from kb.migrate import main
+        assert callable(main)
+
+    def test_migrate_registered_in_commands(self):
+        """migrate should be in the COMMANDS dict."""
+        from kb.__main__ import COMMANDS
+        assert "migrate" in COMMANDS
+        assert COMMANDS["migrate"]["module"] == "kb.migrate"
+
+    def test_migrate_reset_approved_calls_function(self, tmp_path):
+        """--reset-approved should call migrate_approved_to_draft."""
+        state_file = tmp_path / "action-state.json"
+        state = {
+            "actions": {
+                "id1--linkedin_v2": {
+                    "status": "approved",
+                    "completed_at": "2026-02-07T10:00:00",
+                },
+            }
+        }
+        state_file.write_text(json.dumps(state))
+
+        with patch("kb.serve.ACTION_STATE_PATH", state_file), \
+             patch("sys.argv", ["migrate", "--reset-approved"]):
+            from kb.migrate import main
+            main()
+
+        updated = json.loads(state_file.read_text())
+        assert updated["actions"]["id1--linkedin_v2"]["status"] == "draft"
 
 
 # ===== LinkedIn V2 JSON Template =====

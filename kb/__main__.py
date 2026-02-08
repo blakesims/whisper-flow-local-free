@@ -258,6 +258,11 @@ COMMANDS = {
         "description": "Render carousel visuals (PDF + thumbnails) for approved posts",
         "module": "kb.publish",
     },
+    "migrate": {
+        "label": "Migrate",
+        "description": "Run data migrations (e.g., reset approved items to draft)",
+        "module": "kb.migrate",
+    },
 }
 
 
