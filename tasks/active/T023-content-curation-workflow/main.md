@@ -4,8 +4,7 @@
 T023
 
 ## Meta
-- **Status:** EXECUTING_PHASE_3
-- **Phase 3 Started:** 2026-02-08
+- **Status:** CODE_REVIEW
 - **Last Updated:** 2026-02-08
 
 ## Overview
@@ -232,7 +231,7 @@ Note: `linkedin_v2` is always an alias pointing to the latest version (whether L
 ---
 
 ### Phase 3: Staging Area + Text Editing
-**Status**: IN_PROGRESS
+**Status**: COMPLETE
 
 **Objectives:**
 - Build staging area in kb serve: approved/staged posts land here for curation
@@ -483,6 +482,46 @@ ready → published (copy/export)
 - **Summary:** Solid implementation. Approve rewire correctly gates visual pipeline for AUTO_JUDGE_TYPES, four new endpoints are well-structured with proper validation, HTML template uses escapeHtml consistently, and 25 meaningful tests cover the key behaviors. 277/277 tests pass. Major issue (no server-side guard against concurrent iterations) is mitigated by client-side guard.
 
 -> Details: `code-review-phase-2.md`
+
+---
+
+## Execution Log (Phase 3)
+
+### Phase 3: Staging Area + Text Editing
+- **Status:** COMPLETE
+- **Started:** 2026-02-08
+- **Completed:** 2026-02-08
+- **Commits:** `3f17cd2`
+- **Files Modified:**
+  - `kb/serve.py` -- Enhanced /stage endpoint to create _N_0 edit version; added 3 new endpoints: POST /save-edit (versioned text edits), POST /generate-visuals (background visual pipeline trigger), GET /edit-history (edit sub-versions); updated /posted to accept 'ready' status; updated posting-queue-v2 to include staged/ready items with visual_status, staged_round, edit_count, thumbnail_url metadata; added status priority sorting
+  - `kb/templates/posting_queue.html` -- Added CSS for staging textarea, visual status indicators (generating/ready/failed/text_only), edit badges, save/generate/publish buttons; added renderStagingView() function for editable textarea with change tracking; added generateVisuals(), saveEdit(), publishItem(), pollVisualGeneration() functions; updated keyboard handler: g=generate, s=save, p=publish (staging mode), textarea focus suppression, Ctrl+S save, Escape blur; added ready/generating status badges in entity list
+  - `kb/tests/test_staging.py` -- NEW: 23 tests covering stage edit version creation (3), save-edit versioning (6), generate-visuals trigger (5), edit-history (3), state transitions (3), posting-queue-v2 staging metadata (3)
+- **Notes:**
+  - Pre-existing test failures in test_carousel_templates.py (3 tests) are unrelated T024 template issues.
+  - 339 tests pass total (339/342, 3 pre-existing failures).
+  - 'p' shortcut is context-dependent: in staging mode it publishes, otherwise it navigates to prompts page.
+
+### Tasks Completed
+- [x] Task 3.1: Enhanced /stage endpoint to create initial edit version (_N_0) in transcript JSON
+- [x] Task 3.2: Added POST /save-edit endpoint for versioned text edits (linkedin_v2_N_M+1)
+- [x] Task 3.3: Added POST /generate-visuals endpoint triggering run_visual_pipeline() from staging
+- [x] Task 3.4: Added GET /edit-history endpoint returning edit sub-versions
+- [x] Task 3.5: Updated /posted endpoint to accept 'ready' status
+- [x] Task 3.6: Updated posting-queue-v2 to include staged/ready items with visual metadata
+- [x] Task 3.7: Built staging area UI with editable textarea, save/generate/publish buttons
+- [x] Task 3.8: Visual status indicators (generating spinner, ready thumbnail, failed, text_only)
+- [x] Task 3.9: Keyboard shortcuts: g=generate, s=save, p=publish, textarea focus handling
+- [x] Task 3.10: 23 new tests for staging flow, edit versioning, visual trigger
+
+### Acceptance Criteria
+- [x] AC1: 'a' in iteration view stages the post (creates linkedin_v2_N_0 edit version) -- verified via test_stage_creates_edit_version_n_0, _N_0 created with _source and _edited_at
+- [x] AC2: Staging area shows post text in editable textarea -- renderStagingView() renders textarea with staging-editor id
+- [x] AC3: Saving creates new edit version (linkedin_v2_N_1, _N_2, etc.) -- verified via test_save_edit_creates_n_1, test_save_edit_increments_correctly
+- [x] AC4: Edit versions preserved in transcript JSON -- versioned keys stored in transcript analysis dict, verified in tests
+- [x] AC5: Visual generation only triggers from staging (not on approve) -- generate-visuals requires staged status, approve gated for AUTO_JUDGE_TYPES (Phase 2)
+- [x] AC6: "Generating..." spinner while visuals render -- visual-status.generating with spinner in renderStagingView, pollVisualGeneration polls for completion
+- [x] AC7: "Ready" status with visual preview when complete -- visual-status.ready with thumbnail_url, status transitions to "ready" after pipeline completes
+- [x] AC8: Published/copy action available only when ready -- publishItem() gates on ready/text_only status, publish button disabled otherwise
 
 ---
 
