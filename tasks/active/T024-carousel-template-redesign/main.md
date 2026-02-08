@@ -4,7 +4,7 @@
 T024
 
 ## Meta
-- **Status:** EXECUTING_PHASE_1
+- **Status:** CODE_REVIEW
 - **Last Updated:** 2026-02-08
 
 ## Overview
@@ -367,6 +367,45 @@ Note: Q2 (timeline style) and Q4 (font choice) folded into Phase 0 mockup scope 
 - [x] AC6: Content uses bullets/lists (not block text) — ul and ol elements with styled markers
 - [x] AC7: Each file opens in browser at correct dimensions (1080x1350) — width/height set on `.slide` class
 - [ ] AC8: Blake reviews and selects winner(s) — PENDING: requires human review
+
+### Phase 1: Title Page Template + Config Schema
+- **Status:** COMPLETE
+- **Started:** 2026-02-08
+- **Completed:** 2026-02-08
+- **Commits:** `3118052`
+- **Files Modified:**
+  - `kb/carousel_templates/config.json` -- replaced old dark-purple/light template defs with brand-purple, modern-editorial, tech-minimal; added brand.author_name, brand.community_name, brand.profile_photo_path, header section
+  - `kb/carousel_templates/brand-purple.html` -- NEW: Jinja2 template from mockup #3 with parameterized variables
+  - `kb/carousel_templates/modern-editorial.html` -- NEW: Jinja2 template from mockup #4 with parameterized variables
+  - `kb/carousel_templates/tech-minimal.html` -- NEW: Jinja2 template from mockup #5 with parameterized variables
+  - `kb/carousel_templates/_archive/dark-purple.html` -- archived old MVP template
+  - `kb/carousel_templates/_archive/light.html` -- archived old MVP template
+  - `kb/render.py` -- added load_profile_photo_base64(), updated render_html_from_slides() to pass header/profile_photo_data/brand with backward compat
+  - `kb/tests/test_carousel_templates.py` -- rewritten for new templates: 69 tests covering config schema, all 3 templates, profile photo loading, mermaid, parameterization
+  - `kb/tests/test_render.py` -- updated all references from dark-purple to brand-purple, updated assertions for new template structure
+- **Notes:**
+  - All 3 templates fully parameterized: no hardcoded text from mockups
+  - Title page uses responsive font sizing: title-short (<40 chars), title-medium (40-65), title-long (>65)
+  - Profile photo: renders as base64 data URI when profile.png exists, falls back to gray circle with initials (e.g. "BS") when missing
+  - Backward compatibility: brand.name automatically maps to brand.author_name in render.py
+  - Default template changed from dark-purple to brand-purple
+  - 277 total tests pass across full suite
+
+### Tasks Completed
+- [x] Task 1.1: Updated config.json with brand, header, and 3 new template definitions
+- [x] Task 1.2: Created brand-purple.html Jinja2 template from mockup #3
+- [x] Task 1.3: Created modern-editorial.html Jinja2 template from mockup #4
+- [x] Task 1.4: Created tech-minimal.html Jinja2 template from mockup #5
+- [x] Task 1.5: Updated render.py with profile photo base64 loading, header/brand config passing
+- [x] Task 1.6: Archived old templates, rewrote tests for new system
+
+### Acceptance Criteria Verification
+- [x] AC1: Title page renders with book-style title + subtitle -- all 3 templates render hook slide as title page with title-page-main-title and subtitle
+- [x] AC2: Header bar shows name + community name from config -- tested with brand.author_name and brand.community_name from config.json, verified in all templates
+- [x] AC3: Profile photo renders as circular cutout (base64 data URI, not local file path) -- load_profile_photo_base64() converts to data URI; placeholder renders initials when photo missing
+- [x] AC4: Text sizes scale based on content length -- title-short/title-medium/title-long CSS classes applied based on character count
+- [x] AC5: All elements configurable via config.json -- verified with test_no_hardcoded_names that changing brand values changes rendered output
+- [x] AC6: Jinja2 template is fully parameterized (no hardcoded text from mockup) -- all text comes from template variables
 
 ---
 
