@@ -6,6 +6,7 @@ T025
 ## Meta
 - **Status:** COMPLETE
 - **Last Updated:** 2026-02-08
+- **Current Sub-phase:** Phase 4 complete (code review PASS). Phase 5 (Split serve.py) not yet planned.
 - **Priority:** 3 (important but not blocking current work)
 
 ## Overview
@@ -394,6 +395,65 @@ python3 -m pytest kb/tests/ -v
 - [x] AC7: `kb/videos.py:transcribe_sample()` still has try/except ImportError wrapping -- verified
 - [x] AC8: Test suite passes (395 pass, 2 pre-existing failures) -- verified
 
+### Phase 4 Sub-phase 4.1: Extract template rendering to `kb/prompts.py`
+- **Status:** COMPLETE
+- **Started:** 2026-02-08
+- **Completed:** 2026-02-08
+- **Commits:** `7600a13`
+- **Files Created:**
+  - `kb/prompts.py` -- NEW module (~170 lines), 4 pure template functions with `__all__`
+- **Files Modified:**
+  - `kb/analyze.py` -- removed 4 function definitions (~168 lines), added 5-line import from `kb.prompts` for re-export
+- **Notes:** All 4 functions are pure stdlib (re, json). Re-export from kb.analyze ensures backward compat. Test baseline unchanged: 395 pass, 2 pre-existing failures.
+- **Blockers:** None
+
+### Tasks Completed (Phase 4 Sub-phase 4.1)
+- [x] Task 4.1.1: Created `kb/prompts.py` with format_prerequisite_output, substitute_template_vars, render_conditional_template, resolve_optional_inputs
+- [x] Task 4.1.2: Replaced 4 function defs in `kb/analyze.py` with `from kb.prompts import ...`
+- [x] Task 4.1.3: Full test suite passed (395 pass, 2 pre-existing failures)
+- [x] Task 4.1.4: Verified re-exports from both `kb.analyze` and `kb.prompts`
+- [x] Task 4.1.5: Committed `7600a13`
+
+### Acceptance Criteria (Phase 4 Sub-phase 4.1)
+- [x] AC1: `kb/prompts.py` exists with 4 functions -- verified
+- [x] AC2: `kb/prompts.py` imports ONLY from stdlib (`re`, `json`) -- verified by inspection
+- [x] AC3: All 4 functions re-exported from `kb/analyze.py` -- verified via `from kb.analyze import ...`
+- [x] AC4: 395 tests pass (same 2 pre-existing failures) -- verified
+- [x] AC5: Existing `patch('kb.analyze.substitute_template_vars', ...)` patterns still work -- verified (tests pass)
+
+### Phase 4 Sub-phase 4.2: Extract judge loop to `kb/judge.py`
+- **Status:** COMPLETE
+- **Started:** 2026-02-08
+- **Completed:** 2026-02-08
+- **Commits:** `16ff9d1`
+- **Files Created:**
+  - `kb/judge.py` -- NEW module (~340 lines), 7 judge loop functions + AUTO_JUDGE_TYPES constant
+- **Files Modified:**
+  - `kb/analyze.py` -- removed 7 function definitions + AUTO_JUDGE_TYPES (~448 lines), added 8-line import from `kb.judge` for re-export
+- **Notes:** DEFAULT_MODEL computed from kb.config at module level in judge.py (avoids circular import). Lazy imports from kb.analyze inside run_with_judge_loop() and run_analysis_with_auto_judge() function bodies. Test baseline unchanged: 395 pass, 2 pre-existing failures. kb/serve.py import verified working.
+- **Blockers:** None
+
+### Tasks Completed (Phase 4 Sub-phase 4.2)
+- [x] Task 4.2.1: Read kb/analyze.py -- identified all 7 functions + AUTO_JUDGE_TYPES + DEFAULT_MODEL definition
+- [x] Task 4.2.2: Created `kb/judge.py` with module-level imports (json, time, datetime, Rich, kb.prompts, kb.config)
+- [x] Task 4.2.3: Added lazy imports inside run_with_judge_loop() (analyze_transcript, run_analysis_with_deps, load_analysis_type, _save_analysis_to_file)
+- [x] Task 4.2.4: Added lazy import inside run_analysis_with_auto_judge() (analyze_transcript_file)
+- [x] Task 4.2.5: Replaced 7 function defs + AUTO_JUDGE_TYPES in kb/analyze.py with `from kb.judge import ...`
+- [x] Task 4.2.6: Full test suite passed (395 pass, 2 pre-existing failures)
+- [x] Task 4.2.7: Verified re-exports from both `kb.analyze` and `kb.judge`
+- [x] Task 4.2.8: Verified `from kb.serve import app` works
+- [x] Task 4.2.9: Committed `16ff9d1`
+- [x] Task 4.2.10: Updated main.md execution log
+
+### Acceptance Criteria (Phase 4 Sub-phase 4.2)
+- [x] AC1: `kb/judge.py` exists with 7 functions + 1 constant -- verified
+- [x] AC2: `kb/judge.py` imports prompts from `kb.prompts` (not `kb.analyze`) -- verified by inspection
+- [x] AC3: `kb/judge.py` uses lazy imports from `kb.analyze` inside function bodies -- verified (run_with_judge_loop, run_analysis_with_auto_judge)
+- [x] AC4: All 7 functions + AUTO_JUDGE_TYPES are re-exported from `kb/analyze.py` -- verified via `from kb.analyze import ...`
+- [x] AC5: 395 tests pass (same 2 pre-existing failures) -- verified
+- [x] AC6: All `patch('kb.analyze.run_with_judge_loop', ...)` patterns in tests still work -- verified (tests pass)
+- [x] AC7: `kb/serve.py` module-level import succeeds -- verified via `from kb.serve import app`
+
 ---
 
 ## Code Review Log
@@ -421,6 +481,14 @@ python3 -m pytest kb/tests/ -v
 - **Summary:** Clean wrapper extraction. All 8 ACs verified independently. Zero new test failures (baseline confirmed via git stash comparison). Wrapper is minimal, correct, and has no circular import risk.
 
 -> Details: `code-review-phase-3.md`
+
+### Phase 4 (Split analyze.py)
+- **Gate:** PASS
+- **Reviewed:** 2026-02-08
+- **Issues:** 0 critical, 0 major, 4 minor (unused `import time` in judge.py, mid-file import placement, commit message count off-by-one, test baseline reporting)
+- **Summary:** Clean extraction of 11 functions + 1 constant into kb/prompts.py and kb/judge.py. All ACs verified. Zero new test failures (confirmed via git stash baseline comparison). Circular import strategy is sound. Re-exports maintain full backward compat.
+
+-> Details: `code-review-phase-4.md`
 
 ---
 
@@ -809,6 +877,270 @@ Note: `kb/sources/zoom.py` line 46 and `kb/videos.py` line 34 have module-level 
 - **Open Questions Finalized:** Naming question resolved (use `kb/transcription.py`). No remaining open questions needing human input.
 
 -> Details: `plan-review-phase3.md`
+
+---
+
+## Phase 4 Plan: Split `kb/analyze.py` (MEDIUM RISK)
+
+### Objective
+
+Split the 2,096-line `kb/analyze.py` god file into 3 focused modules (`kb/prompts.py`, `kb/judge.py`, and a thin CLI in `kb/analyze.py`) while keeping the Gemini API core and analysis orchestration in `kb/analyze.py`. Zero behavior change -- pure structural refactor.
+
+### Current State Analysis
+
+`kb/analyze.py` contains **31 functions** across **6 distinct responsibilities** totaling 2,096 lines:
+
+| Responsibility | Functions | Lines | Dependencies |
+|---|---|---|---|
+| Template/prompt rendering | `format_prerequisite_output`, `substitute_template_vars`, `render_conditional_template`, `resolve_optional_inputs` | ~145 | Pure functions, no API calls, no IO. Only import is `re` (stdlib). |
+| Judge loop orchestration | `_get_starting_round`, `_build_history_from_existing`, `_build_score_history`, `_update_alias`, `run_with_judge_loop`, `run_analysis_with_auto_judge`, `AUTO_JUDGE_TYPES` | ~350 | Depends on: `analyze_transcript`, `run_analysis_with_deps`, `load_analysis_type`, `resolve_optional_inputs`, `format_prerequisite_output`, `_save_analysis_to_file`, console |
+| Gemini API + analysis core | `load_analysis_type`, `list_analysis_types`, `analyze_transcript`, `run_analysis_with_deps`, `_save_analysis_to_file`, `analyze_transcript_file` | ~350 | Depends on: template functions, config, `google.genai` |
+| Missing analyses feature | `get_decimal_defaults`, `get_transcript_missing_analyses`, `scan_missing_by_decimal`, `get_missing_summary`, `show_missing_analyses`, `run_missing_analyses`, `run_missing_interactive` | ~355 | Depends on: `get_all_transcripts`, `analyze_transcript_file`, `load_registry`, config |
+| CLI selectors/formatters | `get_all_transcripts`, `format_analysis_status`, `select_transcripts`, `select_analysis_types_interactive` | ~100 | Depends on: `list_analysis_types`, questionary, Rich |
+| CLI entry point | `run_interactive_mode`, `run_batch_pending`, `main` | ~380 | Depends on everything above |
+| Module-level config | Constants + imports | ~66 | `kb.config`, `kb.core` |
+
+### External Consumers (Who imports from `kb.analyze`)
+
+| Consumer | Imports | Import Style |
+|---|---|---|
+| `kb/serve.py:33` | `list_analysis_types`, `load_analysis_type`, `ANALYSIS_TYPES_DIR`, `AUTO_JUDGE_TYPES`, `run_with_judge_loop` | Module-level |
+| `kb/serve.py:280` | `run_analysis_with_deps`, `analyze_transcript_file`, `_save_analysis_to_file`, `DEFAULT_MODEL` | Lazy (inside function) |
+| `kb/inbox.py:37` | `analyze_transcript_file`, `list_analysis_types` | Module-level |
+| `kb/sources/paste.py:253` | `analyze_transcript_file` | Lazy |
+| `kb/sources/file.py:191` | `analyze_transcript_file` | Lazy |
+| `kb/sources/zoom.py:514` | `analyze_transcript_file` | Lazy |
+| `kb/sources/cap_clean.py:327` | `analyze_transcript` | Lazy |
+| `kb/videos.py:793` | `get_decimal_defaults`, `analyze_transcript_file` | Lazy |
+| `kb/__main__.py:220` | `scan_missing_by_decimal` | Lazy |
+| `kb/__main__.py:365,491` | `list_analysis_types` | Lazy |
+| `kb/__init__.py:31` | `analyze_transcript`, `analyze_transcript_file`, `list_analysis_types` | Lazy (`__getattr__`) |
+
+### Test Files Affected
+
+| Test File | Functions Imported from `kb.analyze` |
+|---|---|
+| `test_compound_analysis.py` | `substitute_template_vars`, `format_prerequisite_output`, `load_analysis_type`, `run_analysis_with_deps` |
+| `test_conditional_template.py` | `render_conditional_template`, `substitute_template_vars`, `resolve_optional_inputs` |
+| `test_judge_versioning.py` | `_get_starting_round`, `_build_history_from_existing`, `_build_score_history`, `_update_alias`, `run_with_judge_loop`, `AUTO_JUDGE_TYPES`, `resolve_optional_inputs`, `render_conditional_template` |
+
+### Scope
+
+- **In:** Extracting template rendering to `kb/prompts.py`, judge loop to `kb/judge.py`, and updating all imports across source files, test files, and re-exports in `kb/analyze.py`.
+- **Out:** Not splitting the CLI `main()` function into a separate file (it can stay in `analyze.py` since COMMANDS references `kb.analyze` module). Not refactoring the missing analyses feature out (it is tightly coupled to `get_all_transcripts` and `analyze_transcript_file`). Not changing any behavior.
+
+### Sub-Phases
+
+#### Sub-phase 4.1: Extract template rendering to `kb/prompts.py`
+
+- **Objective:** Move the 4 pure template functions to a new `kb/prompts.py` module. These have zero external dependencies (only `re` from stdlib and `json` from stdlib), making this the safest extraction.
+- **Tasks:**
+  - [ ] Task 4.1.1: Create `kb/prompts.py` containing:
+    - `format_prerequisite_output(analysis_result: dict) -> str` (lines 619-655)
+    - `substitute_template_vars(prompt: str, context: dict) -> str` (lines 658-678)
+    - `render_conditional_template(prompt: str, context: dict) -> str` (lines 681-740)
+    - `resolve_optional_inputs(analysis_def: dict, existing_analysis: dict, transcript_text: str) -> dict` (lines 868-909)
+    - Add module docstring explaining purpose.
+    - Imports needed: `import re`, `import json` (both stdlib only).
+  - [ ] Task 4.1.2: In `kb/analyze.py`, replace the 4 function definitions with imports from `kb.prompts`:
+    ```python
+    from kb.prompts import (
+        format_prerequisite_output,
+        substitute_template_vars,
+        render_conditional_template,
+        resolve_optional_inputs,
+    )
+    ```
+    This re-export ensures all external consumers that currently import these from `kb.analyze` continue to work unchanged.
+  - [ ] Task 4.1.3: Run full test suite: `python3 -m pytest kb/tests/ -v`
+  - [ ] Task 4.1.4: Verify the re-exports work: `python3 -c "from kb.analyze import substitute_template_vars, format_prerequisite_output, render_conditional_template, resolve_optional_inputs; print('OK')"` AND `python3 -c "from kb.prompts import substitute_template_vars, format_prerequisite_output, render_conditional_template, resolve_optional_inputs; print('OK')"`
+- **Acceptance Criteria:**
+  - [ ] `kb/prompts.py` exists with 4 functions
+  - [ ] `kb/prompts.py` imports ONLY from stdlib (`re`, `json`)
+  - [ ] All 4 functions are re-exported from `kb/analyze.py` (backward compat)
+  - [ ] All 395 tests pass (same 2 pre-existing failures)
+  - [ ] All existing `patch('kb.analyze.substitute_template_vars', ...)` patterns in tests still work because the functions are re-exported
+- **Files:**
+  - `kb/prompts.py` -- NEW file, ~130 lines
+  - `kb/analyze.py` -- MODIFY: remove ~130 lines of function bodies, add 5-line import
+- **Dependencies:** Phases 1-3 of T025 COMPLETE
+- **Risk:** LOW. These are pure functions with no side effects, no IO, no external API calls.
+
+**Note on test patches:** The tests use `patch('kb.analyze.substitute_template_vars', ...)` etc. Because the re-export from `kb.analyze` means these names still exist in the `kb.analyze` module namespace, the patches will continue to work without any test changes. However, patches will affect the `kb.analyze` module's reference, not the `kb.prompts` module's original. This is the correct behavior because callers within `kb/analyze.py` resolve these names from their own module namespace.
+
+#### Sub-phase 4.2: Extract judge loop to `kb/judge.py`
+
+- **Objective:** Move the judge loop orchestration (7 functions + 1 constant) to `kb/judge.py`. This is the most complex extraction because `run_with_judge_loop` calls back into `analyze_transcript` and `run_analysis_with_deps`.
+- **Tasks:**
+  - [ ] Task 4.2.1: Create `kb/judge.py` containing:
+    - `AUTO_JUDGE_TYPES` dict (line 1326-1328)
+    - `_get_starting_round(existing_analysis, analysis_type)` (lines 984-1011)
+    - `_build_history_from_existing(existing_analysis, analysis_type, judge_type)` (lines 1014-1046)
+    - `_build_score_history(existing_analysis, judge_type)` (lines 1049-1067)
+    - `_update_alias(existing_analysis, analysis_type, judge_type, draft_result, current_round)` (lines 1070-1081)
+    - `run_with_judge_loop(...)` (lines 1084-1322)
+    - `run_analysis_with_auto_judge(...)` (lines 1331-1431)
+    - Module docstring explaining purpose.
+  - [ ] Task 4.2.2: Set up imports in `kb/judge.py`:
+    ```python
+    import json
+    import time
+    from datetime import datetime
+    from rich.console import Console
+    from rich.panel import Panel
+
+    from kb.prompts import (
+        format_prerequisite_output,
+        resolve_optional_inputs,
+    )
+    # Lazy imports to avoid circular dependency:
+    # analyze_transcript, run_analysis_with_deps, load_analysis_type,
+    # _save_analysis_to_file, analyze_transcript_file are imported
+    # inside function bodies.
+
+    console = Console()
+    ```
+    **Critical design decision -- circular import avoidance:** `kb/judge.py` needs `analyze_transcript` and `run_analysis_with_deps` from `kb/analyze.py`, but `kb/analyze.py` currently defines these and calls judge functions. The solution: `kb/judge.py` uses lazy imports (inside function bodies) for the functions it needs from `kb/analyze.py`. This matches the existing pattern already used throughout the codebase.
+  - [ ] Task 4.2.3: Inside `run_with_judge_loop()` in `kb/judge.py`, add lazy imports at the top of the function body:
+    ```python
+    from kb.analyze import (
+        analyze_transcript, run_analysis_with_deps,
+        load_analysis_type, _save_analysis_to_file,
+    )
+    ```
+  - [ ] Task 4.2.4: Inside `run_analysis_with_auto_judge()` in `kb/judge.py`, add lazy imports at the top of the function body:
+    ```python
+    from kb.analyze import analyze_transcript_file
+    ```
+  - [ ] Task 4.2.5: In `kb/analyze.py`, replace the 7 function definitions and `AUTO_JUDGE_TYPES` with re-exports:
+    ```python
+    from kb.judge import (
+        AUTO_JUDGE_TYPES,
+        _get_starting_round,
+        _build_history_from_existing,
+        _build_score_history,
+        _update_alias,
+        run_with_judge_loop,
+        run_analysis_with_auto_judge,
+    )
+    ```
+  - [ ] Task 4.2.6: Run full test suite: `python3 -m pytest kb/tests/ -v`
+  - [ ] Task 4.2.7: Verify re-exports work: `python3 -c "from kb.analyze import run_with_judge_loop, AUTO_JUDGE_TYPES; print('OK')"` AND `python3 -c "from kb.judge import run_with_judge_loop, AUTO_JUDGE_TYPES; print('OK')"`
+  - [ ] Task 4.2.8: Verify `kb/serve.py` still works (it imports `run_with_judge_loop` and `AUTO_JUDGE_TYPES` from `kb.analyze`): `python3 -c "from kb.serve import app; print('OK')"`
+- **Acceptance Criteria:**
+  - [ ] `kb/judge.py` exists with 7 functions + 1 constant
+  - [ ] `kb/judge.py` imports prompts from `kb.prompts` (not `kb.analyze`)
+  - [ ] `kb/judge.py` uses lazy imports from `kb.analyze` inside function bodies (no circular import at module level)
+  - [ ] All 7 functions + `AUTO_JUDGE_TYPES` are re-exported from `kb/analyze.py`
+  - [ ] All 395 tests pass (same 2 pre-existing failures)
+  - [ ] All `patch('kb.analyze.run_with_judge_loop', ...)` and `patch('kb.analyze.analyze_transcript', ...)` patterns in `test_judge_versioning.py` still work
+  - [ ] `kb/serve.py` module-level import succeeds
+- **Files:**
+  - `kb/judge.py` -- NEW file, ~380 lines
+  - `kb/analyze.py` -- MODIFY: remove ~380 lines, add 8-line import
+- **Dependencies:** Sub-phase 4.1 COMPLETE
+- **Risk:** MEDIUM. The circular dependency between `judge.py` and `analyze.py` requires careful lazy import placement. The existing tests use `patch('kb.analyze.run_with_judge_loop', ...)` which relies on re-export behavior.
+
+**Circular dependency analysis:**
+- `kb/analyze.py` needs: nothing from `kb/judge.py` at runtime (it re-exports via import but no function in analyze.py calls judge functions directly)
+- `kb/judge.py` needs from `kb/analyze.py`: `analyze_transcript`, `run_analysis_with_deps`, `load_analysis_type`, `_save_analysis_to_file`, `analyze_transcript_file`
+- Direction: `judge -> analyze` (one-way at function call time), `analyze -> judge` (only at import time for re-export)
+- This is safe because Python handles circular imports when one side only imports at module level for re-export, and the other imports lazily inside functions.
+
+**Test patch analysis:** `test_judge_versioning.py` patches `kb.analyze.run_with_judge_loop`, `kb.analyze.analyze_transcript`, and `kb.analyze.run_analysis_with_deps`. Because `kb/judge.py` does lazy imports inside function bodies (`from kb.analyze import analyze_transcript`), patching `kb.analyze.analyze_transcript` will be seen by `kb/judge.py` because the lazy import resolves from the `kb.analyze` module namespace where the mock is installed. This works correctly.
+
+#### Sub-phase 4.3: Update external imports (optional optimization)
+
+- **Objective:** Update external consumers to import directly from `kb.prompts` or `kb.judge` where appropriate, reducing coupling. This is optional -- re-exports mean everything works without it -- but improves clarity.
+- **Tasks:**
+  - [ ] Task 4.3.1: Update `kb/serve.py:33`:
+    - FROM: `from kb.analyze import list_analysis_types, load_analysis_type, ANALYSIS_TYPES_DIR, AUTO_JUDGE_TYPES, run_with_judge_loop`
+    - TO: `from kb.analyze import list_analysis_types, load_analysis_type, ANALYSIS_TYPES_DIR` and `from kb.judge import AUTO_JUDGE_TYPES, run_with_judge_loop`
+  - [ ] Task 4.3.2: Update `kb/__init__.py:31` -- NO CHANGE needed. It imports `analyze_transcript`, `analyze_transcript_file`, `list_analysis_types` which all remain in `kb/analyze.py`.
+  - [ ] Task 4.3.3: Update test files to import from canonical locations (optional, can be deferred):
+    - `test_compound_analysis.py`: `substitute_template_vars`, `format_prerequisite_output` -> from `kb.prompts`
+    - `test_conditional_template.py`: `render_conditional_template`, `substitute_template_vars`, `resolve_optional_inputs` -> from `kb.prompts`
+    - `test_judge_versioning.py`: `_get_starting_round`, `_build_history_from_existing`, `_build_score_history`, `_update_alias`, `AUTO_JUDGE_TYPES` -> from `kb.judge`
+    - **BUT** keep `run_with_judge_loop` imports and patches targeting `kb.analyze` because they need to patch the name in the namespace where it is called.
+  - [ ] Task 4.3.4: Run full test suite: `python3 -m pytest kb/tests/ -v`
+  - [ ] Task 4.3.5: Verify no regressions in `kb serve` startup: `python3 -c "from kb.serve import app; print('OK')"`
+- **Acceptance Criteria:**
+  - [ ] `kb/serve.py` imports judge functions from `kb.judge` directly
+  - [ ] All 395 tests pass (same 2 pre-existing failures)
+  - [ ] All test patches still function correctly
+- **Files:**
+  - `kb/serve.py` -- MODIFY: split one import line into two
+  - `kb/tests/test_compound_analysis.py` -- MODIFY: change import sources (optional)
+  - `kb/tests/test_conditional_template.py` -- MODIFY: change import sources (optional)
+  - `kb/tests/test_judge_versioning.py` -- MODIFY: change import sources for helpers (optional)
+- **Dependencies:** Sub-phase 4.2 COMPLETE
+- **Risk:** LOW. Only changing import sources, all functions remain the same.
+
+### Post-Split File Sizes (Estimated)
+
+| File | Before | After | Change |
+|---|---|---|---|
+| `kb/analyze.py` | 2,096 lines | ~1,230 lines | -866 lines (functions removed, import re-exports added) |
+| `kb/prompts.py` | NEW | ~130 lines | Template rendering functions |
+| `kb/judge.py` | NEW | ~380 lines | Judge loop orchestration |
+
+`kb/analyze.py` retains: module-level config (66 lines), analysis type loading (20 lines), Gemini API call (125 lines), dependency resolution (70 lines), file save (5 lines), analyze_transcript_file (115 lines), missing analyses feature (355 lines), CLI selectors/formatters (100 lines), CLI entry point (380 lines), re-export imports (~15 lines).
+
+### Import Dependency Graph (After Split)
+
+```
+kb/prompts.py        (stdlib only: re, json)
+     ^
+     |
+kb/judge.py          (imports from kb.prompts at module level)
+     |               (lazy imports from kb.analyze inside function bodies)
+     v
+kb/analyze.py        (imports from kb.prompts and kb.judge at module level for re-export)
+                     (imports from kb.config, kb.core)
+```
+
+No circular import at module load time. The `judge -> analyze` lazy imports resolve at function call time, after both modules are fully loaded.
+
+### Decision Matrix
+
+#### Open Questions (Need Human Input)
+| # | Question | Options | Impact | Resolution |
+|---|----------|---------|--------|------------|
+| 1 | Should the "missing analyses" feature (~355 lines) also be extracted to a separate module (e.g., `kb/missing.py`)? | A) Extract now as Sub-phase 4.4 B) Leave in `kb/analyze.py` for now, extract in a future phase C) Leave permanently (it is tightly coupled to analyze) | The missing analyses functions depend on `get_all_transcripts`, `analyze_transcript_file`, and `load_registry`. Extracting them would reduce `kb/analyze.py` by another 355 lines (from ~1,498 to ~1,143). However, it adds scope and risk to this phase. | RESOLVED: B. Leave in analyze.py for now. Reduces scope/risk. Can extract in future phase if needed. |
+| 2 | Should Sub-phase 4.3 (updating external imports to canonical locations) be mandatory or optional? | A) Mandatory -- do it as part of this phase B) Optional -- defer to a future cleanup pass | If mandatory, external consumers import from the "right" module immediately. If optional, re-exports handle everything and we reduce scope/risk. Test file import changes are particularly low-value since tests already work via re-exports. | RESOLVED: B. Optional/deferred. Re-exports guarantee backward compatibility, so 4.3 is purely cosmetic. |
+| 3 | Should the `console = Console()` instance in `kb/judge.py` be shared with `kb/analyze.py` or be a separate instance? | A) Create a new `Console()` instance in `kb/judge.py` (simple, matches existing pattern where multiple modules create their own console) B) Share a single console instance via a common module | Every `kb/*.py` file already creates its own `Console()` instance. Creating a new one is consistent with the existing pattern. | RESOLVED: A. Separate instance. Matches existing codebase pattern. |
+
+#### Decisions Made (Autonomous)
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Re-export all moved functions from `kb/analyze.py` | Yes | Backward compatibility. External consumers import from `kb.analyze` and test patches target `kb.analyze`. Changing all import sites is risky and unnecessary. |
+| Use lazy imports in `kb/judge.py` for `kb.analyze` functions | Yes | Avoids circular import at module load time. Matches existing codebase pattern (lazy imports are used throughout `kb/`). |
+| Template functions go to `kb/prompts.py` (not `kb/templates.py`) | `kb/prompts.py` | The functions deal with LLM prompt construction and variable substitution. "prompts" describes the responsibility better than "templates" which could be confused with HTML/Jinja templates. Also matches the original proposed name from the task description. |
+| Judge functions go to `kb/judge.py` | `kb/judge.py` | Matches the original proposed name from the task description. The judge loop is a distinct orchestration pattern. |
+| CLI `main()` stays in `kb/analyze.py` | Yes | The COMMANDS dict in `kb/__main__.py` references `kb.analyze` as the module, and calls `module.main()`. Moving `main()` would require changing COMMANDS entries. Not worth the risk for this phase. |
+| `_save_analysis_to_file` stays in `kb/analyze.py` | Yes | It is a simple 4-line utility used by both `analyze_transcript_file` (in analyze.py) and `run_with_judge_loop` (moving to judge.py). Keeping it in analyze.py avoids an additional dependency direction. judge.py will lazy-import it. |
+| Order of extraction: prompts first, then judge | Yes | Prompts are pure functions with zero dependencies -- safest to extract first. Judge depends on prompts, so extracting prompts first means judge.py can import from kb.prompts directly (not from kb.analyze). |
+| `get_all_transcripts` stays in `kb/analyze.py` | Yes | Used by both the missing analyses feature and the CLI interactive mode. Both remain in analyze.py. |
+
+### Test Baseline
+```bash
+# Current baseline (confirmed 2026-02-08):
+# 395 passed, 2 failed (pre-existing carousel template tests)
+python3 -m pytest kb/tests/ -v
+```
+
+### Phase 4 Plan Review
+- **Gate:** READY (with required fix)
+- **Reviewed:** 2026-02-08
+- **Summary:** Plan is well-verified with 100% accurate line numbers and complete external consumer analysis. One critical gap: `DEFAULT_MODEL` missing from `kb/judge.py` imports (would cause NameError). Simple fix: compute from `kb.config` directly. Post-split line estimates off by ~270 lines (documentation only). All 3 open questions resolved autonomously (no human input needed).
+- **Issues:** 1 critical, 1 major, 4 minor
+- **Open Questions Finalized:**
+  - Q1: Leave "missing analyses" in analyze.py (Option B -- reduces scope/risk)
+  - Q2: Sub-phase 4.3 is optional (Option B -- re-exports handle everything)
+  - Q3: Separate Console() instance in judge.py (Option A -- matches existing pattern)
+- **Required Fix Before Execution:** Add `DEFAULT_MODEL` computation to `kb/judge.py` module-level imports. Recommended approach: compute from `kb.config` (no circular import risk). See plan-review-phase4.md for details.
+
+-> Details: `plan-review-phase4.md`
 
 ---
 
