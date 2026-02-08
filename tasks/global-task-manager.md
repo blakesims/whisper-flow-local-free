@@ -6,8 +6,6 @@
 | :--- | :---- | :---- | :--- | :---- | :--- | :---- | :---- |
 | T012 | KB Transcription Architecture + Zoom | 2 | 2/3 | ACTIVE | - | task-documentation | [main.md](active/T012-kb-zoom-meetings/main.md) |
 | T014 | Cap AI Markers for Intra-Segment Editing | 3 | 0/4 | PLANNING | T013 | - | [main.md](planning/T014-cap-ai-markers/main.md) |
-| T023 | Content Curation Workflow | 1 | 0/4 | READY | T022 | - | [main.md](active/T023-content-curation-workflow/main.md) |
-| T024 | Carousel Template Redesign | 1 | 0/5 | PLANNING | T022 | - | [main.md](active/T024-carousel-template-redesign/main.md) |
 
 ## Notes
 - Priority: 1=Highest, 5=Lowest
@@ -16,6 +14,8 @@
 - For ongoing tasks without distinct phases, use "Ongoing" in the "Phases" column
 
 ## Recently Completed (2026-02-08)
+- T024: Carousel Template Redesign - 5 phases: mockups, template conversion, content slides + markdown, mermaid SVG, polish ([main.md](active/T024-carousel-template-redesign/main.md))
+- T023: Content Curation Workflow - 4 phases: judge versioning + auto-judge, iteration view + approve rewire, staging area + text editing, slide editing + template selection ([main.md](active/T023-content-curation-workflow/main.md))
 - T022: Content Engine — Text to Visual Content & Lead Magnets - 4 phases: linkedin_v2 + judge, visual classifier + templates, rendering pipeline, kb serve integration ([main.md](completed/T022-content-engine/main.md))
 - T020: KB Posting Queue Extension - 4 phases ([main.md](completed/T020-kb-posting-queue-extension/main.md))
 - T021: KB Serve UI -- Layout & JSON Rendering - 4 phases ([main.md](completed/T021-kb-serve-ui-layout-rendering/main.md))

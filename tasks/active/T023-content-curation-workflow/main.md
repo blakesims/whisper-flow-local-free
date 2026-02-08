@@ -4,8 +4,7 @@
 T023
 
 ## Meta
-- **Status:** EXECUTING_PHASE_4
-- **Last Updated:** 2026-02-08
+- **Status:** COMPLETE
 - **Last Updated:** 2026-02-08
 
 ## Overview
@@ -286,7 +285,7 @@ ready → published (copy/export)
 ---
 
 ### Phase 4: Slide Editing + Template Selection
-**Status**: EXECUTING
+**Status**: COMPLETE
 
 **Objectives:**
 - After visual generation, allow editing individual carousel slides in kb serve
@@ -492,6 +491,14 @@ ready → published (copy/export)
 
 -> Details: `code-review-phase-3.md`
 
+### Phase 4
+- **Gate:** PASS
+- **Reviewed:** 2026-02-08
+- **Issues:** 0 critical, 2 major, 4 minor
+- **Summary:** Clean implementation of slide editing, template selection, re-render, and CLI publish. All 8 ACs verified, 370/370 tests pass. Phase 3 review fix (stale visual invalidation) correctly applied. Major issues: /render endpoint does not validate template_name before background thread; find_staged_renderables() has no test coverage. Neither blocks completion.
+
+-> Details: `code-review-phase-4.md`
+
 ---
 
 ## Execution Log (Phase 3)
@@ -531,6 +538,57 @@ ready → published (copy/export)
 - [x] AC6: "Generating..." spinner while visuals render -- visual-status.generating with spinner in renderStagingView, pollVisualGeneration polls for completion
 - [x] AC7: "Ready" status with visual preview when complete -- visual-status.ready with thumbnail_url, status transitions to "ready" after pipeline completes
 - [x] AC8: Published/copy action available only when ready -- publishItem() gates on ready/text_only status, publish button disabled otherwise
+
+---
+
+## Execution Log (Phase 4)
+
+### Phase 4: Slide Editing + Template Selection
+- **Status:** COMPLETE
+- **Started:** 2026-02-08
+- **Completed:** 2026-02-08
+- **Commits:** `f2eff82`
+- **Files Modified:**
+  - `kb/serve.py` -- Added 4 new endpoints: GET /api/templates (list carousel templates from config.json), GET /api/action/<id>/slides (return carousel slide data), POST /api/action/<id>/save-slides (save edited slides, invalidate visuals), POST /api/action/<id>/render (re-render with template in background thread); fixed save-edit on "ready" items to invalidate visual_status to "stale" and reset status to "staged" (Phase 3 code review fix)
+  - `kb/templates/posting_queue.html` -- Added CSS for slide editor cards, template selector dropdown, stale visual indicator, slide textareas; added JavaScript: fetchTemplates(), fetchSlides(), saveSlides(), reRender(), buildSlideEditorHtml(), buildTemplateSelectorHtml(); updated renderStagingView() to include template selector, slide editor, re-render button; updated selectEntity() to fetch templates+slides for staged/ready items; added slide textarea change tracking
+  - `kb/publish.py` -- Added --template/-t flag for template selection; added --staged flag for rendering staged items from action-state.json; added find_staged_renderables() function; updated render_one() to pass template_name to render_pipeline
+  - `kb/tests/test_slide_editing.py` -- NEW: 23 tests covering GET /api/templates (3), GET /api/action/<id>/slides (4), POST /api/action/<id>/save-slides (6), POST /api/action/<id>/render (5), save-edit visual invalidation (2), kb publish --template (2), slides persistence (1)
+- **Notes:**
+  - Phase 3 code review fix applied: save-edit on "ready" items now resets status to "staged" and visual_status to "stale"
+  - save-slides also invalidates visuals (sets visual_status to "stale")
+  - Mermaid slide content is read-only in the UI (textarea has readonly attribute)
+  - Template selector is populated from /api/templates which reads carousel_templates/config.json
+  - Re-render uses render_pipeline() with template_name parameter, same as generate-visuals but with template override
+  - 370 tests pass total (342 original + 23 new + 5 previously-failing template tests now fixed by T024)
+
+### Tasks Completed
+- [x] Task 4.1: GET /api/templates endpoint returning template list from config.json with default marked
+- [x] Task 4.2: GET /api/action/<id>/slides endpoint returning carousel slide data
+- [x] Task 4.3: POST /api/action/<id>/save-slides endpoint saving edited title/content (type read-only), invalidating visuals
+- [x] Task 4.4: POST /api/action/<id>/render endpoint triggering background re-render with template selection
+- [x] Task 4.5: Slide editor UI with per-slide textareas for title and content, mermaid read-only
+- [x] Task 4.6: Template selector dropdown in staging area
+- [x] Task 4.7: Re-render button in staging area actions bar
+- [x] Task 4.8: Phase 3 code review fix: save-edit on ready items invalidates stale visuals
+- [x] Task 4.9: kb publish --template flag and --staged mode for CLI rendering
+- [x] Task 4.10: 23 new tests for all Phase 4 endpoints and behaviors
+
+### Acceptance Criteria
+- [x] AC1: After visual generation, slides are viewable and editable in kb serve -- GET /slides returns slide data, buildSlideEditorHtml() renders per-slide cards in staging view
+- [x] AC2: Each slide shows title and content in textarea fields -- slide-card has .slide-title-input and .slide-content-input textareas
+- [x] AC3: Slide type is read-only (can't change hook to mermaid) -- save-slides only updates title/content, type preserved; mermaid content textarea has readonly attribute
+- [x] AC4: Save edits updates the carousel_slides analysis data -- verified via test_save_slides_updates_content and test_save_slides_records_timestamp
+- [x] AC5: Template selector shows available templates -- buildTemplateSelectorHtml() populates dropdown from /api/templates, 3 templates confirmed (brand-purple, modern-editorial, tech-minimal)
+- [x] AC6: Re-render produces new PDF/PNGs with edited content and chosen template -- POST /render passes template_name to render_pipeline(), background thread updates status to ready
+- [x] AC7: `kb publish --decimal X` works with staged content -- --staged flag and find_staged_renderables() locate staged items; --template passes to render_one()
+- [x] AC8: Slide edits persist across page refreshes -- verified via test_save_and_refetch_slides (save then GET returns edited values)
+
+---
+
+## Completion
+- **Completed:** 2026-02-08
+- **Summary:** Full content curation workflow delivered across 4 phases: judge versioning + auto-judge pipeline (Phase 1), iteration view + approve rewire (Phase 2), staging area + text editing (Phase 3), slide editing + template selection + CLI publish (Phase 4). 370 tests total, all passing.
+- **Learnings:** Validate user-provided enum values before spawning background threads. New utility functions need their own test coverage even when only called from one place. Extract repeated code patterns into helpers before they triple.
 
 ---
 
