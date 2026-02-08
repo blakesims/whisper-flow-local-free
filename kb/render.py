@@ -4,13 +4,13 @@ KB Rendering Pipeline — HTML carousel → PDF + Mermaid diagrams.
 Converts carousel slide data + Jinja2 templates into:
 - Multi-page PDF (one page per slide at 1080x1350px)
 - Individual slide PNGs (for posting queue thumbnails)
-- Mermaid diagram PNGs (embedded in carousel slides)
+- Mermaid diagram SVGs (embedded inline in carousel slides)
 
 Usage:
     from kb.render import render_carousel, render_mermaid, render_pipeline
 
-    # Render mermaid diagram to PNG
-    png_path = render_mermaid("graph LR\\n  A-->B", "/tmp/output")
+    # Render mermaid diagram to SVG
+    svg_content = render_mermaid("graph LR\\n  A-->B", "/tmp/output")
 
     # Render carousel slides to PDF
     pdf_path = render_carousel(slides, "dark-purple", "/tmp/output")
@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Optional
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
-from markupsafe import Markup
+from markupsafe import Markup, escape
 
 logger = logging.getLogger(__name__)
 
@@ -74,18 +74,18 @@ def render_mermaid(
     width: int = 860,
 ) -> Optional[str]:
     """
-    Render mermaid code to PNG using mmdc CLI.
+    Render mermaid code to SVG using mmdc CLI.
 
     Args:
         mermaid_code: Mermaid diagram code (e.g. "graph LR\\n  A-->B")
-        output_path: Directory to write the output PNG
+        output_path: Directory to write the output SVG
         mmdc_path: Path to mmdc binary (auto-detected if None)
         background: Background color (default: transparent)
         theme: Mermaid theme (dark, default, forest, neutral)
         width: Output width in pixels
 
     Returns:
-        Path to generated PNG, or None if rendering failed.
+        SVG content string (ready for inline embedding), or None if rendering failed.
     """
     if mmdc_path is None:
         mmdc_path = _find_mmdc()
@@ -96,7 +96,7 @@ def render_mermaid(
 
     output_dir = Path(output_path)
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_file = output_dir / "mermaid.png"
+    output_file = output_dir / "mermaid.svg"
 
     # Write mermaid code to temp file
     try:
@@ -132,8 +132,9 @@ def render_mermaid(
             return None
 
         if output_file.exists() and output_file.stat().st_size > 0:
-            logger.info("Mermaid rendered: %s", output_file)
-            return str(output_file)
+            svg_content = output_file.read_text(encoding="utf-8")
+            logger.info("Mermaid SVG rendered: %s (%d bytes)", output_file, len(svg_content))
+            return svg_content
 
         logger.warning("mmdc produced no output file")
         return None
@@ -252,14 +253,14 @@ def markdown_to_html(text: str) -> Markup:
 
         # Check for unordered list: '- ' or '* '
         if stripped.startswith("- ") or stripped.startswith("* "):
-            item_text = stripped[2:]
+            item_text = escape(stripped[2:])
             if current_type != "ul":
                 flush()
                 current_type = "ul"
             current_items.append(item_text)
         # Check for ordered list: 'N. '
         elif re.match(r"^\d+\.\s", stripped):
-            item_text = re.sub(r"^\d+\.\s", "", stripped)
+            item_text = escape(re.sub(r"^\d+\.\s", "", stripped))
             if current_type != "ol":
                 flush()
                 current_type = "ol"
@@ -269,7 +270,7 @@ def markdown_to_html(text: str) -> Markup:
             if current_type != "p":
                 flush()
                 current_type = "p"
-            current_items.append(stripped)
+            current_items.append(escape(stripped))
 
     flush()
     return Markup("".join(html_parts))
@@ -573,7 +574,7 @@ def render_pipeline(
         Dict with:
             - pdf_path: str
             - thumbnail_paths: list[str]
-            - mermaid_path: str or None
+            - mermaid_svg: str or None (raw SVG content)
             - html: str
             - errors: list[str]
     """
@@ -588,25 +589,25 @@ def render_pipeline(
     errors = []
 
     # Step 1: Render mermaid diagrams if needed
-    mermaid_path = None
+    mermaid_svg = None
     if has_mermaid:
+        # Select mmdc theme based on template
+        mermaid_theme = "dark"
+        if template_name == "modern-editorial":
+            mermaid_theme = "neutral"
+
         for slide in slides:
             if slide.get("type") == "mermaid" and slide.get("content"):
                 mermaid_out_dir = os.path.join(output_dir, "mermaid")
-                mermaid_path = render_mermaid(
+                svg_content = render_mermaid(
                     slide["content"],
                     mermaid_out_dir,
+                    theme=mermaid_theme,
                 )
-                if mermaid_path:
-                    # Convert local file path to base64 data URI for Playwright
-                    # (Chromium security blocks local file:// paths in set_content)
-                    try:
-                        with open(mermaid_path, "rb") as img_f:
-                            img_data = base64.b64encode(img_f.read()).decode("ascii")
-                        slide["mermaid_image_path"] = f"data:image/png;base64,{img_data}"
-                    except (IOError, OSError) as read_err:
-                        logger.warning("Could not read mermaid PNG for base64: %s", read_err)
-                        slide["mermaid_image_path"] = mermaid_path
+                if svg_content:
+                    # Embed SVG inline via Markup() — trusted source (mmdc output)
+                    slide["mermaid_svg"] = Markup(svg_content)
+                    mermaid_svg = svg_content
                 else:
                     errors.append(
                         f"Mermaid render failed for slide {slide.get('slide_number')}. "
@@ -631,7 +632,7 @@ def render_pipeline(
         return {
             "pdf_path": None,
             "thumbnail_paths": [],
-            "mermaid_path": mermaid_path,
+            "mermaid_svg": mermaid_svg,
             "html": None,
             "errors": errors + [f"Carousel render failed: {e}"],
         }
@@ -639,7 +640,7 @@ def render_pipeline(
     return {
         "pdf_path": carousel_result["pdf_path"],
         "thumbnail_paths": carousel_result["thumbnail_paths"],
-        "mermaid_path": mermaid_path,
+        "mermaid_svg": mermaid_svg,
         "html": carousel_result["html"],
         "errors": errors,
     }

@@ -341,12 +341,11 @@
     padding: 20px 56px 56px 56px;
     flex: 1;
   }
-  .mermaid-container img {
+  .mermaid-container svg {
     max-width: 860px;
     max-height: 800px;
     width: auto;
     height: auto;
-    object-fit: contain;
   }
   .mermaid-code {
     font-family: {{ fonts.mono }};
@@ -475,8 +474,8 @@
   <div class="slide-subtitle-line"></div>
   {% endif %}
   <div class="mermaid-container">
-    {% if slide.mermaid_image_path %}
-      <img src="{{ slide.mermaid_image_path }}" alt="Diagram">
+    {% if slide.mermaid_svg %}
+      {{ slide.mermaid_svg }}
     {% else %}
       <div class="mermaid-code">{{ slide.content }}</div>
     {% endif %}

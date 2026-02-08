@@ -41,7 +41,7 @@ SAMPLE_SLIDES = [
     {"slide_number": 1, "type": "hook", "content": "I automated my entire posting workflow.", "words": 6},
     {"slide_number": 2, "type": "content", "content": "Most creators spend 2 hours per post.", "words": 8},
     {"slide_number": 3, "type": "content", "content": "Step 1: Voice note into transcription.", "words": 6},
-    {"slide_number": 4, "type": "mermaid", "content": "graph LR\n  A-->B-->C", "words": 5, "mermaid_image_path": None},
+    {"slide_number": 4, "type": "mermaid", "content": "graph LR\n  A-->B-->C", "words": 5, "mermaid_svg": None},
     {"slide_number": 5, "type": "content", "content": "Step 2: LLM writes the post.", "words": 6},
     {"slide_number": 6, "type": "cta", "content": "What takes you the most time?", "words": 7},
 ]
@@ -134,14 +134,15 @@ class TestRenderHtmlFromSlides:
 
     def test_mermaid_slide_without_image(self):
         html = render_html_from_slides(SAMPLE_SLIDES, "brand-purple")
-        # Without mermaid_image_path, should show raw code
+        # Without mermaid_svg, should show raw code
         assert "graph LR" in html
 
-    def test_mermaid_slide_with_image(self):
+    def test_mermaid_slide_with_svg(self):
+        from markupsafe import Markup
         slides = [dict(s) for s in SAMPLE_SLIDES]
-        slides[3]["mermaid_image_path"] = "data:image/png;base64,abc123"
+        slides[3]["mermaid_svg"] = Markup('<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>')
         html = render_html_from_slides(slides, "brand-purple")
-        assert 'src="data:image/png;base64,abc123"' in html
+        assert '<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>' in html
 
     def test_cta_slide_content(self):
         html = render_html_from_slides(SAMPLE_SLIDES, "brand-purple")
@@ -199,10 +200,10 @@ class TestRenderMermaid:
     @patch("kb.render.subprocess.run")
     def test_successful_render(self, mock_run):
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Mock mmdc success: create the output file
+            # Mock mmdc success: create the output SVG file
             def side_effect(*args, **kwargs):
-                output_file = Path(tmpdir) / "mermaid.png"
-                output_file.write_bytes(b"fake png data")
+                output_file = Path(tmpdir) / "mermaid.svg"
+                output_file.write_text('<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>')
                 return MagicMock(returncode=0, stderr="")
 
             mock_run.side_effect = side_effect
@@ -213,7 +214,8 @@ class TestRenderMermaid:
                 mmdc_path="/usr/bin/true",
             )
             assert result is not None
-            assert result.endswith("mermaid.png")
+            assert "<svg" in result
+            assert isinstance(result, str)
 
     @patch("kb.render.subprocess.run")
     def test_failed_render_returns_none(self, mock_run):
@@ -276,6 +278,9 @@ class TestRenderMermaid:
             assert "forest" in cmd
             assert "-w" in cmd
             assert "500" in cmd
+            # Verify SVG output (not PNG)
+            output_arg_idx = cmd.index("-o") + 1
+            assert cmd[output_arg_idx].endswith(".svg")
 
     def test_auto_detects_mmdc(self):
         """_find_mmdc should return a path if mmdc exists."""
@@ -440,7 +445,7 @@ class TestRenderPipeline:
     @patch("kb.render.render_carousel")
     @patch("kb.render.render_mermaid")
     def test_full_pipeline_with_mermaid(self, mock_mermaid, mock_carousel):
-        mock_mermaid.return_value = "/tmp/mermaid.png"
+        mock_mermaid.return_value = '<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>'
         mock_carousel.return_value = {
             "pdf_path": "/tmp/carousel.pdf",
             "thumbnail_paths": ["/tmp/slide-1.png"],
@@ -451,7 +456,8 @@ class TestRenderPipeline:
             result = render_pipeline(SAMPLE_SLIDES_DATA, tmpdir)
 
             assert result["pdf_path"] == "/tmp/carousel.pdf"
-            assert result["mermaid_path"] == "/tmp/mermaid.png"
+            assert result["mermaid_svg"] is not None
+            assert "<svg" in result["mermaid_svg"]
             assert len(result["errors"]) == 0
 
     @patch("kb.render.render_carousel")
@@ -467,7 +473,7 @@ class TestRenderPipeline:
             result = render_pipeline(SAMPLE_SLIDES_NO_MERMAID, tmpdir)
 
             mock_mermaid.assert_not_called()
-            assert result["mermaid_path"] is None
+            assert result["mermaid_svg"] is None
             assert len(result["errors"]) == 0
 
     @patch("kb.render.render_carousel")
@@ -485,7 +491,7 @@ class TestRenderPipeline:
             result = render_pipeline(SAMPLE_SLIDES_DATA, tmpdir)
 
             assert result["pdf_path"] == "/tmp/carousel.pdf"
-            assert result["mermaid_path"] is None
+            assert result["mermaid_svg"] is None
             assert len(result["errors"]) == 1
             assert "Mermaid render failed" in result["errors"][0]
 
@@ -493,7 +499,7 @@ class TestRenderPipeline:
     @patch("kb.render.render_mermaid")
     def test_pipeline_carousel_failure(self, mock_mermaid, mock_carousel):
         """Carousel render failure returns error result."""
-        mock_mermaid.return_value = "/tmp/mermaid.png"
+        mock_mermaid.return_value = '<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>'
         mock_carousel.side_effect = RuntimeError("Playwright crashed")
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -535,9 +541,11 @@ class TestRenderPipeline:
 
     @patch("kb.render.render_carousel")
     @patch("kb.render.render_mermaid")
-    def test_pipeline_embeds_mermaid_path_in_slide(self, mock_mermaid, mock_carousel):
-        """Verify mermaid image path gets set on the slide data."""
-        mock_mermaid.return_value = "/tmp/mermaid/mermaid.png"
+    def test_pipeline_embeds_mermaid_svg_in_slide(self, mock_mermaid, mock_carousel):
+        """Verify mermaid SVG gets set on the slide data as Markup."""
+        from markupsafe import Markup
+        svg_content = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="100" height="50"/></svg>'
+        mock_mermaid.return_value = svg_content
         mock_carousel.return_value = {
             "pdf_path": "/tmp/carousel.pdf",
             "thumbnail_paths": [],
@@ -551,9 +559,11 @@ class TestRenderPipeline:
         with tempfile.TemporaryDirectory() as tmpdir:
             render_pipeline(slides_data, tmpdir)
 
-            # Check that the mermaid slide had its image path set
+            # Check that the mermaid slide had its SVG set as Markup
             mermaid_slide = slides_data["slides"][3]
-            assert mermaid_slide["mermaid_image_path"] == "/tmp/mermaid/mermaid.png"
+            assert "mermaid_svg" in mermaid_slide
+            assert isinstance(mermaid_slide["mermaid_svg"], Markup)
+            assert "<svg" in str(mermaid_slide["mermaid_svg"])
 
 
 # ===== Publish CLI Tests =====

@@ -29,6 +29,14 @@
             "words": {
               "type": "integer",
               "description": "Word count of the content"
+            },
+            "title": {
+              "type": "string",
+              "description": "Short title for this slide (used in timeline labels and slide headers). Required for content slides, optional for others."
+            },
+            "subtitle": {
+              "type": "string",
+              "description": "Subtitle or supporting text. Used on hook slides (below main title) and CTA slides (above button)."
             }
           },
           "required": ["slide_number", "type", "content", "words"]

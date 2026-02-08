@@ -49,7 +49,7 @@ SAMPLE_SLIDES = [
     {"slide_number": 2, "type": "content", "content": "- Use Whisper API to convert audio recordings to text\n- Process meeting recordings, voice memos, and podcasts\n- Store transcripts in structured JSON for downstream processing", "words": 22, "title": "Set Up Transcription"},
     {"slide_number": 3, "type": "content", "content": "- Feed transcript chunks to Claude for topic extraction\n- Generate structured summaries with key insights\n- Identify quotable moments and actionable takeaways", "words": 20, "title": "Run LLM Analysis"},
     {"slide_number": 4, "type": "content", "content": "- Score each content piece for visual potential\n- Classify format: carousel, single image, text post\n- Auto-select the right template based on content type", "words": 20, "title": "Visual Classification"},
-    {"slide_number": 5, "type": "mermaid", "content": "graph LR\n    A[Voice Note] --> B[Whisper]\n    B --> C[LLM Analysis]\n    C --> D[Visual Gen]\n    D --> E[PDF Carousel]", "words": 12, "mermaid_image_path": None, "title": "The Full Pipeline"},
+    {"slide_number": 5, "type": "mermaid", "content": "graph LR\n    A[Voice Note] --> B[Whisper]\n    B --> C[LLM Analysis]\n    C --> D[Visual Gen]\n    D --> E[PDF Carousel]", "words": 12, "mermaid_svg": None, "title": "The Full Pipeline"},
     {"slide_number": 6, "type": "cta", "content": "Want to build your own AI content pipeline?", "words": 9, "subtitle": "Follow along as I automate everything from transcription to publishing."},
 ]
 
@@ -180,6 +180,15 @@ class TestCarouselSlidesConfig:
         prompt = config["prompt"]
         assert "- " in prompt and "bullet" in prompt.lower()
         assert "1. " in prompt and "numbered" in prompt.lower()
+
+    def test_schema_has_title_and_subtitle_fields(self):
+        """Phase 3: Schema should include title and subtitle for slides."""
+        path = os.path.join(KB_CONFIG_DIR, "carousel_slides.json")
+        with open(path) as f:
+            config = json.load(f)
+        item_props = config["output_schema"]["properties"]["slides"]["items"]["properties"]
+        assert "title" in item_props, "Missing 'title' field in slide schema"
+        assert "subtitle" in item_props, "Missing 'subtitle' field in slide schema"
 
 
 # ===== Config.json Schema Tests =====
@@ -355,6 +364,28 @@ class TestMarkdownToHtml:
         assert "<ol>" in result
         assert result.index("</ul>") < result.index("<ol>")
 
+    def test_escapes_html_in_list_items(self):
+        """HTML in list item text should be escaped to prevent XSS."""
+        text = "- <script>alert('xss')</script>\n- Normal item"
+        result = str(markdown_to_html(text))
+        assert "&lt;script&gt;" in result
+        assert "<script>" not in result
+        assert "<li>Normal item</li>" in result
+
+    def test_escapes_html_in_numbered_items(self):
+        """HTML in numbered list text should be escaped."""
+        text = "1. <b>Bold</b> text"
+        result = str(markdown_to_html(text))
+        assert "&lt;b&gt;" in result
+        assert "<b>" not in result
+
+    def test_escapes_html_in_plain_text(self):
+        """HTML in plain text should be escaped."""
+        text = "Some <em>emphasis</em> here"
+        result = str(markdown_to_html(text))
+        assert "&lt;em&gt;" in result
+        assert "<em>" not in result
+
 
 # ===== Template Rendering Tests =====
 
@@ -462,7 +493,7 @@ class TestBrandPurpleTemplate:
     def test_renders_mermaid_slide(self, env, template_context):
         template = env.get_template("brand-purple.html")
         html = template.render(**template_context)
-        # With no mermaid_image_path, should render code
+        # With no mermaid_svg, should render code
         assert "graph LR" in html
 
     def test_renders_handle(self, env, template_context):
@@ -801,8 +832,8 @@ class TestProfilePhotoLoading:
                 os.unlink(test_photo_path)
 
 
-class TestTemplateMermaidWithImage:
-    """Tests for mermaid slide with an actual image path."""
+class TestTemplateMermaidWithSvg:
+    """Tests for mermaid slide with inline SVG content."""
 
     @pytest.fixture
     def env(self):
@@ -813,12 +844,13 @@ class TestTemplateMermaidWithImage:
         with open(os.path.join(CAROUSEL_DIR, "config.json")) as f:
             return json.load(f)
 
-    def test_mermaid_with_image_path(self, env, config):
-        """When mermaid_image_path is set, render an img tag."""
+    def test_mermaid_with_svg_content(self, env, config):
+        """When mermaid_svg is set, render SVG inline (not escaped)."""
+        from markupsafe import Markup
         slides = [
             {"slide_number": 1, "type": "hook", "content": "Test hook", "words": 2},
             {"slide_number": 2, "type": "mermaid", "content": "graph LR\n  A-->B", "words": 2,
-             "mermaid_image_path": "data:image/png;base64,abc123", "title": "Diagram"},
+             "mermaid_svg": Markup('<svg xmlns="http://www.w3.org/2000/svg"><rect width="100" height="50"/></svg>'), "title": "Diagram"},
             {"slide_number": 3, "type": "cta", "content": "Test CTA", "words": 2},
         ]
         template_config = config["templates"]["brand-purple"]
@@ -834,14 +866,16 @@ class TestTemplateMermaidWithImage:
         }
         template = env.get_template("brand-purple.html")
         html = template.render(**context)
-        assert 'data:image/png;base64,abc123' in html
+        # SVG should be rendered inline, not escaped
+        assert '<svg xmlns="http://www.w3.org/2000/svg">' in html
+        assert '&lt;svg' not in html
 
-    def test_mermaid_without_image_path(self, env, config):
-        """When mermaid_image_path is None, render code as text."""
+    def test_mermaid_without_svg(self, env, config):
+        """When mermaid_svg is None, render code as text fallback."""
         slides = [
             {"slide_number": 1, "type": "hook", "content": "Test hook", "words": 2},
             {"slide_number": 2, "type": "mermaid", "content": "graph LR\n  A-->B", "words": 2,
-             "mermaid_image_path": None},
+             "mermaid_svg": None},
             {"slide_number": 3, "type": "cta", "content": "Test CTA", "words": 2},
         ]
         template_config = config["templates"]["brand-purple"]
@@ -858,6 +892,33 @@ class TestTemplateMermaidWithImage:
         template = env.get_template("brand-purple.html")
         html = template.render(**context)
         assert "graph LR" in html
+
+    def test_mermaid_svg_all_templates(self, env, config):
+        """Verify inline SVG renders correctly across all 3 templates."""
+        from markupsafe import Markup
+        svg = Markup('<svg xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="40"/></svg>')
+        slides = [
+            {"slide_number": 1, "type": "hook", "content": "Test hook", "words": 2},
+            {"slide_number": 2, "type": "mermaid", "content": "graph LR\n  A-->B", "words": 2,
+             "mermaid_svg": svg, "title": "Diagram"},
+            {"slide_number": 3, "type": "cta", "content": "End", "words": 1},
+        ]
+        for template_name in ["brand-purple", "modern-editorial", "tech-minimal"]:
+            template_config = config["templates"][template_name]
+            context = {
+                "slides": slides,
+                "width": config["dimensions"]["width"],
+                "height": config["dimensions"]["height"],
+                "colors": template_config["colors"],
+                "fonts": template_config["fonts"],
+                "brand": config["brand"],
+                "header": config["header"],
+                "profile_photo_data": None,
+            }
+            template = env.get_template(template_config["file"])
+            html = template.render(**context)
+            assert '<svg xmlns="http://www.w3.org/2000/svg">' in html, f"{template_name}: SVG not rendered inline"
+            assert '&lt;svg' not in html, f"{template_name}: SVG was escaped"
 
 
 class TestMinimalSlideSet:

@@ -388,25 +388,19 @@ class TestApproveTriggersThread:
 
 # ===== Mermaid Base64 Conversion =====
 
-class TestMermaidBase64:
-    """Tests for mermaid PNG -> base64 data URI conversion in render_pipeline."""
+class TestMermaidSvgInline:
+    """Tests for mermaid SVG inline embedding in render_pipeline."""
 
     @patch("kb.render.render_carousel")
     @patch("kb.render.render_mermaid")
-    def test_mermaid_path_converted_to_base64(self, mock_mermaid, mock_carousel):
-        """render_pipeline should convert mermaid PNG to base64 data URI."""
-        import copy
+    def test_mermaid_svg_embedded_as_markup(self, mock_mermaid, mock_carousel):
+        """render_pipeline should embed SVG content as Markup in slide data."""
+        from markupsafe import Markup
         from kb.render import render_pipeline
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Create a fake PNG file for mermaid
-            mermaid_dir = os.path.join(tmpdir, "mermaid")
-            os.makedirs(mermaid_dir)
-            fake_png = os.path.join(mermaid_dir, "mermaid.png")
-            with open(fake_png, "wb") as f:
-                f.write(b"\x89PNG\r\n\x1a\n fake png content")
-
-            mock_mermaid.return_value = fake_png
+            svg_content = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="100" height="50"/></svg>'
+            mock_mermaid.return_value = svg_content
             mock_carousel.return_value = {
                 "pdf_path": os.path.join(tmpdir, "carousel.pdf"),
                 "thumbnail_paths": [],
@@ -425,20 +419,20 @@ class TestMermaidBase64:
 
             result = render_pipeline(slides_data, tmpdir)
 
-            # Check the slide data was mutated to have base64 URI
+            # Check the slide data was mutated to have SVG Markup
             mermaid_slide = slides_data["slides"][1]
-            assert mermaid_slide["mermaid_image_path"].startswith("data:image/png;base64,")
-            assert len(mermaid_slide["mermaid_image_path"]) > 30  # Not empty
+            assert "mermaid_svg" in mermaid_slide
+            assert isinstance(mermaid_slide["mermaid_svg"], Markup)
+            assert "<svg" in str(mermaid_slide["mermaid_svg"])
 
     @patch("kb.render.render_carousel")
     @patch("kb.render.render_mermaid")
-    def test_mermaid_fallback_on_read_error(self, mock_mermaid, mock_carousel):
-        """If PNG can't be read, fallback to raw file path."""
+    def test_mermaid_failure_sets_no_svg(self, mock_mermaid, mock_carousel):
+        """If render_mermaid returns None, slide should not have mermaid_svg."""
         from kb.render import render_pipeline
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Point to a nonexistent file (render_mermaid returned path but file was deleted)
-            mock_mermaid.return_value = "/nonexistent/mermaid.png"
+            mock_mermaid.return_value = None
             mock_carousel.return_value = {
                 "pdf_path": os.path.join(tmpdir, "carousel.pdf"),
                 "thumbnail_paths": [],
@@ -455,9 +449,10 @@ class TestMermaidBase64:
 
             result = render_pipeline(slides_data, tmpdir)
 
-            # Should fallback to raw path (not crash)
+            # Should have error logged, no mermaid_svg
             mermaid_slide = slides_data["slides"][0]
-            assert mermaid_slide["mermaid_image_path"] == "/nonexistent/mermaid.png"
+            assert mermaid_slide.get("mermaid_svg") is None
+            assert len(result["errors"]) == 1
 
 
 # ===== Action Mapping Transition =====
