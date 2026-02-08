@@ -1572,14 +1572,25 @@ def run_interactive_mode(
         console.print(f"\n[bold cyan]({i}/{len(selected_transcripts)}) {transcript['title']}[/bold cyan]")
 
         try:
-            results = analyze_transcript_file(
-                transcript_path=transcript["path"],
-                analysis_types=selected_types,
-                model=model,
-                save=True,
-                skip_existing=True,
-                force=force
-            )
+            has_auto_judge = any(t in AUTO_JUDGE_TYPES for t in selected_types)
+            if has_auto_judge:
+                results = run_analysis_with_auto_judge(
+                    transcript_path=transcript["path"],
+                    analysis_types=selected_types,
+                    model=model,
+                    save=True,
+                    skip_existing=True,
+                    force=force,
+                )
+            else:
+                results = analyze_transcript_file(
+                    transcript_path=transcript["path"],
+                    analysis_types=selected_types,
+                    model=model,
+                    save=True,
+                    skip_existing=True,
+                    force=force
+                )
 
             # Count successes
             successes = sum(1 for r in results.values() if "error" not in r)
