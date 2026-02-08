@@ -16,7 +16,7 @@ python3 -c "from playwright.sync_api import sync_playwright; print('playwright O
 python3 -c "import jinja2; print(f'jinja2 {jinja2.__version__} OK')"
 ```
 
-- [ ] All 4 print OK with no errors
+- [x] All 4 print OK with no errors
 
 ### 1.2 Tests pass
 
@@ -33,8 +33,8 @@ python3 -m kb analyze --help | grep -q "judge" && echo "judge flag OK"
 python3 -m kb publish --help
 ```
 
-- [ ] `--judge` flag exists in analyze help
-- [ ] `kb publish` shows help with `--pending`, `--regenerate`, `--dry-run`
+- [x] `--judge` flag exists in analyze help
+- [x] `kb publish` shows help with `--pending`, `--regenerate`, `--dry-run`
 
 ---
 
@@ -54,9 +54,9 @@ python3 -m kb analyze --list-types
 python3 -m kb analyze -t linkedin_v2 -d <DECIMAL>
 ```
 
-- [ ] Runs without error
-- [ ] Output is a LinkedIn post (1200-1800 chars, has a hook)
-- [ ] Output stored in transcript JSON under `linkedin_v2` key
+- [x] Runs without error
+- [x] Output is a LinkedIn post (1200-1800 chars, has a hook)
+- [x] Output stored in transcript JSON under `linkedin_v2` key
 
 ### 1.5 Judge loop
 
@@ -76,9 +76,9 @@ python3 -m kb analyze -t linkedin_v2 --judge -d <DECIMAL>
 python3 -m kb analyze -t visual_format -d <DECIMAL>
 ```
 
-- [ ] Returns `CAROUSEL` or `TEXT_ONLY`
-- [ ] Has `confidence` score and `reasoning`
-- [ ] If CAROUSEL: has `include_mermaid` and `suggested_slide_count`
+- [x] Returns `CAROUSEL` or `TEXT_ONLY`
+- [x] Has `confidence` score and `reasoning`
+- [x] If CAROUSEL: has `include_mermaid` and `suggested_slide_count`
 
 ### 1.7 Carousel slides (only if 1.6 returned CAROUSEL)
 
@@ -86,11 +86,11 @@ python3 -m kb analyze -t visual_format -d <DECIMAL>
 python3 -m kb analyze -t carousel_slides -d <DECIMAL>
 ```
 
-- [ ] Returns JSON with `slides` array
-- [ ] Each slide has `slide_number`, `type`, `content`, `words`
-- [ ] Slide types include `hook` (first) and `cta` (last)
-- [ ] 6-10 slides total
-- [ ] Words per slide: 10-30
+- [x] Returns JSON with `slides` array
+- [x] Each slide has `slide_number`, `type`, `content`, `words`
+- [x] Slide types include `hook` (first) and `cta` (last)
+- [x] 6-10 slides total
+- [x] Words per slide: 10-30
 
 ---
 
