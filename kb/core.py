@@ -414,10 +414,7 @@ def transcribe_audio(
         RuntimeError: If transcription produces no result
     """
     # Import here to avoid circular imports
-    import sys
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from app.core.transcription_service_cpp import get_transcription_service
-    from app.utils.config_manager import ConfigManager
+    from kb.transcription import get_transcription_service, ConfigManager
 
     # Validate file
     if not os.path.isfile(file_path):

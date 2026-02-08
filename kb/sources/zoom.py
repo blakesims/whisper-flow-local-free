@@ -258,8 +258,7 @@ def transcribe_meeting(meeting: dict, model_name: str = "medium") -> tuple[str, 
     Raises:
         RuntimeError: If no segments could be transcribed
     """
-    from app.core.transcription_service_cpp import get_transcription_service
-    from app.utils.config_manager import ConfigManager
+    from kb.transcription import get_transcription_service, ConfigManager
 
     config = ConfigManager()
     service = get_transcription_service(config)

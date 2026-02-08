@@ -187,8 +187,7 @@ def transcribe_sample(video_path: str, duration: int = SAMPLE_DURATION) -> Optio
     Returns transcript text or None on failure.
     """
     try:
-        from app.core.transcription_service_cpp import get_transcription_service
-        from app.utils.config_manager import ConfigManager
+        from kb.transcription import get_transcription_service, ConfigManager
     except ImportError as e:
         console.print(f"[yellow]Warning: Could not import transcription service: {e}[/yellow]")
         return None
