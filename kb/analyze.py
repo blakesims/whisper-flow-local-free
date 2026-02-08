@@ -566,7 +566,8 @@ def select_transcripts(
 def select_analysis_types_interactive(
     available: list[dict],
     existing_analysis: dict | None = None,
-    current_model: str = DEFAULT_MODEL
+    current_model: str = DEFAULT_MODEL,
+    force: bool = False
 ) -> list[str]:
     """Interactive multi-select for analysis types.
 
@@ -584,7 +585,11 @@ def select_analysis_types_interactive(
             analysis_data = existing_analysis[t["name"]]
             done_model = analysis_data.get("_model", "unknown")
 
-            if done_model == current_model:
+            if force:
+                # Force mode - allow re-running everything
+                label = f"{t['name']}: {t['description']} [done with {done_model}, force re-run]"
+                choices.append(questionary.Choice(title=label, value=t["name"], checked=False))
+            elif done_model == current_model:
                 # Same model - show as done, disabled
                 label = f"{t['name']}: {t['description']} [done with {done_model}]"
                 choices.append(questionary.Choice(title=label, value=t["name"], disabled="already done"))
@@ -1550,7 +1555,8 @@ def run_interactive_mode(
     selected_types = select_analysis_types_interactive(
         available_types,
         existing_analysis=existing_analysis,
-        current_model=model
+        current_model=model,
+        force=force
     )
 
     if not selected_types:
