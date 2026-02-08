@@ -201,3 +201,29 @@ If style needs tweaking, the template files are:
 - `kb/carousel_templates/dark-purple.html` — CSS styling
 - `kb/carousel_templates/light.html` — alternate template
 - `kb/carousel_templates/config.json` — colors, fonts, brand
+
+
+
+## post t023-24 smoke test
+
+
+T023 — Content Curation Workflow:
+
+1. Auto-judge works: kb analyze -t linkedin_v2 -d <any-decimal> — verify it creates both linkedin_v2_0 and linkedin_judge_0 in the JSON output
+2. Serve + view scores: kb serve → open browser → navigate to an entity with linkedin content → verify per-criterion score grid shows (hook_strength, structure, specificity, etc.)
+3. Iterate: Press i on an item → verify spinner, then linkedin_v2_1 appears with new scores + deltas
+4. Stage + edit: Press a to stage → edit post text → press s → verify versioned edit saved (linkedin_v2_N_1)
+5. Generate visuals: Press g from staging → verify carousel PDF renders
+
+T024 — Carousel Template Redesign:
+
+6. Three templates exist: Hit GET /api/templates or check the template selector dropdown in serve — should list brand-purple, modern-editorial, tech-minimal
+7. Render each template: kb publish --decimal <X> --template brand-purple --staged (repeat for each) — open the PDFs and verify they look distinct
+8. Title page: Profile photo (circular cutout), header bar with author/community name, title/subtitle layout
+9. Content slides: Bullets render as proper lists (not raw markdown), slide numbers/progress indicators visible
+10. Mermaid: If any content has a mermaid diagram, verify it's SVG (crisp, not pixelated)
+
+Note: You'll need to provide profile.png (transparent background) in the carousel templates config path for the title page photo to render. Without it, title page should still work but without the photo.
+
+The fast-path smoke test is really steps 1, 2, 5, 7 — that covers both pipelines end-to-end.
+
