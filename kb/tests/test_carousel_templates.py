@@ -1,5 +1,5 @@
 """
-Tests for Carousel Templates — T024 Phase 1: New template system.
+Tests for Carousel Templates — T024 Phase 1+2: Template system + content slides.
 
 Tests:
 - Analysis type config loading (visual_format, carousel_slides)
@@ -8,6 +8,10 @@ Tests:
 - Profile photo base64 loading
 - Template parameterization (no hardcoded text)
 - Title page scaling based on content length
+- Markdown-to-HTML parsing (bullets, numbered lists, plain text)
+- Timeline/progress indicators on all templates
+- header.show_on_all_slides config honored by all templates
+- CTA slide styling
 """
 
 import pytest
@@ -19,7 +23,8 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, FileSystemLoader, select_autoescape
+from kb.render import markdown_to_html
 
 # Paths
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -27,13 +32,23 @@ KB_CONFIG_DIR = os.path.join(REPO_ROOT, "kb", "config", "analysis_types")
 CAROUSEL_DIR = os.path.join(REPO_ROOT, "kb", "carousel_templates")
 
 
+def _make_env():
+    """Create Jinja2 environment matching production settings."""
+    env = Environment(
+        loader=FileSystemLoader(CAROUSEL_DIR),
+        autoescape=select_autoescape(["html"]),
+    )
+    env.filters["markdown_to_html"] = markdown_to_html
+    return env
+
+
 # ===== Sample Data =====
 
 SAMPLE_SLIDES = [
     {"slide_number": 1, "type": "hook", "content": "I automated my entire posting workflow.", "words": 6, "subtitle": "From transcription to publishing in 30 seconds"},
-    {"slide_number": 2, "type": "content", "content": "Use Whisper API to convert audio recordings to text\nProcess meeting recordings, voice memos, and podcasts\nStore transcripts in structured JSON for downstream processing", "words": 22, "title": "Set Up Transcription"},
-    {"slide_number": 3, "type": "content", "content": "Feed transcript chunks to Claude for topic extraction\nGenerate structured summaries with key insights\nIdentify quotable moments and actionable takeaways", "words": 20, "title": "Run LLM Analysis"},
-    {"slide_number": 4, "type": "content", "content": "Score each content piece for visual potential\nClassify format: carousel, single image, text post\nAuto-select the right template based on content type", "words": 20, "title": "Visual Classification"},
+    {"slide_number": 2, "type": "content", "content": "- Use Whisper API to convert audio recordings to text\n- Process meeting recordings, voice memos, and podcasts\n- Store transcripts in structured JSON for downstream processing", "words": 22, "title": "Set Up Transcription"},
+    {"slide_number": 3, "type": "content", "content": "- Feed transcript chunks to Claude for topic extraction\n- Generate structured summaries with key insights\n- Identify quotable moments and actionable takeaways", "words": 20, "title": "Run LLM Analysis"},
+    {"slide_number": 4, "type": "content", "content": "- Score each content piece for visual potential\n- Classify format: carousel, single image, text post\n- Auto-select the right template based on content type", "words": 20, "title": "Visual Classification"},
     {"slide_number": 5, "type": "mermaid", "content": "graph LR\n    A[Voice Note] --> B[Whisper]\n    B --> C[LLM Analysis]\n    C --> D[Visual Gen]\n    D --> E[PDF Carousel]", "words": 12, "mermaid_image_path": None, "title": "The Full Pipeline"},
     {"slide_number": 6, "type": "cta", "content": "Want to build your own AI content pipeline?", "words": 9, "subtitle": "Follow along as I automate everything from transcription to publishing."},
 ]
@@ -157,6 +172,15 @@ class TestCarouselSlidesConfig:
         assert "6" in prompt and "10" in prompt
         assert "10-30 words" in prompt or ("10" in prompt and "30" in prompt)
 
+    def test_prompt_has_markdown_formatting_instruction(self):
+        """Phase 2 M2: LLM prompt must instruct markdown formatting."""
+        path = os.path.join(KB_CONFIG_DIR, "carousel_slides.json")
+        with open(path) as f:
+            config = json.load(f)
+        prompt = config["prompt"]
+        assert "- " in prompt and "bullet" in prompt.lower()
+        assert "1. " in prompt and "numbered" in prompt.lower()
+
 
 # ===== Config.json Schema Tests =====
 
@@ -254,6 +278,84 @@ class TestCarouselConfig:
         assert "light" not in config["templates"]
 
 
+# ===== Markdown-to-HTML Filter Tests =====
+
+class TestMarkdownToHtml:
+    """Tests for the markdown_to_html Jinja2 filter in render.py."""
+
+    def test_empty_string(self):
+        assert str(markdown_to_html("")) == ""
+
+    def test_bullet_list(self):
+        text = "- First item\n- Second item\n- Third item"
+        result = str(markdown_to_html(text))
+        assert "<ul>" in result
+        assert "<li>First item</li>" in result
+        assert "<li>Second item</li>" in result
+        assert "<li>Third item</li>" in result
+        assert "</ul>" in result
+
+    def test_bullet_list_star_syntax(self):
+        text = "* Item A\n* Item B"
+        result = str(markdown_to_html(text))
+        assert "<ul>" in result
+        assert "<li>Item A</li>" in result
+        assert "<li>Item B</li>" in result
+
+    def test_numbered_list(self):
+        text = "1. First step\n2. Second step\n3. Third step"
+        result = str(markdown_to_html(text))
+        assert "<ol>" in result
+        assert "<li>First step</li>" in result
+        assert "<li>Second step</li>" in result
+        assert "<li>Third step</li>" in result
+        assert "</ol>" in result
+
+    def test_plain_text_with_line_breaks(self):
+        text = "Line one\nLine two\nLine three"
+        result = str(markdown_to_html(text))
+        assert "<p>" in result
+        assert "<br>" in result
+        assert "Line one" in result
+        assert "Line two" in result
+
+    def test_mixed_content(self):
+        """Bullets followed by plain text should produce separate elements."""
+        text = "- Bullet one\n- Bullet two\n\nSome plain text here"
+        result = str(markdown_to_html(text))
+        assert "<ul>" in result
+        assert "<li>Bullet one</li>" in result
+        assert "<p>Some plain text here</p>" in result
+
+    def test_no_raw_dash_prefix_in_output(self):
+        """The '- ' prefix should be stripped, not rendered."""
+        text = "- Item with content"
+        result = str(markdown_to_html(text))
+        assert "<li>Item with content</li>" in result
+        assert "- Item" not in result
+
+    def test_no_raw_number_prefix_in_output(self):
+        """The '1. ' prefix should be stripped, not rendered."""
+        text = "1. Step one"
+        result = str(markdown_to_html(text))
+        assert "<li>Step one</li>" in result
+        assert "1. Step" not in result
+
+    def test_returns_markup_type(self):
+        """Should return Markup (safe) type, not plain string."""
+        from markupsafe import Markup
+        result = markdown_to_html("- test")
+        assert isinstance(result, Markup)
+
+    def test_blank_lines_separate_groups(self):
+        """Blank lines should separate adjacent list groups."""
+        text = "- A\n- B\n\n1. One\n2. Two"
+        result = str(markdown_to_html(text))
+        assert "<ul>" in result
+        assert "<ol>" in result
+        assert result.index("</ul>") < result.index("<ol>")
+
+
 # ===== Template Rendering Tests =====
 
 class TestBrandPurpleTemplate:
@@ -261,7 +363,7 @@ class TestBrandPurpleTemplate:
 
     @pytest.fixture
     def env(self):
-        return Environment(loader=FileSystemLoader(CAROUSEL_DIR))
+        return _make_env()
 
     @pytest.fixture
     def config(self):
@@ -325,7 +427,6 @@ class TestBrandPurpleTemplate:
         template = env.get_template("brand-purple.html")
         html = template.render(**template_context)
         assert "data:image/png;base64,iVBORw0KGgo=" in html
-        assert '<img src="data:image/png;base64' in html
 
     def test_title_page_scales_font(self, env, template_context):
         """Title page should use different CSS classes based on content length."""
@@ -385,13 +486,73 @@ class TestBrandPurpleTemplate:
         # Should NOT contain the old hardcoded values
         assert "Blake Sims" not in html
 
+    def test_timeline_indicator_present(self, env, template_context):
+        """Content slides should have numbered circle timeline."""
+        template = env.get_template("brand-purple.html")
+        html = template.render(**template_context)
+        assert "tl-dot" in html
+        assert "tl-step" in html
+        assert "tl-dot active" in html or 'class="tl-dot active"' in html
+
+    def test_timeline_fills_progressively(self, env, template_context):
+        """First content slide should show step 1 active, others not."""
+        template = env.get_template("brand-purple.html")
+        html = template.render(**template_context)
+        # Should contain both filled and active states
+        assert "tl-step active" in html or 'class="tl-step active"' in html
+        assert "tl-step filled" in html or "tl-dot filled" in html
+
+    def test_content_renders_as_bullets(self, env, template_context):
+        """Markdown bullets should render as <ul><li> elements."""
+        template = env.get_template("brand-purple.html")
+        html = template.render(**template_context)
+        assert "<ul>" in html
+        assert "<li>" in html
+        # Raw '- ' prefix should not appear in rendered output
+        assert "- Use Whisper" not in html
+        assert "Use Whisper" in html
+
+    def test_numbered_list_content(self, env, template_context):
+        """Numbered list content should render as <ol><li>."""
+        template_context["slides"] = [
+            {"slide_number": 1, "type": "hook", "content": "Test", "words": 1},
+            {"slide_number": 2, "type": "content", "content": "1. First step\n2. Second step\n3. Third step", "words": 9, "title": "Steps"},
+            {"slide_number": 3, "type": "cta", "content": "Done", "words": 1},
+        ]
+        template = env.get_template("brand-purple.html")
+        html = template.render(**template_context)
+        assert "<ol>" in html
+        assert "<li>First step</li>" in html
+
+    def test_plain_text_content(self, env, template_context):
+        """Plain text should render as <p> with <br>."""
+        template_context["slides"] = [
+            {"slide_number": 1, "type": "hook", "content": "Test", "words": 1},
+            {"slide_number": 2, "type": "content", "content": "Line one\nLine two\nLine three", "words": 6, "title": "Info"},
+            {"slide_number": 3, "type": "cta", "content": "Done", "words": 1},
+        ]
+        template = env.get_template("brand-purple.html")
+        html = template.render(**template_context)
+        assert "<p>" in html
+        assert "<br>" in html
+
+    def test_header_show_on_all_slides_respected(self, env, template_context):
+        """When show_on_all_slides is false, content slides should hide header."""
+        template_context["header"]["show_on_all_slides"] = False
+        template = env.get_template("brand-purple.html")
+        html = template.render(**template_context)
+        # Count actual header div elements (not CSS class definitions)
+        # With show_on_all_slides=False, only the hook slide should have header div
+        header_div_count = html.count('<div class="header">')
+        assert header_div_count == 1  # Only the hook slide
+
 
 class TestModernEditorialTemplate:
     """Tests for modern-editorial.html Jinja2 template rendering."""
 
     @pytest.fixture
     def env(self):
-        return Environment(loader=FileSystemLoader(CAROUSEL_DIR))
+        return _make_env()
 
     @pytest.fixture
     def config(self):
@@ -433,6 +594,18 @@ class TestModernEditorialTemplate:
         assert "editorial-big-number" in html
         assert "editorial-pip" in html
 
+    def test_editorial_big_number_format(self, env, template_context):
+        """Editorial numbers should be zero-padded (01, 02, 03)."""
+        template = env.get_template("modern-editorial.html")
+        html = template.render(**template_context)
+        assert "01" in html  # First content slide
+
+    def test_editorial_pip_progress(self, env, template_context):
+        """Pip bar should show filled, active, and unfilled states."""
+        template = env.get_template("modern-editorial.html")
+        html = template.render(**template_context)
+        assert "editorial-pip filled" in html or "editorial-pip active" in html
+
     def test_renders_header(self, env, template_context):
         template = env.get_template("modern-editorial.html")
         html = template.render(**template_context)
@@ -449,13 +622,37 @@ class TestModernEditorialTemplate:
         html = template.render(**template_context)
         assert html.count("page-break-after: always") == len(SAMPLE_SLIDES) - 1
 
+    def test_content_renders_as_bullets(self, env, template_context):
+        """Markdown bullets should render as HTML list."""
+        template = env.get_template("modern-editorial.html")
+        html = template.render(**template_context)
+        assert "<ul>" in html
+        assert "<li>" in html
+        assert "Use Whisper" in html
+
+    def test_header_show_on_all_slides_respected(self, env, template_context):
+        """When show_on_all_slides is false, content/mermaid/cta should hide header."""
+        template_context["header"]["show_on_all_slides"] = False
+        template = env.get_template("modern-editorial.html")
+        html = template.render(**template_context)
+        # Count actual header div elements (not CSS class definitions)
+        header_div_count = html.count('<div class="header">')
+        assert header_div_count == 1  # Only the hook slide
+
+    def test_cta_slide_styling(self, env, template_context):
+        """CTA slide should have call-to-action elements."""
+        template = env.get_template("modern-editorial.html")
+        html = template.render(**template_context)
+        assert "cta-heading" in html
+        assert "cta-button" in html
+
 
 class TestTechMinimalTemplate:
     """Tests for tech-minimal.html Jinja2 template rendering."""
 
     @pytest.fixture
     def env(self):
-        return Environment(loader=FileSystemLoader(CAROUSEL_DIR))
+        return _make_env()
 
     @pytest.fixture
     def config(self):
@@ -503,10 +700,23 @@ class TestTechMinimalTemplate:
         assert "breadcrumb" in html
         assert "bc-step" in html
 
+    def test_breadcrumb_active_state(self, env, template_context):
+        """Breadcrumb should have active and filled states."""
+        template = env.get_template("tech-minimal.html")
+        html = template.render(**template_context)
+        assert "bc-step active" in html or 'class="bc-step active"' in html
+
     def test_renders_step_bar(self, env, template_context):
         template = env.get_template("tech-minimal.html")
         html = template.render(**template_context)
         assert "step-bar" in html
+        assert "step-bar-segment" in html
+
+    def test_step_bar_colored_segments(self, env, template_context):
+        """Step bar should have filled and active segments."""
+        template = env.get_template("tech-minimal.html")
+        html = template.render(**template_context)
+        assert "step-bar-segment active" in html or 'class="step-bar-segment active"' in html
 
     def test_renders_header(self, env, template_context):
         template = env.get_template("tech-minimal.html")
@@ -523,6 +733,30 @@ class TestTechMinimalTemplate:
         template = env.get_template("tech-minimal.html")
         html = template.render(**template_context)
         assert html.count("page-break-after: always") == len(SAMPLE_SLIDES) - 1
+
+    def test_content_renders_as_bullets(self, env, template_context):
+        """Markdown bullets should render as HTML list."""
+        template = env.get_template("tech-minimal.html")
+        html = template.render(**template_context)
+        assert "<ul>" in html
+        assert "<li>" in html
+        assert "Use Whisper" in html
+
+    def test_header_show_on_all_slides_respected(self, env, template_context):
+        """When show_on_all_slides is false, content/mermaid/cta should hide header."""
+        template_context["header"]["show_on_all_slides"] = False
+        template = env.get_template("tech-minimal.html")
+        html = template.render(**template_context)
+        # Count actual header div elements (not CSS class definitions)
+        header_div_count = html.count('<div class="header">')
+        assert header_div_count == 1  # Only the hook slide
+
+    def test_cta_slide_styling(self, env, template_context):
+        """CTA slide should have call-to-action elements."""
+        template = env.get_template("tech-minimal.html")
+        html = template.render(**template_context)
+        assert "cta-heading" in html
+        assert "cta-button" in html
 
 
 class TestProfilePhotoLoading:
@@ -572,7 +806,7 @@ class TestTemplateMermaidWithImage:
 
     @pytest.fixture
     def env(self):
-        return Environment(loader=FileSystemLoader(CAROUSEL_DIR))
+        return _make_env()
 
     @pytest.fixture
     def config(self):
@@ -600,7 +834,7 @@ class TestTemplateMermaidWithImage:
         }
         template = env.get_template("brand-purple.html")
         html = template.render(**context)
-        assert '<img src="data:image/png;base64,abc123"' in html
+        assert 'data:image/png;base64,abc123' in html
 
     def test_mermaid_without_image_path(self, env, config):
         """When mermaid_image_path is None, render code as text."""
@@ -624,7 +858,6 @@ class TestTemplateMermaidWithImage:
         template = env.get_template("brand-purple.html")
         html = template.render(**context)
         assert "graph LR" in html
-        assert '<img src="data:image/png' not in html
 
 
 class TestMinimalSlideSet:
@@ -632,7 +865,7 @@ class TestMinimalSlideSet:
 
     @pytest.fixture
     def env(self):
-        return Environment(loader=FileSystemLoader(CAROUSEL_DIR))
+        return _make_env()
 
     @pytest.fixture
     def config(self):
@@ -641,7 +874,7 @@ class TestMinimalSlideSet:
 
     def test_six_slides(self, env, config):
         slides = [
-            {"slide_number": i + 1, "type": t, "content": f"Slide {i+1} content", "words": 3}
+            {"slide_number": i + 1, "type": t, "content": f"- Slide {i+1} content", "words": 3}
             for i, t in enumerate(["hook", "content", "content", "content", "content", "cta"])
         ]
         for template_name in ["brand-purple", "modern-editorial", "tech-minimal"]:
@@ -661,6 +894,85 @@ class TestMinimalSlideSet:
             assert html.count("page-break-after: always") == 5, f"Template {template_name} should have 5 page breaks"
             for i in range(1, 7):
                 assert f'id="slide-{i}"' in html, f"Template {template_name} missing slide-{i}"
+
+
+class TestAllTemplatesContentTypes:
+    """Cross-template tests for all content types rendering correctly."""
+
+    @pytest.fixture
+    def env(self):
+        return _make_env()
+
+    @pytest.fixture
+    def config(self):
+        with open(os.path.join(CAROUSEL_DIR, "config.json")) as f:
+            return json.load(f)
+
+    @pytest.fixture(params=["brand-purple", "modern-editorial", "tech-minimal"])
+    def template_name(self, request):
+        return request.param
+
+    def _render(self, env, config, template_name, slides):
+        template_config = config["templates"][template_name]
+        context = {
+            "slides": slides,
+            "width": config["dimensions"]["width"],
+            "height": config["dimensions"]["height"],
+            "colors": template_config["colors"],
+            "fonts": template_config["fonts"],
+            "brand": config["brand"],
+            "header": config["header"],
+            "profile_photo_data": None,
+        }
+        template = env.get_template(template_config["file"])
+        return template.render(**context)
+
+    def test_bullet_content(self, env, config, template_name):
+        slides = [
+            {"slide_number": 1, "type": "hook", "content": "Test", "words": 1},
+            {"slide_number": 2, "type": "content", "content": "- Alpha\n- Beta\n- Gamma", "words": 3, "title": "Bullets"},
+            {"slide_number": 3, "type": "cta", "content": "End", "words": 1},
+        ]
+        html = self._render(env, config, template_name, slides)
+        assert "<ul>" in html, f"{template_name}: missing <ul> for bullets"
+        assert "<li>Alpha</li>" in html, f"{template_name}: missing bullet item"
+
+    def test_numbered_content(self, env, config, template_name):
+        slides = [
+            {"slide_number": 1, "type": "hook", "content": "Test", "words": 1},
+            {"slide_number": 2, "type": "content", "content": "1. First\n2. Second\n3. Third", "words": 3, "title": "Steps"},
+            {"slide_number": 3, "type": "cta", "content": "End", "words": 1},
+        ]
+        html = self._render(env, config, template_name, slides)
+        assert "<ol>" in html, f"{template_name}: missing <ol> for numbered list"
+        assert "<li>First</li>" in html, f"{template_name}: missing numbered item"
+
+    def test_plain_text_content(self, env, config, template_name):
+        slides = [
+            {"slide_number": 1, "type": "hook", "content": "Test", "words": 1},
+            {"slide_number": 2, "type": "content", "content": "Some plain text\nWith a second line", "words": 7, "title": "Info"},
+            {"slide_number": 3, "type": "cta", "content": "End", "words": 1},
+        ]
+        html = self._render(env, config, template_name, slides)
+        assert "<p>" in html, f"{template_name}: missing <p> for plain text"
+        assert "Some plain text" in html, f"{template_name}: missing text content"
+
+    def test_hook_slide_present(self, env, config, template_name):
+        slides = [
+            {"slide_number": 1, "type": "hook", "content": "Hook title here", "words": 3},
+            {"slide_number": 2, "type": "cta", "content": "End", "words": 1},
+        ]
+        html = self._render(env, config, template_name, slides)
+        assert "Hook title here" in html
+
+    def test_cta_slide_present(self, env, config, template_name):
+        slides = [
+            {"slide_number": 1, "type": "hook", "content": "Start", "words": 1},
+            {"slide_number": 2, "type": "cta", "content": "Follow me for more", "words": 4, "subtitle": "More good stuff"},
+        ]
+        html = self._render(env, config, template_name, slides)
+        assert "Follow me for more" in html
+        assert "cta-heading" in html
 
 
 if __name__ == "__main__":

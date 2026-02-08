@@ -23,6 +23,7 @@ import base64
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -30,6 +31,7 @@ from pathlib import Path
 from typing import Optional
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from markupsafe import Markup
 
 logger = logging.getLogger(__name__)
 
@@ -201,6 +203,78 @@ def load_profile_photo_base64(config: Optional[dict] = None) -> Optional[str]:
         return None
 
 
+def markdown_to_html(text: str) -> Markup:
+    """
+    Convert markdown-style content string to HTML.
+
+    Parses line-by-line:
+    - Lines starting with '- ' or '* ' become <ul><li> bullet points
+    - Lines starting with 'N. ' (e.g. '1. ', '2. ') become <ol><li> numbered lists
+    - Plain text lines become <p> paragraphs with <br> for line breaks within a block
+
+    Adjacent lines of the same type are grouped into the same list element.
+    Returns Markup (safe HTML) for direct injection into Jinja2 templates.
+
+    Args:
+        text: Content string with optional markdown formatting.
+
+    Returns:
+        Markup-wrapped HTML string.
+    """
+    if not text:
+        return Markup("")
+
+    lines = text.split("\n")
+    html_parts = []
+    current_type = None  # 'ul', 'ol', or 'p'
+    current_items = []
+
+    def flush():
+        nonlocal current_type, current_items
+        if not current_items:
+            return
+        if current_type == "ul":
+            items = "".join(f"<li>{item}</li>" for item in current_items)
+            html_parts.append(f"<ul>{items}</ul>")
+        elif current_type == "ol":
+            items = "".join(f"<li>{item}</li>" for item in current_items)
+            html_parts.append(f"<ol>{items}</ol>")
+        elif current_type == "p":
+            html_parts.append(f"<p>{'<br>'.join(current_items)}</p>")
+        current_type = None
+        current_items = []
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            flush()
+            continue
+
+        # Check for unordered list: '- ' or '* '
+        if stripped.startswith("- ") or stripped.startswith("* "):
+            item_text = stripped[2:]
+            if current_type != "ul":
+                flush()
+                current_type = "ul"
+            current_items.append(item_text)
+        # Check for ordered list: 'N. '
+        elif re.match(r"^\d+\.\s", stripped):
+            item_text = re.sub(r"^\d+\.\s", "", stripped)
+            if current_type != "ol":
+                flush()
+                current_type = "ol"
+            current_items.append(item_text)
+        else:
+            # Plain text
+            if current_type != "p":
+                flush()
+                current_type = "p"
+            current_items.append(stripped)
+
+    flush()
+    return Markup("".join(html_parts))
+
+
 def render_html_from_slides(
     slides: list[dict],
     template_name: str = "brand-purple",
@@ -260,6 +334,7 @@ def render_html_from_slides(
         loader=FileSystemLoader(str(CAROUSEL_TEMPLATES_DIR)),
         autoescape=select_autoescape(["html"]),
     )
+    env.filters["markdown_to_html"] = markdown_to_html
     template = env.get_template(template_file)
 
     html = template.render(

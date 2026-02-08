@@ -171,6 +171,14 @@
     color: {{ colors.accent }};
   }
 
+  .content p {
+    font-size: 26px;
+    line-height: 1.5;
+    color: {{ colors.text_primary }};
+    padding: 14px 0;
+    font-weight: 400;
+  }
+
   /* Footer */
   .slide-footer {
     position: absolute;
@@ -443,6 +451,7 @@
 {% endfor %}
 {% set ci = current_content_index|length %}
 <div class="slide" id="slide-{{ slide.slide_number }}">
+  {% if header.show_on_all_slides %}
   <div class="terminal-bar">
     <div class="terminal-dot red"></div>
     <div class="terminal-dot yellow"></div>
@@ -458,6 +467,7 @@
     <span class="header-right">{{ brand.author_name }}</span>
     {% endif %}
   </div>
+  {% endif %}
   <div class="breadcrumb">
     {% for cs in content_slides %}
     {% set step_num = loop.index %}
@@ -489,14 +499,7 @@
   <div class="slide-title">{{ slide.title }}</div>
   {% endif %}
   <div class="content">
-    <ul>
-    {% for line in slide.content.split('\n') %}
-      {% set stripped = line.strip() %}
-      {% if stripped %}
-      <li>{{ stripped.lstrip('- ').lstrip('* ') }}</li>
-      {% endif %}
-    {% endfor %}
-    </ul>
+    {{ slide.content|markdown_to_html }}
   </div>
   <div class="slide-footer-left">step[{{ ci - 1 }}]</div>
   <div class="slide-footer">{{ ci }}/{{ content_slides|length }}</div>
@@ -505,6 +508,7 @@
 {% elif slide.type == 'mermaid' %}
 {# ====== MERMAID SLIDE ====== #}
 <div class="slide" id="slide-{{ slide.slide_number }}">
+  {% if header.show_on_all_slides %}
   <div class="terminal-bar">
     <div class="terminal-dot red"></div>
     <div class="terminal-dot yellow"></div>
@@ -520,6 +524,7 @@
     <span class="header-right">{{ brand.author_name }}</span>
     {% endif %}
   </div>
+  {% endif %}
   {% if slide.title %}
   <div class="slide-title">{{ slide.title }}</div>
   <div class="code-comment">// Architecture overview</div>
@@ -536,6 +541,7 @@
 {% elif slide.type == 'cta' %}
 {# ====== CTA SLIDE ====== #}
 <div class="slide" id="slide-{{ slide.slide_number }}">
+  {% if header.show_on_all_slides %}
   <div class="terminal-bar">
     <div class="terminal-dot red"></div>
     <div class="terminal-dot yellow"></div>
@@ -551,6 +557,7 @@
     <span class="header-right">{{ brand.author_name }}</span>
     {% endif %}
   </div>
+  {% endif %}
   <div class="cta-tech">
     {% if brand.handle %}
     <div class="cta-prompt">$ follow --user {{ brand.handle.lstrip('@') }} --topic ai-automation</div>

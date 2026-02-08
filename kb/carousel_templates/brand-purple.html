@@ -178,6 +178,13 @@
     line-height: 30px;
   }
 
+  .content p {
+    font-size: 27px;
+    line-height: 1.5;
+    color: {{ colors.text_secondary }};
+    padding: 14px 0;
+  }
+
   /* Footer */
   .slide-footer {
     position: absolute;
@@ -443,14 +450,7 @@
   <div class="slide-subtitle-line"></div>
   {% endif %}
   <div class="content">
-    <ul>
-    {% for line in slide.content.split('\n') %}
-      {% set stripped = line.strip() %}
-      {% if stripped %}
-      <li>{{ stripped.lstrip('- ').lstrip('* ') }}</li>
-      {% endif %}
-    {% endfor %}
-    </ul>
+    {{ slide.content|markdown_to_html }}
   </div>
   <div class="corner-accent"></div>
   <div class="slide-footer">{{ current_content_index|length }} / {{ content_slides|length }}</div>

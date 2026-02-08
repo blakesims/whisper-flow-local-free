@@ -177,6 +177,14 @@
     color: {{ colors.accent }};
   }
 
+  .content p {
+    font-size: 27px;
+    line-height: 1.55;
+    color: {{ colors.text_secondary }};
+    padding: 14px 0;
+    font-weight: 400;
+  }
+
   /* Footer */
   .slide-footer {
     position: absolute;
@@ -422,6 +430,7 @@
 {% endfor %}
 {% set ci = current_content_index|length %}
 <div class="slide" style="display:flex; flex-direction:column;" id="slide-{{ slide.slide_number }}">
+  {% if header.show_on_all_slides %}
   <div class="header">
     {% if header.author_position == 'left' %}
     <span class="header-left">{{ brand.author_name }}</span>
@@ -432,6 +441,7 @@
     {% endif %}
   </div>
   <div class="header-divider"></div>
+  {% endif %}
   <div class="editorial-indicator">
     <div class="editorial-big-number active-num">{{ '%02d' % ci }}</div>
     <div class="editorial-step-info">
@@ -458,14 +468,7 @@
   </div>
   {% endif %}
   <div class="content">
-    <ul>
-    {% for line in slide.content.split('\n') %}
-      {% set stripped = line.strip() %}
-      {% if stripped %}
-      <li>{{ stripped.lstrip('- ').lstrip('* ') }}</li>
-      {% endif %}
-    {% endfor %}
-    </ul>
+    {{ slide.content|markdown_to_html }}
   </div>
   <div class="slide-footer">{{ '%02d' % ci }} / {{ '%02d' % content_slides|length }}</div>
 </div>
@@ -473,6 +476,7 @@
 {% elif slide.type == 'mermaid' %}
 {# ====== MERMAID SLIDE ====== #}
 <div class="slide" style="display:flex; flex-direction:column;" id="slide-{{ slide.slide_number }}">
+  {% if header.show_on_all_slides %}
   <div class="header">
     {% if header.author_position == 'left' %}
     <span class="header-left">{{ brand.author_name }}</span>
@@ -483,6 +487,7 @@
     {% endif %}
   </div>
   <div class="header-divider"></div>
+  {% endif %}
   {% if slide.title %}
   <div class="slide-title">{{ slide.title }}</div>
   <div class="pull-accent">
@@ -502,6 +507,7 @@
 {% elif slide.type == 'cta' %}
 {# ====== CTA SLIDE ====== #}
 <div class="slide" style="display:flex; flex-direction:column;" id="slide-{{ slide.slide_number }}">
+  {% if header.show_on_all_slides %}
   <div class="header">
     {% if header.author_position == 'left' %}
     <span class="header-left">{{ brand.author_name }}</span>
@@ -512,6 +518,7 @@
     {% endif %}
   </div>
   <div class="header-divider"></div>
+  {% endif %}
   <div class="cta-editorial">
     <div class="cta-editorial-rule"></div>
     <div class="cta-heading">{{ slide.content }}</div>
