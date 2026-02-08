@@ -1,9 +1,11 @@
 {
   "name": "carousel_slides",
-  "description": "Break a LinkedIn post into structured slide data for carousel rendering",
+  "description": "Transform a LinkedIn post into visual carousel slide data",
   "requires": ["linkedin_v2"],
   "optional_inputs": [],
-  "prompt": "You are a carousel content architect. Your job is to take a LinkedIn post and break it into individual slides for a PDF carousel.\n\nPOST CONTENT:\n\n{{linkedin_v2}}\n\nORIGINAL TRANSCRIPT (for additional context and detail):\n{{transcript}}\n\n---\n\nSLIDE STRUCTURE RULES:\n\n1. HOOK SLIDE (slide 1): The opening hook from the post. 5-12 words maximum. Must create curiosity or tension. This is what makes someone swipe.\n\n2. CONTENT SLIDES (slides 2 through N-1): One idea per slide. 10-30 words each. Each slide should:\n   - Communicate a single, clear point\n   - Be readable in 3-5 seconds\n   - Flow logically from the previous slide\n   - Use short sentences or bullet fragments, not paragraphs\n   - Include specific details (tool names, metrics, numbers) when available\n\n   CONTENT FORMATTING: Use markdown in the content string:\n   - For bullet points, start each line with '- ' (dash space)\n   - For numbered lists, start each line with '1. ', '2. ', etc.\n   - For plain text with line breaks, use newlines between sentences\n   - Do NOT use paragraph blocks. Structure content as lists or short lines.\n\n3. MERMAID SLIDE (optional): If the content describes a workflow, pipeline, or process, include ONE mermaid slide. Provide the mermaid diagram code. Constraints:\n   - Maximum 10 nodes\n   - Must be readable at a glance (3 seconds)\n   - Use one of these patterns:\n     - Pipeline: A --> B --> C --> D\n     - Fork: A --> B & A --> C\n     - Cycle: A --> B --> C --> A\n   - Keep node labels to 2-4 words each\n\n4. CTA SLIDE (last slide): The closing question or call-to-action from the post. 8-20 words. Should invite engagement.\n\nTOTAL SLIDES: 6 to 10. Aim for the sweet spot where each slide has exactly one idea. Do not pad or compress.\n\nFor each slide, specify:\n- slide_number: integer starting at 1\n- type: one of \"hook\", \"content\", \"mermaid\", \"cta\"\n- content: the text for this slide (for mermaid type, this is the mermaid code)\n- words: word count of the content\n- title: short title for the slide (2-5 words). Required for content and mermaid slides (used in timeline labels and slide headers). Optional for hook and cta.\n- subtitle: supporting text. Used on hook slides (displayed below the main title) and CTA slides (displayed above the button). Optional for content slides.\n\nReturn ONLY the slides array. No preamble.",
+  "skip_raw_transcript": true,
+  "system_instruction": "You produce carousel slide data for PDF rendering. STRICT RULES you must follow:\n1. Every content and mermaid slide MUST have a non-empty 'title' field of 2-5 words. Empty titles are FORBIDDEN. Examples: 'Set Up Recording', 'Run Analysis', 'The Results'.\n2. The 'content' field MUST use bullet-point format with each line starting with '- ' (dash space). NEVER use paragraphs or prose.\n3. Do NOT copy text verbatim from the source post. Restructure and condense into fresh, scannable bullet points.\n4. Each bullet point should be 8-15 words with one specific insight, tool name, number, or command.",
+  "prompt": "Transform this LinkedIn post into a visual carousel.\n\nSOURCE POST:\n{{linkedin_v2}}\n\n---\n\nCreate 6-10 slides following this structure:\n\nSlide 1 (hook): Short punchy title, 5-12 words. Add a subtitle with supporting context.\nSlides 2-N (content): Each needs a 2-5 word TITLE and 3-4 BULLET POINTS starting with '- '.\nOptional mermaid slide: If the post describes a workflow/pipeline. Max 10 nodes.\nLast slide (cta): Engaging question, 8-20 words.\n\nEXAMPLE content slide:\n{\n  \"slide_number\": 2,\n  \"type\": \"content\",\n  \"title\": \"Set Up Recording\",\n  \"content\": \"- Run npx playwright codegen to open a browser recorder\\n- Click through your app's key user flows manually\\n- Capture sign-up, login, dashboard, and core features\\n- Save the raw recording as your test seed script\",\n  \"words\": 30\n}",
   "output_schema": {
     "type": "object",
     "properties": {
@@ -22,24 +24,24 @@
               "enum": ["hook", "content", "mermaid", "cta"],
               "description": "Slide type"
             },
+            "title": {
+              "type": "string",
+              "description": "2-5 word label for timeline and slide header. MUST NOT be empty for content and mermaid slides."
+            },
             "content": {
               "type": "string",
-              "description": "The text content for this slide (or mermaid code for mermaid type)"
+              "description": "Bullet-point content using '- ' prefix per line. For mermaid slides, this is diagram code."
             },
             "words": {
               "type": "integer",
               "description": "Word count of the content"
             },
-            "title": {
-              "type": "string",
-              "description": "Short title for this slide (used in timeline labels and slide headers). Required for content slides, optional for others."
-            },
             "subtitle": {
               "type": "string",
-              "description": "Subtitle or supporting text. Used on hook slides (below main title) and CTA slides (above button)."
+              "description": "Supporting text for hook slides (below title) and CTA slides (above button)."
             }
           },
-          "required": ["slide_number", "type", "content", "words"]
+          "required": ["slide_number", "type", "title", "content", "words"]
         }
       },
       "total_slides": {

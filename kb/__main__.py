@@ -38,7 +38,7 @@ DEFAULTS = {
     },
     "defaults": {
         "whisper_model": "medium",
-        "gemini_model": "gemini-2.0-flash",
+        "gemini_model": "gemini-3-pro-preview",
         "decimal": "50.01.01",
     },
     "zoom": {
@@ -328,7 +328,7 @@ def show_config():
     defaults_table.add_column("Label", style="dim")
     defaults_table.add_column("Value")
     defaults_table.add_row("Whisper Model", defaults.get("whisper_model", "medium"))
-    defaults_table.add_row("Gemini Model", defaults.get("gemini_model", "gemini-2.0-flash"))
+    defaults_table.add_row("Gemini Model", defaults.get("gemini_model", "gemini-3-pro-preview"))
     defaults_table.add_row("Decimal", defaults.get("decimal", "50.01.01"))
     console.print(defaults_table)
 

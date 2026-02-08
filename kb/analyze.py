@@ -647,6 +647,10 @@ def format_prerequisite_output(analysis_result: dict) -> str:
                     formatted_items.append(f"- {item}")
             return "\n\n".join(formatted_items)
 
+    # If there's a 'post' key (e.g. linkedin_v2), extract just the post text
+    if 'post' in content and isinstance(content['post'], str):
+        return content['post']
+
     # Multiple keys - return JSON representation
     return json.dumps(content, indent=2, ensure_ascii=False)
 
@@ -783,24 +787,42 @@ def analyze_transcript(
     if prerequisite_context:
         prompt_template = render_conditional_template(prompt_template, prerequisite_context)
 
-    # Build the prompt with schema instruction
+    # Build the prompt
     title_context = f"Title: {title}\n\n" if title else ""
-    schema_json = json.dumps(config['output_schema'], indent=2)
+    has_api_schema = 'output_schema' in config
+    include_transcript = not config.get('skip_raw_transcript', False)
 
-    full_prompt = f"""{prompt_template}
+    # Build prompt parts
+    parts = [prompt_template]
 
-{title_context}TRANSCRIPT:
-{transcript_text}
+    if include_transcript:
+        parts.append(f"\n{title_context}TRANSCRIPT:\n{transcript_text}\n\n---")
 
----
+    # Only append schema as text if NOT using API-level schema enforcement
+    # (avoids duplicate/conflicting instructions)
+    if not has_api_schema:
+        schema_json = json.dumps(config['output_schema'], indent=2)
+        parts.append(f"\nRespond with valid JSON matching this schema:\n{schema_json}\n\nOutput ONLY the JSON, no markdown code blocks or explanation.")
+    else:
+        parts.append("\nOutput ONLY valid JSON. No markdown code blocks or explanation.")
 
-Respond with valid JSON matching this schema:
-{schema_json}
-
-Output ONLY the JSON, no markdown code blocks or explanation."""
+    full_prompt = "\n".join(parts)
 
     # Initialize client
     client = genai.Client(api_key=api_key)
+
+    # Build generation config — use response_json_schema for structural enforcement
+    gen_config_kwargs = {
+        'response_mime_type': 'application/json',
+    }
+    if 'output_schema' in config:
+        gen_config_kwargs['response_json_schema'] = config['output_schema']
+
+    # Use system instruction if provided in config (separates formatting rules from content)
+    if config.get('system_instruction'):
+        gen_config_kwargs['system_instruction'] = config['system_instruction']
+
+    gen_config = types.GenerateContentConfig(**gen_config_kwargs)
 
     # Retry loop with exponential backoff
     for attempt in range(max_retries):
@@ -808,10 +830,7 @@ Output ONLY the JSON, no markdown code blocks or explanation."""
             response = client.models.generate_content(
                 model=model,
                 contents=full_prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type='application/json',
-                    temperature=0.3,  # Lower for more consistent structured output
-                ),
+                config=gen_config,
             )
 
             # Parse and return the result

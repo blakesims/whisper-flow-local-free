@@ -4,7 +4,7 @@
 T023
 
 ## Meta
-- **Status:** COMPLETE
+- **Status:** IN PROGRESS (Phases 1-4 complete, Phase 5 planned)
 - **Last Updated:** 2026-02-08
 
 ## Overview
@@ -585,9 +585,46 @@ ready → published (copy/export)
 
 ---
 
-## Completion
+### Phase 5: Human Feedback on Iteration
+**Status**: Not Started
+
+**Objectives:**
+- Add a text input in kb serve where Blake can type directional feedback before pressing 'i' to iterate
+- Human feedback is passed alongside the AI judge scores to the LLM on the next improvement round
+- This gives Blake control over *what* to improve, not just relying on the judge's criteria
+
+**How it works:**
+1. Blake sees round 0 draft + judge scores in kb serve iteration view
+2. Optionally types feedback in a textarea (e.g. "make the hook about the ffmpeg discovery specifically" or "tell it as a story, drop the numbered list")
+3. Presses 'i' to iterate
+4. The `/iterate` endpoint receives the human feedback string
+5. `run_with_judge_loop()` accepts an optional `human_feedback` parameter
+6. The linkedin_v2.json prompt template gets a new `{{#if human_feedback}}` block injected alongside the existing `{{#if judge_feedback}}` block
+7. The LLM sees: transcript + prior drafts + judge scores + human direction
+
+**Estimated Time**: 2-3 hours
+
+**Files:**
+- `kb/config/analysis_types/linkedin_v2.json` — MODIFY: add `{{#if human_feedback}}` template block after the judge_feedback section. Something like: "The author has additional feedback for this round: {{human_feedback}}"
+- `kb/analyze.py` — MODIFY: `run_with_judge_loop()` accepts optional `human_feedback: str | None` param. Injects into prompt context alongside `judge_feedback` when present.
+- `kb/serve.py` — MODIFY: `/iterate` endpoint reads `human_feedback` from POST body. Passes to `run_with_judge_loop()`. Store human feedback in transcript JSON for history (e.g. `_human_feedback` field in the versioned judge key).
+- `kb/templates/posting_queue.html` — MODIFY: add textarea below judge scores in iteration view. 'i' shortcut reads textarea value and sends it with the iterate request. Textarea placeholder: "Optional: tell the AI what to change..."
+- `kb/tests/test_human_feedback.py` — NEW: tests for human feedback passthrough, storage, prompt injection
+
+**Acceptance Criteria:**
+- [ ] AC1: Textarea visible in iteration view below judge scores
+- [ ] AC2: Pressing 'i' with text in the textarea sends it to `/iterate` endpoint
+- [ ] AC3: Pressing 'i' with empty textarea works as before (no regression)
+- [ ] AC4: Human feedback appears in the prompt context sent to the LLM
+- [ ] AC5: Human feedback is stored in the transcript JSON (for history/audit)
+- [ ] AC6: History injection includes human feedback from prior rounds (so round 2+ can see what Blake asked for in round 1)
+- [ ] AC7: All existing tests still pass
+
+---
+
+## Completion (Phases 1-4)
 - **Completed:** 2026-02-08
-- **Summary:** Full content curation workflow delivered across 4 phases: judge versioning + auto-judge pipeline (Phase 1), iteration view + approve rewire (Phase 2), staging area + text editing (Phase 3), slide editing + template selection + CLI publish (Phase 4). 370 tests total, all passing.
+- **Summary:** Full content curation workflow delivered across 4 phases: judge versioning + auto-judge pipeline (Phase 1), iteration view + approve rewire (Phase 2), staging area + text editing (Phase 3), slide editing + template selection + CLI publish (Phase 4). 370 tests total, all passing. Phase 5 (human feedback) planned but not yet started.
 - **Learnings:** Validate user-provided enum values before spawning background threads. New utility functions need their own test coverage even when only called from one place. Extract repeated code patterns into helpers before they triple.
 
 ---
@@ -595,3 +632,4 @@ ready → published (copy/export)
 ## Notes & Updates
 - 2026-02-08: Task created from Blake's feedback on T022 Phase 5. Supersedes T022 Phase 5 (iterative judge). Incorporates workflow redesign: iterate → stage → edit → generate visuals → publish.
 - 2026-02-08: Key design decisions: auto-judge CLI only, approve=stage not publish, edit versioning as linkedin_v2_N_M, judge gets transcript access.
+- 2026-02-08: Phase 5 added — human feedback on iteration. Blake wants to give directional feedback alongside AI judge scores before iterating.

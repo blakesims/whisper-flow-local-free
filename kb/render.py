@@ -639,10 +639,18 @@ def render_pipeline(
             "errors": errors + [f"Carousel render failed: {e}"],
         }
 
+    # Step 3: Save HTML to disk for inspection
+    html_content = carousel_result["html"]
+    if html_content:
+        html_path = os.path.join(output_dir, "carousel.html")
+        with open(html_path, "w", encoding="utf-8") as f:
+            f.write(html_content)
+        logger.info("HTML saved: %s", html_path)
+
     return {
         "pdf_path": carousel_result["pdf_path"],
         "thumbnail_paths": carousel_result["thumbnail_paths"],
         "mermaid_svg": mermaid_svg,
-        "html": carousel_result["html"],
+        "html": html_content,
         "errors": errors,
     }
