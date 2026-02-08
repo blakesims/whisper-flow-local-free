@@ -150,9 +150,60 @@ def render_mermaid(
             pass
 
 
+def load_profile_photo_base64(config: Optional[dict] = None) -> Optional[str]:
+    """
+    Load profile photo from configured path and return as base64 data URI.
+
+    Falls back to None if the file doesn't exist (template should render
+    a placeholder with initials instead).
+
+    Args:
+        config: Carousel config dict (loaded from config.json if None)
+
+    Returns:
+        Base64 data URI string (e.g. "data:image/png;base64,...") or None.
+    """
+    if config is None:
+        config = load_carousel_config()
+
+    brand = config.get("brand", {})
+    photo_path_str = brand.get("profile_photo_path")
+    if not photo_path_str:
+        return None
+
+    # Resolve relative to carousel_templates dir
+    photo_path = CAROUSEL_TEMPLATES_DIR / photo_path_str
+    if not photo_path.exists():
+        logger.info(
+            "Profile photo not found at %s — template will use placeholder.",
+            photo_path,
+        )
+        return None
+
+    try:
+        with open(photo_path, "rb") as f:
+            photo_bytes = f.read()
+
+        # Detect MIME type from extension
+        ext = photo_path.suffix.lower()
+        mime_map = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".webp": "image/webp",
+        }
+        mime_type = mime_map.get(ext, "image/png")
+
+        encoded = base64.b64encode(photo_bytes).decode("ascii")
+        return f"data:{mime_type};base64,{encoded}"
+    except (IOError, OSError) as e:
+        logger.warning("Could not read profile photo: %s", e)
+        return None
+
+
 def render_html_from_slides(
     slides: list[dict],
-    template_name: str = "dark-purple",
+    template_name: str = "brand-purple",
     config: Optional[dict] = None,
 ) -> str:
     """
@@ -160,7 +211,8 @@ def render_html_from_slides(
 
     Args:
         slides: List of slide dicts with {slide_number, type, content, words, ...}
-        template_name: Template name from config.json (e.g. "dark-purple", "light")
+        template_name: Template name from config.json (e.g. "brand-purple",
+                       "modern-editorial", "tech-minimal")
         config: Carousel config dict (loaded from config.json if None)
 
     Returns:
@@ -184,6 +236,20 @@ def render_html_from_slides(
     template_file = template_config["file"]
     dimensions = config.get("dimensions", {"width": 1080, "height": 1350})
     brand = config.get("brand", {})
+    header = config.get("header", {
+        "show_on_all_slides": True,
+        "author_position": "left",
+        "community_position": "right",
+    })
+
+    # Backward compatibility: brand.name -> brand.author_name
+    if "author_name" not in brand and "name" in brand:
+        brand["author_name"] = brand["name"]
+    if "community_name" not in brand:
+        brand["community_name"] = ""
+
+    # Load profile photo as base64 data URI
+    profile_photo_data = load_profile_photo_base64(config)
 
     # Verify template file exists
     template_path = CAROUSEL_TEMPLATES_DIR / template_file
@@ -203,6 +269,8 @@ def render_html_from_slides(
         colors=template_config["colors"],
         fonts=template_config["fonts"],
         brand=brand,
+        header=header,
+        profile_photo_data=profile_photo_data,
     )
 
     return html
@@ -353,7 +421,7 @@ def render_slide_thumbnails(
 
 def render_carousel(
     slides: list[dict],
-    template_name: str = "dark-purple",
+    template_name: str = "brand-purple",
     output_dir: str = ".",
     config: Optional[dict] = None,
     generate_thumbnails: bool = True,
@@ -438,7 +506,7 @@ def render_pipeline(
         config = load_carousel_config()
 
     if template_name is None:
-        template_name = config.get("defaults", {}).get("template", "dark-purple")
+        template_name = config.get("defaults", {}).get("template", "brand-purple")
 
     slides = slides_data.get("slides", [])
     has_mermaid = slides_data.get("has_mermaid", False)

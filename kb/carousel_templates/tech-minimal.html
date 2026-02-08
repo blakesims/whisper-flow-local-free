@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width={{ width }}, initial-scale=1.0">
+<link href="{{ fonts.google_fonts_url }}" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: {{ width }}px;
+    overflow: hidden;
+  }
+
+  .slide {
+    width: {{ width }}px;
+    height: {{ height }}px;
+    position: relative;
+    overflow: hidden;
+    background: {{ colors.background }};
+    color: {{ colors.text_primary }};
+    display: flex;
+    flex-direction: column;
+    font-family: {{ fonts.heading }};
+  }
+
+  /* Terminal bar */
+  .terminal-bar {
+    display: flex;
+    align-items: center;
+    padding: 20px 48px;
+    background: {{ colors.terminal_bg }};
+    gap: 8px;
+  }
+  .terminal-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+  }
+  .terminal-dot.red { background: {{ colors.red }}; }
+  .terminal-dot.yellow { background: {{ colors.yellow }}; }
+  .terminal-dot.green { background: {{ colors.green }}; }
+  .terminal-tab {
+    margin-left: 20px;
+    font-family: {{ fonts.mono }};
+    font-size: 13px;
+    color: {{ colors.text_secondary }};
+    background: {{ colors.background }};
+    padding: 6px 16px;
+    border-radius: 6px 6px 0 0;
+  }
+
+  /* Header */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 24px 48px 20px 48px;
+    border-bottom: 1px solid {{ colors.divider }};
+  }
+  .header-left {
+    font-family: {{ fonts.mono }};
+    font-size: 18px;
+    font-weight: 600;
+    color: {{ colors.text_primary }};
+  }
+  .header-left .prompt {
+    color: {{ colors.green }};
+  }
+  .header-right {
+    font-family: {{ fonts.mono }};
+    font-size: 16px;
+    font-weight: 400;
+    color: {{ colors.text_secondary }};
+  }
+
+  /* Breadcrumb progress */
+  .breadcrumb {
+    display: flex;
+    align-items: center;
+    padding: 24px 48px 0 48px;
+    font-family: {{ fonts.mono }};
+    font-size: 14px;
+    gap: 0;
+    flex-wrap: wrap;
+  }
+  .bc-step { color: {{ colors.breadcrumb_inactive }}; padding: 4px 0; }
+  .bc-step.filled { color: {{ colors.text_secondary }}; }
+  .bc-step.active { color: {{ colors.accent }}; font-weight: 700; }
+  .bc-sep { color: {{ colors.breadcrumb_separator }}; margin: 0 8px; }
+  .bc-sep.filled { color: {{ colors.breadcrumb_inactive }}; }
+
+  /* Step bar */
+  .step-bar {
+    display: flex;
+    gap: 4px;
+    padding: 16px 48px 0 48px;
+  }
+  .step-bar-segment {
+    flex: 1;
+    height: 3px;
+    background: {{ colors.divider }};
+    border-radius: 2px;
+  }
+  .step-bar-segment.filled { background: {{ colors.breadcrumb_inactive }}; }
+  .step-bar-segment.active {
+    background: {{ colors.accent }};
+    box-shadow: 0 0 8px rgba(88,166,255,0.3);
+  }
+
+  /* Slide title */
+  .slide-title {
+    font-family: {{ fonts.heading }};
+    font-size: 44px;
+    font-weight: 700;
+    color: {{ colors.text_primary }};
+    padding: 40px 48px 0 48px;
+    line-height: 1.2;
+    letter-spacing: -0.5px;
+  }
+
+  /* Code comment */
+  .code-comment {
+    font-family: {{ fonts.mono }};
+    font-size: 16px;
+    color: {{ colors.green }};
+    padding: 16px 48px 0 48px;
+    opacity: 0.8;
+  }
+
+  /* Content */
+  .content {
+    padding: 28px 48px 48px 48px;
+  }
+  .content ul, .content ol {
+    list-style: none;
+    padding: 0;
+  }
+  .content li {
+    font-size: 26px;
+    line-height: 1.5;
+    color: {{ colors.text_primary }};
+    padding: 16px 0 16px 44px;
+    position: relative;
+    border-bottom: 1px solid {{ colors.divider }};
+    font-weight: 400;
+  }
+  .content li:last-child { border-bottom: none; }
+  .content ul li::before {
+    content: "$";
+    position: absolute;
+    left: 0;
+    font-family: {{ fonts.mono }};
+    font-size: 20px;
+    font-weight: 700;
+    color: {{ colors.green }};
+  }
+  .content ol {
+    counter-reset: tech-counter;
+  }
+  .content ol li {
+    counter-increment: tech-counter;
+  }
+  .content ol li::before {
+    content: "[" counter(tech-counter) "]";
+    position: absolute;
+    left: 0;
+    font-family: {{ fonts.mono }};
+    font-size: 18px;
+    font-weight: 600;
+    color: {{ colors.accent }};
+  }
+
+  /* Footer */
+  .slide-footer {
+    position: absolute;
+    bottom: 28px;
+    right: 48px;
+    font-family: {{ fonts.mono }};
+    font-size: 13px;
+    color: {{ colors.slide_number }};
+  }
+  .slide-footer-left {
+    position: absolute;
+    bottom: 28px;
+    left: 48px;
+    font-family: {{ fonts.mono }};
+    font-size: 13px;
+    color: {{ colors.breadcrumb_separator }};
+  }
+
+  /* === TITLE PAGE === */
+  .title-hero {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 0 64px;
+  }
+  .title-page-badge {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 40px;
+  }
+  .title-page-photo {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: {{ colors.terminal_bg }};
+    border: 2px solid {{ colors.terminal_border }};
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .title-page-photo img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+  }
+  .title-page-photo svg {
+    width: 44px;
+    height: 44px;
+    fill: {{ colors.breadcrumb_inactive }};
+  }
+  .title-page-photo .initials {
+    font-size: 26px;
+    font-weight: 700;
+    color: {{ colors.breadcrumb_inactive }};
+    font-family: {{ fonts.mono }};
+  }
+  .title-page-author-info {
+    display: flex;
+    flex-direction: column;
+  }
+  .title-page-author-name {
+    font-size: 20px;
+    font-weight: 600;
+    color: {{ colors.text_primary }};
+  }
+  .title-page-author-handle {
+    font-family: {{ fonts.mono }};
+    font-size: 15px;
+    color: {{ colors.accent }};
+  }
+  .title-page-command {
+    font-family: {{ fonts.mono }};
+    font-size: 18px;
+    color: {{ colors.breadcrumb_inactive }};
+    margin-bottom: 20px;
+  }
+  .title-page-command .prompt-sym { color: {{ colors.green }}; }
+  .title-page-command .cmd { color: {{ colors.text_secondary }}; }
+  .title-page-main-title {
+    font-weight: 700;
+    color: {{ colors.text_primary }};
+    line-height: 1.1;
+    letter-spacing: -1.5px;
+    margin-bottom: 24px;
+  }
+  .title-page-main-title.title-short {
+    font-size: 68px;
+  }
+  .title-page-main-title.title-medium {
+    font-size: 62px;
+  }
+  .title-page-main-title.title-long {
+    font-size: 50px;
+  }
+  .title-page-divider {
+    width: 60px;
+    height: 3px;
+    background: {{ colors.accent }};
+    margin-bottom: 24px;
+    border-radius: 2px;
+  }
+  .title-page-subtitle {
+    font-size: 24px;
+    font-weight: 400;
+    color: {{ colors.text_secondary }};
+    line-height: 1.5;
+    max-width: 680px;
+  }
+  .title-page-tags {
+    display: flex;
+    gap: 10px;
+    margin-top: 36px;
+    flex-wrap: wrap;
+  }
+  .title-page-tag {
+    font-family: {{ fonts.mono }};
+    font-size: 13px;
+    color: {{ colors.accent }};
+    background: {{ colors.code_highlight_bg }};
+    border: 1px solid rgba(88,166,255,0.2);
+    padding: 6px 14px;
+    border-radius: 20px;
+  }
+
+  /* === CTA PAGE === */
+  .cta-tech {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 0 64px;
+  }
+  .cta-prompt {
+    font-family: {{ fonts.mono }};
+    font-size: 18px;
+    color: {{ colors.green }};
+    margin-bottom: 36px;
+    padding: 12px 24px;
+    background: {{ colors.terminal_bg }};
+    border: 1px solid {{ colors.divider }};
+    border-radius: 8px;
+  }
+  .cta-heading {
+    font-size: 48px;
+    font-weight: 700;
+    color: {{ colors.text_primary }};
+    line-height: 1.15;
+    letter-spacing: -0.8px;
+    margin-bottom: 20px;
+  }
+  .cta-subtext {
+    font-size: 22px;
+    color: {{ colors.text_secondary }};
+    line-height: 1.5;
+    margin-bottom: 48px;
+    max-width: 640px;
+  }
+  .cta-button {
+    display: inline-block;
+    padding: 20px 52px;
+    background: {{ colors.cta_button }};
+    color: #FFFFFF;
+    font-size: 20px;
+    font-weight: 600;
+    border-radius: 6px;
+  }
+  .cta-handle {
+    margin-top: 24px;
+    font-family: {{ fonts.mono }};
+    font-size: 16px;
+    color: {{ colors.breadcrumb_inactive }};
+  }
+
+  /* === MERMAID === */
+  .mermaid-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px 48px 48px 48px;
+    flex: 1;
+  }
+  .mermaid-container img {
+    max-width: 880px;
+    max-height: 800px;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+  }
+  .mermaid-code {
+    font-family: {{ fonts.mono }};
+    font-size: 18px;
+    color: {{ colors.text_primary }};
+    white-space: pre-wrap;
+    padding: 32px;
+    background: {{ colors.terminal_bg }};
+    border: 1px solid {{ colors.terminal_border }};
+    border-radius: 6px;
+    max-width: 900px;
+  }
+</style>
+</head>
+<body>
+
+{% for slide in slides %}
+{% if slide.type == 'hook' %}
+{# ====== TITLE PAGE ====== #}
+<div class="slide" id="slide-{{ slide.slide_number }}">
+  <div class="terminal-bar">
+    <div class="terminal-dot red"></div>
+    <div class="terminal-dot yellow"></div>
+    <div class="terminal-dot green"></div>
+    <span class="terminal-tab">content-pipeline.md</span>
+  </div>
+  <div class="header">
+    {% if header.author_position == 'left' %}
+    <span class="header-left"><span class="prompt">~</span> {{ brand.author_name }}</span>
+    <span class="header-right">{{ brand.community_name }}</span>
+    {% else %}
+    <span class="header-left"><span class="prompt">~</span> {{ brand.community_name }}</span>
+    <span class="header-right">{{ brand.author_name }}</span>
+    {% endif %}
+  </div>
+  <div class="title-hero">
+    <div class="title-page-badge">
+      <div class="title-page-photo">
+        {% if profile_photo_data %}
+        <img src="{{ profile_photo_data }}" alt="{{ brand.author_name }}">
+        {% else %}
+        <span class="initials">{{ brand.author_name.split()[0][0] }}{{ brand.author_name.split()[-1][0] }}</span>
+        {% endif %}
+      </div>
+      <div class="title-page-author-info">
+        <span class="title-page-author-name">{{ brand.author_name }}</span>
+        {% if brand.handle %}
+        <span class="title-page-author-handle">{{ brand.handle }}</span>
+        {% endif %}
+      </div>
+    </div>
+    <div class="title-page-command"><span class="prompt-sym">$</span> <span class="cmd">cat pipeline-guide.md</span></div>
+    <div class="title-page-main-title {% if slide.content|length < 40 %}title-short{% elif slide.content|length < 65 %}title-medium{% else %}title-long{% endif %}">{{ slide.content }}</div>
+    <div class="title-page-divider"></div>
+    {% if slide.subtitle %}
+    <div class="title-page-subtitle">{{ slide.subtitle }}</div>
+    {% endif %}
+    {% if slide.tags %}
+    <div class="title-page-tags">
+      {% for tag in slide.tags %}
+      <span class="title-page-tag">{{ tag }}</span>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% elif slide.type == 'content' %}
+{# ====== CONTENT SLIDE ====== #}
+{% set content_slides = [] %}
+{% for s in slides if s.type == 'content' %}
+  {% if content_slides.append(s) %}{% endif %}
+{% endfor %}
+{% set current_content_index = [] %}
+{% for s in slides[:slide.slide_number] if s.type == 'content' %}
+  {% if current_content_index.append(1) %}{% endif %}
+{% endfor %}
+{% set ci = current_content_index|length %}
+<div class="slide" id="slide-{{ slide.slide_number }}">
+  <div class="terminal-bar">
+    <div class="terminal-dot red"></div>
+    <div class="terminal-dot yellow"></div>
+    <div class="terminal-dot green"></div>
+    <span class="terminal-tab">step-{{ '%02d' % ci }}.md</span>
+  </div>
+  <div class="header">
+    {% if header.author_position == 'left' %}
+    <span class="header-left"><span class="prompt">~</span> {{ brand.author_name }}</span>
+    <span class="header-right">{{ brand.community_name }}</span>
+    {% else %}
+    <span class="header-left"><span class="prompt">~</span> {{ brand.community_name }}</span>
+    <span class="header-right">{{ brand.author_name }}</span>
+    {% endif %}
+  </div>
+  <div class="breadcrumb">
+    {% for cs in content_slides %}
+    {% set step_num = loop.index %}
+    {% if step_num < ci %}
+    <span class="bc-step filled">{{ cs.title if cs.title else 'step-' ~ step_num }}</span>
+    {% if not loop.last %}<span class="bc-sep filled">/</span>{% endif %}
+    {% elif step_num == ci %}
+    <span class="bc-step active">{{ cs.title if cs.title else 'step-' ~ step_num }}</span>
+    {% if not loop.last %}<span class="bc-sep">/</span>{% endif %}
+    {% else %}
+    <span class="bc-step">{{ cs.title if cs.title else 'step-' ~ step_num }}</span>
+    {% if not loop.last %}<span class="bc-sep">/</span>{% endif %}
+    {% endif %}
+    {% endfor %}
+  </div>
+  <div class="step-bar">
+    {% for cs in content_slides %}
+    {% set step_num = loop.index %}
+    {% if step_num < ci %}
+    <div class="step-bar-segment filled"></div>
+    {% elif step_num == ci %}
+    <div class="step-bar-segment active"></div>
+    {% else %}
+    <div class="step-bar-segment"></div>
+    {% endif %}
+    {% endfor %}
+  </div>
+  {% if slide.title %}
+  <div class="slide-title">{{ slide.title }}</div>
+  {% endif %}
+  <div class="content">
+    <ul>
+    {% for line in slide.content.split('\n') %}
+      {% set stripped = line.strip() %}
+      {% if stripped %}
+      <li>{{ stripped.lstrip('- ').lstrip('* ') }}</li>
+      {% endif %}
+    {% endfor %}
+    </ul>
+  </div>
+  <div class="slide-footer-left">step[{{ ci - 1 }}]</div>
+  <div class="slide-footer">{{ ci }}/{{ content_slides|length }}</div>
+</div>
+
+{% elif slide.type == 'mermaid' %}
+{# ====== MERMAID SLIDE ====== #}
+<div class="slide" id="slide-{{ slide.slide_number }}">
+  <div class="terminal-bar">
+    <div class="terminal-dot red"></div>
+    <div class="terminal-dot yellow"></div>
+    <div class="terminal-dot green"></div>
+    <span class="terminal-tab">pipeline.md</span>
+  </div>
+  <div class="header">
+    {% if header.author_position == 'left' %}
+    <span class="header-left"><span class="prompt">~</span> {{ brand.author_name }}</span>
+    <span class="header-right">{{ brand.community_name }}</span>
+    {% else %}
+    <span class="header-left"><span class="prompt">~</span> {{ brand.community_name }}</span>
+    <span class="header-right">{{ brand.author_name }}</span>
+    {% endif %}
+  </div>
+  {% if slide.title %}
+  <div class="slide-title">{{ slide.title }}</div>
+  <div class="code-comment">// Architecture overview</div>
+  {% endif %}
+  <div class="mermaid-container">
+    {% if slide.mermaid_image_path %}
+      <img src="{{ slide.mermaid_image_path }}" alt="Diagram">
+    {% else %}
+      <div class="mermaid-code">{{ slide.content }}</div>
+    {% endif %}
+  </div>
+</div>
+
+{% elif slide.type == 'cta' %}
+{# ====== CTA SLIDE ====== #}
+<div class="slide" id="slide-{{ slide.slide_number }}">
+  <div class="terminal-bar">
+    <div class="terminal-dot red"></div>
+    <div class="terminal-dot yellow"></div>
+    <div class="terminal-dot green"></div>
+    <span class="terminal-tab">follow.md</span>
+  </div>
+  <div class="header">
+    {% if header.author_position == 'left' %}
+    <span class="header-left"><span class="prompt">~</span> {{ brand.author_name }}</span>
+    <span class="header-right">{{ brand.community_name }}</span>
+    {% else %}
+    <span class="header-left"><span class="prompt">~</span> {{ brand.community_name }}</span>
+    <span class="header-right">{{ brand.author_name }}</span>
+    {% endif %}
+  </div>
+  <div class="cta-tech">
+    {% if brand.handle %}
+    <div class="cta-prompt">$ follow --user {{ brand.handle.lstrip('@') }} --topic ai-automation</div>
+    {% endif %}
+    <div class="cta-heading">{{ slide.content }}</div>
+    {% if slide.subtitle %}
+    <div class="cta-subtext">{{ slide.subtitle }}</div>
+    {% endif %}
+    <div class="cta-button">Follow for More</div>
+    {% if brand.handle %}
+    <div class="cta-handle">{{ brand.handle }}</div>
+    {% endif %}
+  </div>
+</div>
+
+{% endif %}
+
+{% if not loop.last %}
+<div style="page-break-after: always;"></div>
+{% endif %}
+{% endfor %}
+
+</body>
+</html>

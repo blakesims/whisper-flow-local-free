@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width={{ width }}, initial-scale=1.0">
+<link href="{{ fonts.google_fonts_url }}" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: {{ width }}px;
+    overflow: hidden;
+  }
+
+  .slide {
+    width: {{ width }}px;
+    height: {{ height }}px;
+    position: relative;
+    overflow: hidden;
+    background: linear-gradient(175deg, {{ colors.background }} 0%, {{ colors.background_gradient_end }} 100%);
+    color: {{ colors.text_primary }};
+    display: flex;
+    flex-direction: column;
+    font-family: {{ fonts.heading }};
+  }
+
+  /* Header */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 36px 56px 28px 56px;
+    border-bottom: 1px solid {{ colors.header_border }};
+  }
+  .header-left {
+    font-size: 21px;
+    font-weight: 700;
+    color: {{ colors.text_primary }};
+  }
+  .header-right {
+    font-size: 19px;
+    font-weight: 500;
+    color: {{ colors.accent_light }};
+  }
+
+  /* Timeline */
+  .timeline {
+    display: flex;
+    align-items: flex-start;
+    padding: 36px 56px 0 56px;
+    gap: 0;
+    justify-content: space-between;
+  }
+  .tl-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex: 1;
+    position: relative;
+  }
+  .tl-dot {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 2.5px solid {{ colors.timeline_dot_border }};
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 700;
+    color: rgba(255,255,255,0.3);
+    z-index: 1;
+  }
+  .tl-dot.filled {
+    background: rgba(139,92,246,0.4);
+    border-color: {{ colors.accent }};
+    color: {{ colors.text_primary }};
+  }
+  .tl-dot.active {
+    background: {{ colors.accent }};
+    border-color: {{ colors.accent_light }};
+    color: {{ colors.text_primary }};
+    box-shadow: 0 0 20px rgba(139,92,246,0.5);
+  }
+  .tl-label {
+    margin-top: 10px;
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.3);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    text-align: center;
+  }
+  .tl-label.active { color: {{ colors.accent_light }}; }
+  .tl-label.filled { color: rgba(255,255,255,0.5); }
+  .tl-step:not(:last-child)::after {
+    content: "";
+    position: absolute;
+    top: 15px;
+    left: calc(50% + 18px);
+    right: calc(-50% + 18px);
+    height: 2px;
+    background: {{ colors.timeline_connector }};
+  }
+  .tl-step.filled:not(:last-child)::after,
+  .tl-step.active:not(:last-child)::after {
+    background: {{ colors.timeline_connector_filled }};
+  }
+
+  /* Slide title */
+  .slide-title {
+    font-size: 46px;
+    font-weight: 800;
+    color: {{ colors.text_primary }};
+    padding: 48px 56px 0 56px;
+    line-height: 1.15;
+    letter-spacing: -0.8px;
+  }
+  .slide-subtitle-line {
+    width: 56px;
+    height: 3px;
+    background: {{ colors.accent }};
+    margin: 20px 0 0 56px;
+    border-radius: 2px;
+  }
+
+  /* Content */
+  .content {
+    padding: 36px 56px 56px 56px;
+  }
+  .content ul, .content ol {
+    list-style: none;
+    padding: 0;
+  }
+  .content li {
+    font-size: 27px;
+    line-height: 1.5;
+    color: {{ colors.text_secondary }};
+    padding: 18px 0 18px 48px;
+    position: relative;
+    border-left: 2px solid {{ colors.bullet_border }};
+    margin-left: 10px;
+  }
+  .content ul li::before {
+    content: "";
+    position: absolute;
+    left: -7px;
+    top: 26px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: {{ colors.accent }};
+  }
+  .content ol {
+    counter-reset: purple-counter;
+  }
+  .content ol li {
+    counter-increment: purple-counter;
+  }
+  .content ol li::before {
+    content: counter(purple-counter);
+    position: absolute;
+    left: -16px;
+    top: 16px;
+    width: 30px;
+    height: 30px;
+    background: rgba(139,92,246,0.25);
+    border: 1.5px solid {{ colors.accent }};
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    color: {{ colors.accent_light }};
+    text-align: center;
+    line-height: 30px;
+  }
+
+  /* Footer */
+  .slide-footer {
+    position: absolute;
+    bottom: 32px;
+    right: 56px;
+    font-size: 15px;
+    color: {{ colors.slide_number }};
+    font-weight: 500;
+  }
+
+  /* Corner accent */
+  .corner-accent {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 200px;
+    height: 200px;
+    background: radial-gradient(circle at bottom left, {{ colors.corner_glow }}, transparent 70%);
+    pointer-events: none;
+  }
+
+  /* === TITLE PAGE === */
+  .title-page-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 0 72px;
+    position: relative;
+  }
+  .title-page-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 36px;
+  }
+  .title-page-photo {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: rgba(139,92,246,0.2);
+    border: 2px solid {{ colors.accent }};
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .title-page-photo img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+  }
+  .title-page-photo svg {
+    width: 36px;
+    height: 36px;
+    fill: {{ colors.accent_light }};
+  }
+  .title-page-photo .initials {
+    font-size: 22px;
+    font-weight: 700;
+    color: {{ colors.accent_light }};
+  }
+  .title-page-author-info {
+    display: flex;
+    flex-direction: column;
+  }
+  .title-page-author-name {
+    font-size: 20px;
+    font-weight: 700;
+    color: {{ colors.text_primary }};
+  }
+  .title-page-author-handle {
+    font-size: 16px;
+    color: {{ colors.accent_light }};
+  }
+  .title-page-main-title {
+    font-weight: 800;
+    color: {{ colors.text_primary }};
+    line-height: 1.08;
+    letter-spacing: -1.8px;
+    margin-bottom: 24px;
+  }
+  .title-page-main-title.title-short {
+    font-size: 72px;
+  }
+  .title-page-main-title.title-medium {
+    font-size: 66px;
+  }
+  .title-page-main-title.title-long {
+    font-size: 54px;
+  }
+  .title-page-accent-line {
+    width: 72px;
+    height: 4px;
+    background: linear-gradient(90deg, {{ colors.accent }}, {{ colors.accent_light }});
+    border-radius: 2px;
+    margin-bottom: 24px;
+  }
+  .title-page-subtitle {
+    font-size: 27px;
+    font-weight: 400;
+    color: {{ colors.text_secondary }};
+    line-height: 1.45;
+    max-width: 700px;
+  }
+
+  /* === CTA PAGE === */
+  .cta-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 0 72px;
+  }
+  .cta-heading {
+    font-size: 50px;
+    font-weight: 800;
+    color: {{ colors.text_primary }};
+    line-height: 1.15;
+    letter-spacing: -1px;
+    margin-bottom: 20px;
+  }
+  .cta-subtext {
+    font-size: 24px;
+    color: {{ colors.text_secondary }};
+    line-height: 1.5;
+    margin-bottom: 48px;
+    max-width: 640px;
+  }
+  .cta-button {
+    display: inline-block;
+    padding: 22px 60px;
+    background: {{ colors.accent }};
+    color: {{ colors.text_primary }};
+    font-size: 24px;
+    font-weight: 700;
+    border-radius: 8px;
+    letter-spacing: -0.2px;
+  }
+  .cta-handle {
+    margin-top: 24px;
+    font-size: 20px;
+    color: rgba(255,255,255,0.35);
+  }
+
+  /* === MERMAID === */
+  .mermaid-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px 56px 56px 56px;
+    flex: 1;
+  }
+  .mermaid-container img {
+    max-width: 860px;
+    max-height: 800px;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+  }
+  .mermaid-code {
+    font-family: {{ fonts.mono }};
+    font-size: 20px;
+    color: {{ colors.text_secondary }};
+    white-space: pre-wrap;
+    padding: 32px;
+    background: {{ colors.highlight_bg }};
+    border: 1px solid {{ colors.highlight_border }};
+    border-radius: 12px;
+    max-width: 900px;
+  }
+</style>
+</head>
+<body>
+
+{% for slide in slides %}
+{% if slide.type == 'hook' %}
+{# ====== TITLE / HOOK PAGE ====== #}
+<div class="slide" id="slide-{{ slide.slide_number }}">
+  <div class="header">
+    {% if header.author_position == 'left' %}
+    <span class="header-left">{{ brand.author_name }}</span>
+    <span class="header-right">{{ brand.community_name }}</span>
+    {% else %}
+    <span class="header-left">{{ brand.community_name }}</span>
+    <span class="header-right">{{ brand.author_name }}</span>
+    {% endif %}
+  </div>
+  <div class="title-page-body">
+    <div class="title-page-badge">
+      <div class="title-page-photo">
+        {% if profile_photo_data %}
+        <img src="{{ profile_photo_data }}" alt="{{ brand.author_name }}">
+        {% else %}
+        <span class="initials">{{ brand.author_name.split()[0][0] }}{{ brand.author_name.split()[-1][0] }}</span>
+        {% endif %}
+      </div>
+      <div class="title-page-author-info">
+        <span class="title-page-author-name">{{ brand.author_name }}</span>
+        {% if brand.handle %}
+        <span class="title-page-author-handle">{{ brand.handle }}</span>
+        {% endif %}
+      </div>
+    </div>
+    <div class="title-page-main-title {% if slide.content|length < 40 %}title-short{% elif slide.content|length < 65 %}title-medium{% else %}title-long{% endif %}">{{ slide.content }}</div>
+    <div class="title-page-accent-line"></div>
+    {% if slide.subtitle %}
+    <div class="title-page-subtitle">{{ slide.subtitle }}</div>
+    {% endif %}
+  </div>
+  <div class="corner-accent"></div>
+</div>
+
+{% elif slide.type == 'content' %}
+{# ====== CONTENT SLIDE ====== #}
+<div class="slide" id="slide-{{ slide.slide_number }}">
+  {% if header.show_on_all_slides %}
+  <div class="header">
+    {% if header.author_position == 'left' %}
+    <span class="header-left">{{ brand.author_name }}</span>
+    <span class="header-right">{{ brand.community_name }}</span>
+    {% else %}
+    <span class="header-left">{{ brand.community_name }}</span>
+    <span class="header-right">{{ brand.author_name }}</span>
+    {% endif %}
+  </div>
+  {% endif %}
+  {# Timeline indicator -- content slides only #}
+  {% set content_slides = [] %}
+  {% for s in slides if s.type == 'content' %}
+    {% if content_slides.append(s) %}{% endif %}
+  {% endfor %}
+  {% set current_content_index = [] %}
+  {% for s in slides[:slide.slide_number] if s.type == 'content' %}
+    {% if current_content_index.append(1) %}{% endif %}
+  {% endfor %}
+  <div class="timeline">
+    {% for cs in content_slides %}
+    {% set step_num = loop.index %}
+    {% if step_num < current_content_index|length %}
+    <div class="tl-step filled">
+      <div class="tl-dot filled">{{ step_num }}</div>
+      <span class="tl-label filled">{{ cs.title if cs.title else 'Step ' ~ step_num }}</span>
+    </div>
+    {% elif step_num == current_content_index|length %}
+    <div class="tl-step active">
+      <div class="tl-dot active">{{ step_num }}</div>
+      <span class="tl-label active">{{ cs.title if cs.title else 'Step ' ~ step_num }}</span>
+    </div>
+    {% else %}
+    <div class="tl-step">
+      <div class="tl-dot">{{ step_num }}</div>
+      <span class="tl-label">{{ cs.title if cs.title else 'Step ' ~ step_num }}</span>
+    </div>
+    {% endif %}
+    {% endfor %}
+  </div>
+  {% if slide.title %}
+  <div class="slide-title">{{ slide.title }}</div>
+  <div class="slide-subtitle-line"></div>
+  {% endif %}
+  <div class="content">
+    <ul>
+    {% for line in slide.content.split('\n') %}
+      {% set stripped = line.strip() %}
+      {% if stripped %}
+      <li>{{ stripped.lstrip('- ').lstrip('* ') }}</li>
+      {% endif %}
+    {% endfor %}
+    </ul>
+  </div>
+  <div class="corner-accent"></div>
+  <div class="slide-footer">{{ current_content_index|length }} / {{ content_slides|length }}</div>
+</div>
+
+{% elif slide.type == 'mermaid' %}
+{# ====== MERMAID SLIDE ====== #}
+<div class="slide" id="slide-{{ slide.slide_number }}">
+  {% if header.show_on_all_slides %}
+  <div class="header">
+    {% if header.author_position == 'left' %}
+    <span class="header-left">{{ brand.author_name }}</span>
+    <span class="header-right">{{ brand.community_name }}</span>
+    {% else %}
+    <span class="header-left">{{ brand.community_name }}</span>
+    <span class="header-right">{{ brand.author_name }}</span>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% if slide.title %}
+  <div class="slide-title">{{ slide.title }}</div>
+  <div class="slide-subtitle-line"></div>
+  {% endif %}
+  <div class="mermaid-container">
+    {% if slide.mermaid_image_path %}
+      <img src="{{ slide.mermaid_image_path }}" alt="Diagram">
+    {% else %}
+      <div class="mermaid-code">{{ slide.content }}</div>
+    {% endif %}
+  </div>
+  <div class="corner-accent"></div>
+</div>
+
+{% elif slide.type == 'cta' %}
+{# ====== CTA SLIDE ====== #}
+<div class="slide" id="slide-{{ slide.slide_number }}">
+  {% if header.show_on_all_slides %}
+  <div class="header">
+    {% if header.author_position == 'left' %}
+    <span class="header-left">{{ brand.author_name }}</span>
+    <span class="header-right">{{ brand.community_name }}</span>
+    {% else %}
+    <span class="header-left">{{ brand.community_name }}</span>
+    <span class="header-right">{{ brand.author_name }}</span>
+    {% endif %}
+  </div>
+  {% endif %}
+  <div class="cta-body">
+    <div class="cta-heading">{{ slide.content }}</div>
+    {% if slide.subtitle %}
+    <div class="cta-subtext">{{ slide.subtitle }}</div>
+    {% endif %}
+    <div class="cta-button">Follow for More</div>
+    {% if brand.handle %}
+    <div class="cta-handle">{{ brand.handle }}</div>
+    {% endif %}
+  </div>
+  <div class="corner-accent"></div>
+</div>
+
+{% endif %}
+
+{% if not loop.last %}
+<div style="page-break-after: always;"></div>
+{% endif %}
+{% endfor %}
+
+</body>
+</html>
