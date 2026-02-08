@@ -4,8 +4,8 @@
 T022
 
 ## Meta
-- **Status:** COMPLETE
-- **Last Updated:** 2026-02-07
+- **Status:** ACTIVE
+- **Last Updated:** 2026-02-08
 
 ## Overview
 
@@ -397,6 +397,70 @@ New function `run_with_judge_loop(decimal, analysis_type, judge_type, max_rounds
 - [ ] `kb publish --dry-run` shows what would be generated without doing it
 - [ ] Failed renders flagged in UI, not blocking
 - [ ] `linkedin_v2` appears in action queue; old `linkedin_post` items don't
+
+### Phase 5: Iterative Judge Loop with Versioned History
+**Status**: PLANNING
+
+**Objectives:**
+
+The current judge loop (`--judge`) overwrites the initial draft — no audit trail. Blake wants versioned outputs where each round is preserved, visible, and comparable.
+
+**Core model:**
+- `linkedin_v2_0` — initial draft (round 0, pre-judgment)
+- `linkedin_judge_0` — judge evaluation of round 0
+- `linkedin_v2_1` — improved draft (round 1, post-judgment)
+- `linkedin_judge_1` — judge evaluation of round 1
+- `linkedin_v2_N` — round N output
+- `linkedin_v2` — alias/pointer to the latest version (for downstream consumers like visual_format, carousel_slides, posting queue)
+
+**Key behaviors:**
+1. **Always judge automatically.** Running `linkedin_v2` generates the draft AND runs the judge. The raw judge score is visible alongside the draft in kb serve.
+2. **Explicit opt-in to improve.** Blake reviews draft + scores in kb serve, then decides whether to trigger a round of improvement. Could be a button: "Improve" or keyboard shortcut.
+3. **Full history in judgment context.** Each improvement round receives the FULL history: all prior drafts, all prior judge evaluations, and all prior feedback. This prevents the LLM from ping-ponging on conflicting judge feedback — it can see "Round 1 judge said X, that made me do Y, Round 2 judge said Z which contradicts X" and self-correct.
+4. **Score deltas visible.** kb serve shows per-criterion score changes between rounds: hook_strength 3→4 (+1), structure 4→4 (=), etc. Overall score delta shown prominently.
+5. **Indefinite rounds.** No hard cap on rounds. Blake can keep improving until satisfied. In practice, 1-2 rounds expected.
+
+**Future vision (out of scope for Phase 5):**
+- Analytics engine: "Round 1 improves average score by X, Round 2 by Y" — tracked over time across all posts
+- Post-publish feedback loop: actual LinkedIn engagement metrics (views, reactions, comments) fed back to refine judge criteria and prompt weights
+- A/B testing: publish pre-judge vs post-judge posts, measure engagement delta
+
+**Storage model (in transcript JSON):**
+```json
+{
+  "analysis": {
+    "linkedin_v2": { ... },          // latest version (alias)
+    "linkedin_v2_0": { ... },        // round 0 draft
+    "linkedin_judge_0": { ... },     // round 0 evaluation
+    "linkedin_v2_1": { ... },        // round 1 improved
+    "linkedin_judge_1": { ... },     // round 1 evaluation
+    "linkedin_v2_rounds": 2,         // total rounds completed
+    "linkedin_v2_history": {         // delta tracking
+      "scores": [
+        {"round": 0, "overall": 3.4, "scores": {...}},
+        {"round": 1, "overall": 4.1, "scores": {...}}
+      ]
+    }
+  }
+}
+```
+
+**Files:**
+- `kb/analyze.py` — MODIFY: refactor `run_with_judge_loop()` to save versioned outputs, inject full history, always auto-judge
+- `kb/serve.py` — MODIFY: show judge scores in posting queue, "Improve" button triggers next round
+- `kb/templates/posting_queue.html` — MODIFY: score display, delta badges, round selector
+- `kb/config/analysis_types/linkedin_v2.json` — MODIFY: update `{{#if judge_feedback}}` block to accept full history context
+
+**Acceptance Criteria:**
+- [ ] `kb analyze -t linkedin_v2` generates draft AND auto-runs judge (no separate `--judge` flag needed)
+- [ ] Initial draft saved as `linkedin_v2_0`, judge as `linkedin_judge_0`
+- [ ] `linkedin_v2` always points to latest version
+- [ ] kb serve posting queue shows judge scores alongside the post
+- [ ] "Improve" action in kb serve triggers next round (saved as `linkedin_v2_1`, etc.)
+- [ ] Each improvement round receives full history (all prior drafts + all prior feedback)
+- [ ] Score deltas visible per criterion (e.g. hook_strength: 3→4)
+- [ ] Can run indefinite rounds without data loss
+- [ ] Downstream consumers (visual_format, carousel_slides, posting queue) read from `linkedin_v2` (latest) transparently
 
 ---
 
