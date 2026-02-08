@@ -151,6 +151,8 @@
         .entity-status.staged { background: var(--mauve); color: var(--crust); }
         .entity-status.draft { background: var(--surface1); color: var(--overlay0); }
         .entity-status.iterating { background: var(--yellow); color: var(--crust); }
+        .entity-status.ready { background: var(--green); color: var(--crust); }
+        .entity-status.generating { background: var(--peach); color: var(--crust); }
 
         .entity-decimal {
             color: var(--mauve);
@@ -652,6 +654,119 @@
         .overall-delta.up { color: var(--green); }
         .overall-delta.down { color: var(--red); }
         .overall-delta.same { color: var(--overlay0); }
+
+        /* Staging area textarea */
+        .staging-textarea {
+            flex: 1;
+            background: var(--mantle);
+            padding: 16px;
+            border-radius: 6px;
+            font-size: 13px;
+            line-height: 1.7;
+            color: var(--text);
+            border: 1px solid var(--surface0);
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            resize: none;
+            min-height: 200px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .staging-textarea:focus {
+            border-color: var(--sapphire);
+        }
+
+        .staging-textarea.modified {
+            border-color: var(--yellow);
+        }
+
+        /* Visual status indicators */
+        .visual-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 16px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+
+        .visual-status.generating {
+            background: var(--peach);
+            color: var(--crust);
+        }
+
+        .visual-status.ready {
+            background: rgba(166, 227, 161, 0.15);
+            color: var(--green);
+            border: 1px solid rgba(166, 227, 161, 0.3);
+        }
+
+        .visual-status.failed {
+            background: rgba(243, 139, 168, 0.15);
+            color: var(--red);
+            border: 1px solid rgba(243, 139, 168, 0.3);
+        }
+
+        .visual-status.text_only {
+            background: rgba(137, 180, 250, 0.15);
+            color: var(--blue);
+            border: 1px solid rgba(137, 180, 250, 0.3);
+        }
+
+        .visual-thumbnail {
+            width: 60px;
+            height: 60px;
+            border-radius: 4px;
+            object-fit: cover;
+            border: 1px solid var(--surface0);
+        }
+
+        /* Edit info bar */
+        .edit-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 10px;
+            color: var(--overlay0);
+            margin-bottom: 4px;
+        }
+
+        .edit-badge {
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 3px;
+            background: var(--surface0);
+            color: var(--subtext0);
+        }
+
+        /* Generate visuals button */
+        .btn-generate {
+            background: var(--peach);
+            color: var(--crust);
+            font-weight: 600;
+        }
+
+        .btn-generate:hover { background: var(--yellow); }
+
+        /* Publish button */
+        .btn-publish {
+            background: var(--green);
+            color: var(--crust);
+            font-weight: 600;
+        }
+
+        .btn-publish:hover { background: var(--teal); }
+
+        /* Save button */
+        .btn-save {
+            background: var(--sapphire);
+            color: var(--crust);
+            font-weight: 600;
+        }
+
+        .btn-save:hover { background: var(--blue); }
     </style>
 </head>
 <body>
@@ -675,12 +790,14 @@
             <div class="pane-body" id="entity-list">
                 <!-- Populated by JavaScript -->
             </div>
-            <div class="shortcut-bar">
+            <div class="shortcut-bar" id="shortcut-bar">
                 <span class="shortcut"><span class="key-hint">j/k</span> entities</span>
                 <span class="shortcut"><span class="key-hint">Up/Dn</span> rounds</span>
                 <span class="shortcut"><span class="key-hint">i</span> iterate</span>
                 <span class="shortcut"><span class="key-hint">a</span> stage</span>
                 <span class="shortcut"><span class="key-hint">c</span> copy</span>
+                <span class="shortcut"><span class="key-hint">g</span> generate</span>
+                <span class="shortcut"><span class="key-hint">s</span> save</span>
             </div>
         </div>
 
@@ -836,6 +953,10 @@
                 let statusHtml = '';
                 if (item.iterating) {
                     statusHtml = '<span class="entity-status iterating"><span class="spinner" style="width:8px;height:8px;border-width:1.5px;"></span> iterating</span>';
+                } else if (item.status === 'ready') {
+                    statusHtml = '<span class="entity-status ready">ready</span>';
+                } else if (item.visual_status === 'generating') {
+                    statusHtml = '<span class="entity-status generating"><span class="spinner" style="width:8px;height:8px;border-width:1.5px;"></span> generating</span>';
                 } else if (item.status === 'staged') {
                     statusHtml = '<span class="entity-status staged">staged</span>';
                 } else if (item.status === 'draft') {
@@ -879,7 +1000,13 @@
 
             document.getElementById('preview-type-label').textContent = selectedEntity.type;
 
-            await fetchIterations(selectedEntity.id);
+            // Show staging view for staged/ready items, iteration view for others
+            if (selectedEntity.status === 'staged' || selectedEntity.status === 'ready') {
+                await fetchIterations(selectedEntity.id);
+                renderStagingView();
+            } else {
+                await fetchIterations(selectedEntity.id);
+            }
         }
 
         // Fetch iterations for selected entity
@@ -1143,8 +1270,12 @@
             const current = iterationsData.iterations[selectedRoundIndex];
             if (!current) return;
 
+            // For staged/ready items, copy from textarea if visible
+            const textarea = document.getElementById('staging-editor');
+            const textToCopy = textarea ? textarea.value : current.post;
+
             try {
-                await navigator.clipboard.writeText(current.post);
+                await navigator.clipboard.writeText(textToCopy);
                 showToast('Copied to clipboard!');
             } catch (error) {
                 // Fallback to server-side
@@ -1155,6 +1286,295 @@
                     console.error('Copy failed:', err);
                     showToast('Copy failed');
                 }
+            }
+        }
+
+        // Track if text has been modified in staging
+        let textModified = false;
+        let originalText = '';
+
+        // Render the staging view (for staged/ready items)
+        function renderStagingView() {
+            const pane = document.getElementById('preview-pane');
+
+            if (!selectedEntity || !iterationsData) return;
+
+            const iterations = iterationsData.iterations;
+            const latestRound = iterations.length > 0 ? iterations[iterations.length - 1] : null;
+            const postText = selectedEntity.content || (latestRound ? latestRound.post : '');
+            originalText = postText;
+            textModified = false;
+
+            const status = selectedEntity.status;
+            const visualStatus = selectedEntity.visual_status || '';
+            const editCount = selectedEntity.edit_count || 0;
+            const stagedRound = selectedEntity.staged_round || 0;
+
+            // Visual status indicator
+            let visualStatusHtml = '';
+            if (visualStatus === 'generating') {
+                visualStatusHtml = `
+                    <div class="visual-status generating">
+                        <span class="spinner"></span>
+                        Generating visuals...
+                    </div>
+                `;
+            } else if (visualStatus === 'ready') {
+                let thumbHtml = '';
+                if (selectedEntity.thumbnail_url) {
+                    thumbHtml = `<img class="visual-thumbnail" src="${escapeHtml(selectedEntity.thumbnail_url)}" alt="Preview">`;
+                }
+                visualStatusHtml = `
+                    <div class="visual-status ready">
+                        ${thumbHtml}
+                        <span>Visuals ready</span>
+                    </div>
+                `;
+            } else if (visualStatus === 'failed') {
+                visualStatusHtml = `
+                    <div class="visual-status failed">
+                        Visual generation failed
+                    </div>
+                `;
+            } else if (visualStatus === 'text_only') {
+                visualStatusHtml = `
+                    <div class="visual-status text_only">
+                        Text-only post (no visuals needed)
+                    </div>
+                `;
+            }
+
+            // Edit info
+            let editInfoHtml = '';
+            if (editCount > 0) {
+                editInfoHtml = `
+                    <div class="edit-info">
+                        <span class="edit-badge">v${stagedRound}.${editCount}</span>
+                        <span>${editCount} edit${editCount > 1 ? 's' : ''}</span>
+                    </div>
+                `;
+            } else {
+                editInfoHtml = `
+                    <div class="edit-info">
+                        <span class="edit-badge">v${stagedRound}.0 (original)</span>
+                    </div>
+                `;
+            }
+
+            // Determine which buttons are available
+            const isReady = status === 'ready' || visualStatus === 'ready' || visualStatus === 'text_only';
+            const isGenerating = visualStatus === 'generating';
+            const canGenerate = status === 'staged' && !isGenerating;
+            const canPublish = isReady;
+
+            pane.innerHTML = `
+                <div class="iteration-view">
+                    <div class="iteration-header">
+                        <div class="iteration-title">${escapeHtml(selectedEntity.source_title)}</div>
+                        <div class="iteration-subtitle">
+                            <span>${escapeHtml(selectedEntity.source_decimal)}</span>
+                            <span class="platform-badge ${PLATFORM_CLASS[selectedEntity.destination] || ''}">${escapeHtml(selectedEntity.destination)}</span>
+                            <span>~${selectedEntity.word_count} words</span>
+                            <span class="entity-status ${status}">${status}</span>
+                        </div>
+                    </div>
+
+                    ${visualStatusHtml}
+
+                    <div class="post-section">
+                        <div class="post-section-title">
+                            Edit Post
+                            ${editInfoHtml}
+                        </div>
+                        <textarea id="staging-editor" class="staging-textarea">${escapeHtml(postText)}</textarea>
+                    </div>
+
+                    <div class="actions-bar">
+                        <button class="btn btn-save" id="btn-save" onclick="saveEdit()" disabled>
+                            <span>Save</span>
+                            <span class="key">s</span>
+                        </button>
+                        <button class="btn btn-generate" onclick="generateVisuals()" ${canGenerate ? '' : 'disabled'}>
+                            <span>${isGenerating ? 'Generating...' : 'Generate Visuals'}</span>
+                            <span class="key">g</span>
+                        </button>
+                        <button class="btn btn-publish" onclick="publishItem()" ${canPublish ? '' : 'disabled'}>
+                            <span>Publish</span>
+                            <span class="key">p</span>
+                        </button>
+                        <button class="btn btn-secondary" onclick="copyContent()">
+                            <span>Copy</span>
+                            <span class="key">c</span>
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            // Attach textarea change tracking
+            const textarea = document.getElementById('staging-editor');
+            const saveBtn = document.getElementById('btn-save');
+            textarea.addEventListener('input', () => {
+                textModified = textarea.value !== originalText;
+                textarea.classList.toggle('modified', textModified);
+                saveBtn.disabled = !textModified;
+            });
+
+            // If generating, start polling for completion
+            if (isGenerating) {
+                pollVisualGeneration();
+            }
+        }
+
+        // Save text edit
+        async function saveEdit() {
+            if (!selectedEntity || !textModified) return;
+
+            const textarea = document.getElementById('staging-editor');
+            if (!textarea) return;
+
+            try {
+                const response = await fetch(`/api/action/${selectedEntity.id}/save-edit`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: textarea.value }),
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    showToast(`Saved as edit #${data.edit_number}`);
+                    textModified = false;
+                    originalText = textarea.value;
+                    textarea.classList.remove('modified');
+                    document.getElementById('btn-save').disabled = true;
+
+                    // Refresh queue to update edit count
+                    await fetchQueue();
+                    // Re-render staging view with updated edit info
+                    if (selectedEntity.status === 'staged' || selectedEntity.status === 'ready') {
+                        // Re-find entity in updated queue
+                        const updated = queueData.items.find(i => i.id === selectedEntity.id);
+                        if (updated) {
+                            selectedEntity = updated;
+                            renderStagingView();
+                            // Restore text in case re-render reset it
+                            const newTextarea = document.getElementById('staging-editor');
+                            if (newTextarea) newTextarea.value = originalText;
+                        }
+                    }
+                } else {
+                    showToast(data.error || 'Save failed');
+                }
+            } catch (error) {
+                console.error('Save failed:', error);
+                showToast('Save failed');
+            }
+        }
+
+        // Generate visuals
+        async function generateVisuals() {
+            if (!selectedEntity || selectedEntity.status !== 'staged') return;
+            if (selectedEntity.visual_status === 'generating') return;
+
+            try {
+                const response = await fetch(`/api/action/${selectedEntity.id}/generate-visuals`, {
+                    method: 'POST',
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    showToast('Visual generation started...');
+                    selectedEntity.visual_status = 'generating';
+                    renderStagingView();
+                    renderEntityList();
+                    pollVisualGeneration();
+                } else {
+                    showToast(data.error || 'Generate failed');
+                }
+            } catch (error) {
+                console.error('Generate visuals failed:', error);
+                showToast('Generate visuals failed');
+            }
+        }
+
+        // Poll for visual generation completion
+        function pollVisualGeneration() {
+            if (!selectedEntity) return;
+
+            const actionId = selectedEntity.id;
+            const check = async () => {
+                try {
+                    await fetchQueue();
+
+                    // Find the entity in the updated queue
+                    const updated = queueData.items.find(i => i.id === actionId);
+                    if (!updated) return;
+
+                    if (updated.visual_status !== 'generating') {
+                        // Generation complete
+                        selectedEntity = updated;
+                        renderStagingView();
+                        renderEntityList();
+
+                        if (updated.visual_status === 'ready' || updated.visual_status === 'text_only') {
+                            showToast('Visuals ready!');
+                        } else if (updated.visual_status === 'failed') {
+                            showToast('Visual generation failed');
+                        }
+                        return;
+                    }
+
+                    // Still generating, poll again
+                    setTimeout(check, 2000);
+                } catch (error) {
+                    console.error('Visual poll failed:', error);
+                    setTimeout(check, 3000);
+                }
+            };
+
+            setTimeout(check, 2000);
+        }
+
+        // Publish / mark as posted
+        async function publishItem() {
+            if (!selectedEntity) return;
+
+            const status = selectedEntity.status;
+            const vs = selectedEntity.visual_status || '';
+            const canPublish = status === 'ready' || vs === 'ready' || vs === 'text_only';
+            if (!canPublish) {
+                showToast('Item must be ready before publishing');
+                return;
+            }
+
+            // Copy to clipboard first
+            const textarea = document.getElementById('staging-editor');
+            const textToCopy = textarea ? textarea.value : selectedEntity.content;
+            try {
+                await navigator.clipboard.writeText(textToCopy);
+            } catch (e) {
+                // fallback
+                try { await fetch(`/api/action/${selectedEntity.id}/copy`, { method: 'POST' }); } catch (err) {}
+            }
+
+            try {
+                const response = await fetch(`/api/action/${selectedEntity.id}/posted`, {
+                    method: 'POST',
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    showToast('Published! Content copied to clipboard.');
+                    await fetchQueue();
+                    // Select next entity if available
+                    if (queueData.items.length > 0) {
+                        selectEntity(Math.min(selectedEntityIndex, queueData.items.length - 1));
+                    }
+                } else {
+                    showToast(data.error || 'Publish failed');
+                }
+            } catch (error) {
+                console.error('Publish failed:', error);
+                showToast('Publish failed');
             }
         }
 
@@ -1174,9 +1594,32 @@
             }, 2000);
         }
 
+        // Check if staging view is active (entity is staged/ready)
+        function isStagingMode() {
+            return selectedEntity && (selectedEntity.status === 'staged' || selectedEntity.status === 'ready');
+        }
+
         // Keyboard navigation
         document.addEventListener('keydown', function(e) {
-            // Mode switching (always active)
+            // Skip shortcuts when typing in textarea (except Escape and Ctrl+S)
+            const isInTextarea = document.activeElement && document.activeElement.tagName === 'TEXTAREA';
+            if (isInTextarea) {
+                // Ctrl+S / Cmd+S to save from textarea
+                if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+                    e.preventDefault();
+                    saveEdit();
+                    return;
+                }
+                // Escape to blur textarea
+                if (e.key === 'Escape') {
+                    document.activeElement.blur();
+                    return;
+                }
+                // All other keys go to textarea
+                return;
+            }
+
+            // Mode switching (always active, except 'p' which is context-dependent)
             if (e.key === 'q') {
                 window.location.href = '/';
                 return;
@@ -1190,6 +1633,11 @@
                 return;
             }
             if (e.key === 'p') {
+                // In staging mode, 'p' means publish (not navigate to prompts)
+                if (isStagingMode()) {
+                    publishItem();
+                    return;
+                }
                 window.location.href = '/prompts';
                 return;
             }
@@ -1225,6 +1673,16 @@
             } else if (e.key === 'c') {
                 // Copy
                 copyContent();
+            } else if (e.key === 'g') {
+                // Generate visuals (staging mode only)
+                if (isStagingMode()) {
+                    generateVisuals();
+                }
+            } else if (e.key === 's') {
+                // Save edit (staging mode only)
+                if (isStagingMode()) {
+                    saveEdit();
+                }
             }
         });
 

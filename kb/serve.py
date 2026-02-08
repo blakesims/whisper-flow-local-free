@@ -863,6 +863,9 @@ def stage_action(action_id: str):
     Sets status to 'staged'. Does NOT trigger visual pipeline.
     Used by 'a' shortcut in iteration view for linkedin_v2 items.
     Requires item to be in 'pending' or 'draft' status.
+
+    Also creates the initial edit version (linkedin_v2_N_0) in the transcript JSON,
+    where N is the current round number of the staged iteration.
     """
     if not validate_action_id(action_id):
         return jsonify({"error": "Invalid action ID format"}), 400
@@ -870,9 +873,11 @@ def stage_action(action_id: str):
     # Get item content for clipboard copy
     items = scan_actionable_items()
     item_content = None
+    transcript_path = None
     for item in items:
         if item["id"] == action_id:
             item_content = item["content"]
+            transcript_path = item.get("transcript_path")
             break
 
     if item_content is None:
@@ -896,6 +901,40 @@ def stage_action(action_id: str):
         state["actions"][action_id]["status"] = "staged"
 
     state["actions"][action_id]["staged_at"] = datetime.now().isoformat()
+
+    # Create initial edit version (_N_0) for auto-judge types
+    parts = action_id.split(ACTION_ID_SEP)
+    analysis_type = parts[1] if len(parts) == 2 else ""
+    edit_round = 0
+    edit_number = 0
+
+    if analysis_type in AUTO_JUDGE_TYPES and transcript_path:
+        try:
+            with open(transcript_path) as f:
+                transcript_data = json.load(f)
+
+            alias = transcript_data.get("analysis", {}).get(analysis_type, {})
+            current_round = alias.get("_round", 0)
+            edit_round = current_round
+
+            # Create _N_0 edit version (the raw LLM output snapshot)
+            edit_key = f"{analysis_type}_{current_round}_0"
+            if edit_key not in transcript_data.get("analysis", {}):
+                transcript_data["analysis"][edit_key] = {
+                    "post": alias.get("post", ""),
+                    "_edited_at": datetime.now().isoformat(),
+                    "_source": f"{analysis_type}_{current_round}",
+                }
+                # Update alias _edit metadata
+                alias["_edit"] = 0
+                with open(transcript_path, 'w') as f:
+                    json.dump(transcript_data, f, indent=2, ensure_ascii=False)
+
+        except (json.JSONDecodeError, IOError, KeyError) as e:
+            logger.warning("[KB Serve] Failed to create edit version on stage: %s", e)
+
+    state["actions"][action_id]["staged_round"] = edit_round
+    state["actions"][action_id]["edit_count"] = edit_number
     save_action_state(state)
 
     # Auto-copy to clipboard
@@ -905,7 +944,198 @@ def stage_action(action_id: str):
     except Exception:
         copied = False
 
-    return jsonify({"success": True, "copied": copied})
+    return jsonify({"success": True, "copied": copied, "staged_round": edit_round})
+
+
+@app.route('/api/action/<action_id>/save-edit', methods=['POST'])
+def save_edit(action_id: str):
+    """Save a text edit, creating a new edit version.
+
+    Creates linkedin_v2_N_M+1 where N is the staged round and M is the current
+    edit number. Updates the linkedin_v2 alias to point to the latest edit.
+
+    Request body: { "text": "edited post text" }
+    """
+    if not validate_action_id(action_id):
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    parts = action_id.split(ACTION_ID_SEP)
+    if len(parts) != 2:
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    analysis_type = parts[1]
+
+    # Must be staged to save edits
+    state = load_action_state()
+    current_status = state["actions"].get(action_id, {}).get("status", "pending")
+    if current_status not in ("staged", "ready"):
+        return jsonify({"error": f"Cannot edit item with status '{current_status}'. Item must be staged or ready."}), 400
+
+    # Get the edited text from request body
+    data = request.get_json()
+    if not data or "text" not in data:
+        return jsonify({"error": "Request body must contain 'text' field"}), 400
+
+    edited_text = data["text"]
+
+    # Find transcript file
+    transcript_path = _find_transcript_file(action_id)
+    if not transcript_path:
+        return jsonify({"error": "Transcript file not found"}), 404
+
+    try:
+        with open(str(transcript_path)) as f:
+            transcript_data = json.load(f)
+
+        alias = transcript_data.get("analysis", {}).get(analysis_type, {})
+        current_round = alias.get("_round", 0)
+        current_edit = alias.get("_edit", 0)
+
+        # Determine the staged round from action state
+        staged_round = state["actions"].get(action_id, {}).get("staged_round", current_round)
+
+        # Next edit number
+        next_edit = current_edit + 1
+        edit_key = f"{analysis_type}_{staged_round}_{next_edit}"
+        source_key = f"{analysis_type}_{staged_round}_{current_edit}"
+
+        # Save the new edit version
+        transcript_data["analysis"][edit_key] = {
+            "post": edited_text,
+            "_edited_at": datetime.now().isoformat(),
+            "_source": source_key,
+        }
+
+        # Update alias to point to latest edit
+        alias["post"] = edited_text
+        alias["_edit"] = next_edit
+        alias["_edited_at"] = datetime.now().isoformat()
+
+        with open(str(transcript_path), 'w') as f:
+            json.dump(transcript_data, f, indent=2, ensure_ascii=False)
+
+        # Update edit count in action state
+        state["actions"][action_id]["edit_count"] = next_edit
+        save_action_state(state)
+
+        return jsonify({
+            "success": True,
+            "edit_key": edit_key,
+            "edit_number": next_edit,
+        })
+
+    except (json.JSONDecodeError, IOError) as e:
+        logger.error("[KB Serve] Failed to save edit: %s", e)
+        return jsonify({"error": "Failed to save edit"}), 500
+
+
+@app.route('/api/action/<action_id>/generate-visuals', methods=['POST'])
+def generate_visuals(action_id: str):
+    """Trigger visual pipeline from staging.
+
+    Runs run_visual_pipeline() in a background thread.
+    Only allowed when item is in 'staged' status.
+    Updates visual_status to 'generating' immediately.
+    """
+    if not validate_action_id(action_id):
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    # Must be staged to generate visuals
+    state = load_action_state()
+    current_status = state["actions"].get(action_id, {}).get("status", "pending")
+    if current_status != "staged":
+        return jsonify({"error": f"Cannot generate visuals for item with status '{current_status}'. Item must be staged."}), 400
+
+    # Check not already generating
+    visual_status = state["actions"].get(action_id, {}).get("visual_status", "")
+    if visual_status == "generating":
+        return jsonify({"error": "Visual generation already in progress"}), 400
+
+    # Find transcript file
+    transcript_path = _find_transcript_file(action_id)
+    if not transcript_path:
+        return jsonify({"error": "Transcript file not found"}), 404
+
+    # Start visual pipeline in background thread
+    def _run_and_update_status():
+        run_visual_pipeline(action_id, str(transcript_path))
+        # After visuals complete, update status to "ready" if visual_status is "ready"
+        st = load_action_state()
+        if action_id in st["actions"]:
+            vs = st["actions"][action_id].get("visual_status", "")
+            if vs in ("ready", "text_only"):
+                st["actions"][action_id]["status"] = "ready"
+                save_action_state(st)
+
+    thread = threading.Thread(target=_run_and_update_status, daemon=True)
+    thread.start()
+    logger.info("[KB Serve] Visual pipeline started from staging for %s", action_id)
+
+    return jsonify({"success": True, "message": "Visual generation started"})
+
+
+@app.route('/api/action/<action_id>/edit-history')
+def get_edit_history(action_id: str):
+    """Return edit versions for a staged item.
+
+    Returns all edit sub-versions (linkedin_v2_N_0, _N_1, etc.)
+    for the staged round.
+    """
+    if not validate_action_id(action_id):
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    parts = action_id.split(ACTION_ID_SEP)
+    if len(parts) != 2:
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    analysis_type = parts[1]
+
+    # Find transcript file
+    transcript_path = _find_transcript_file(action_id)
+    if not transcript_path:
+        return jsonify({"error": "Transcript file not found"}), 404
+
+    try:
+        with open(str(transcript_path)) as f:
+            transcript_data = json.load(f)
+
+        analysis = transcript_data.get("analysis", {})
+        alias = analysis.get(analysis_type, {})
+
+        # Determine the staged round from action state
+        state = load_action_state()
+        staged_round = state["actions"].get(action_id, {}).get("staged_round", alias.get("_round", 0))
+
+        # Collect edit versions for this round
+        edits = []
+        edit_num = 0
+        while True:
+            edit_key = f"{analysis_type}_{staged_round}_{edit_num}"
+            if edit_key not in analysis:
+                break
+            edit_data = analysis[edit_key]
+            edits.append({
+                "edit_number": edit_num,
+                "key": edit_key,
+                "post": edit_data.get("post", ""),
+                "edited_at": edit_data.get("_edited_at", ""),
+                "source": edit_data.get("_source", ""),
+            })
+            edit_num += 1
+
+        current_edit = alias.get("_edit", 0)
+
+        return jsonify({
+            "action_id": action_id,
+            "staged_round": staged_round,
+            "current_edit": current_edit,
+            "edits": edits,
+            "total_edits": len(edits),
+        })
+
+    except (json.JSONDecodeError, IOError) as e:
+        logger.error("[KB Serve] Failed to load edit history: %s", e)
+        return jsonify({"error": "Failed to load edit history"}), 500
 
 
 @app.route('/api/action/<action_id>/iterate', methods=['POST'])
@@ -1084,7 +1314,7 @@ def get_posting_queue_v2():
 
     Returns items grouped as entities (not individual iterations).
     Includes iteration counts and latest scores for each entity.
-    Draft and pending items for linkedin_v2 types.
+    Draft, pending, staged, and ready items for linkedin_v2 types.
     """
     state = load_action_state()
     items = scan_actionable_items()
@@ -1095,8 +1325,8 @@ def get_posting_queue_v2():
         item_state = state["actions"].get(item["id"], {})
         status = item_state.get("status", "pending")
 
-        # Include pending, draft, and staged items
-        if status in ("pending", "draft", "staged"):
+        # Include pending, draft, staged, and ready items
+        if status in ("pending", "draft", "staged", "ready"):
             # Load iteration data for auto-judge types
             parts = item["id"].split(ACTION_ID_SEP)
             analysis_type = parts[1] if len(parts) == 2 else ""
@@ -1135,11 +1365,30 @@ def get_posting_queue_v2():
             item["iterating"] = iterating
             item["relative_time"] = format_relative_time(item["analyzed_at"])
 
+            # Staging metadata
+            item["visual_status"] = item_state.get("visual_status", "")
+            item["staged_round"] = item_state.get("staged_round", 0)
+            item["edit_count"] = item_state.get("edit_count", 0)
+
+            # Visual data for thumbnails
+            visual_data = item_state.get("visual_data", {})
+            thumbnail_paths = visual_data.get("thumbnail_paths", [])
+            if thumbnail_paths:
+                try:
+                    rel_path = str(Path(thumbnail_paths[0]).relative_to(KB_ROOT))
+                    item["thumbnail_url"] = f"/visuals/{rel_path}"
+                except (ValueError, IndexError):
+                    item["thumbnail_url"] = None
+            else:
+                item["thumbnail_url"] = None
+
             entities.append(item)
 
-    # Sort: iterating first, then by latest_score descending, then by analyzed_at
+    # Sort: iterating first, then staged/ready before draft, then by latest_score descending
+    status_priority = {"ready": 0, "staged": 1, "pending": 2, "draft": 3}
     entities.sort(key=lambda x: (
         not x.get("iterating", False),
+        status_priority.get(x.get("status", "pending"), 9),
         -(x.get("latest_score") or 0),
         x.get("analyzed_at", ""),
     ), reverse=False)
@@ -1155,16 +1404,17 @@ def mark_posted(action_id: str):
     """Mark action as posted.
 
     Sets status to 'posted' and records posted_at timestamp.
-    Requires item to be in 'approved' status first.
+    Requires item to be in 'approved' or 'ready' status first.
     """
     if not validate_action_id(action_id):
         return jsonify({"error": "Invalid action ID format"}), 400
 
     state = load_action_state()
 
-    # Validate state transition: must be approved before posting
-    if action_id not in state["actions"] or state["actions"][action_id].get("status") != "approved":
-        return jsonify({"error": "Item must be approved before marking as posted"}), 400
+    # Validate state transition: must be approved or ready before posting
+    current_status = state["actions"].get(action_id, {}).get("status", "")
+    if current_status not in ("approved", "ready"):
+        return jsonify({"error": "Item must be approved or ready before marking as posted"}), 400
 
     state["actions"][action_id]["status"] = "posted"
     state["actions"][action_id]["posted_at"] = datetime.now().isoformat()

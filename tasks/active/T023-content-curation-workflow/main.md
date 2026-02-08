@@ -4,7 +4,8 @@
 T023
 
 ## Meta
-- **Status:** CODE_REVIEW
+- **Status:** EXECUTING_PHASE_3
+- **Phase 3 Started:** 2026-02-08
 - **Last Updated:** 2026-02-08
 
 ## Overview
@@ -179,7 +180,7 @@ Note: `linkedin_v2` is always an alias pointing to the latest version (whether L
 ---
 
 ### Phase 2: kb serve Iteration View + Approve Rewire
-**Status**: Not Started
+**Status**: COMPLETE
 
 **Objectives:**
 - **Rewire approve handler:** Disconnect approve from auto-visual-pipeline. The 'a' shortcut now calls `POST /api/action/<id>/stage` (new endpoint) instead of the existing approve endpoint. This must happen in Phase 2 (not Phase 3) to avoid 'a' accidentally triggering visual generation.
@@ -231,7 +232,7 @@ Note: `linkedin_v2` is always an alias pointing to the latest version (whether L
 ---
 
 ### Phase 3: Staging Area + Text Editing
-**Status**: Not Started
+**Status**: IN_PROGRESS
 
 **Objectives:**
 - Build staging area in kb serve: approved/staged posts land here for curation
@@ -421,6 +422,67 @@ ready → published (copy/export)
 - **Summary:** Solid versioned judge loop refactoring with clean alias management and strong test suite, but auto-judge is unreachable from the decimal-path CLI invocation, the VERSIONED_KEY_PATTERN regex is overly broad, and migrate_approved_to_draft() is dead code.
 
 -> Details: `code-review-phase-1.md`
+
+### Phase 1 (Round 2)
+- **Gate:** PASS
+- **Reviewed:** 2026-02-08
+- **Issues:** 0 critical, 0 major, 3 minor (1 new, 2 carried)
+- **Summary:** All 3 Round 1 issues (C1 auto-judge routing, M1 regex pattern, M2 dead migration code) correctly fixed. 227/227 tests pass. No new critical or major issues.
+
+-> Details: `code-review-phase-1-r2.md`
+
+---
+
+## Execution Log (continued)
+
+### Phase 2: kb serve Iteration View + Approve Rewire
+- **Status:** COMPLETE
+- **Started:** 2026-02-08
+- **Completed:** 2026-02-08
+- **Commits:** `f147554`
+- **Files Modified:**
+  - `kb/serve.py` -- Rewired approve handler to gate `run_visual_pipeline()` for AUTO_JUDGE_TYPES; added 4 new endpoints: POST /stage (stages iteration without visuals), POST /iterate (background judge loop), GET /iterations (all rounds with scores), GET /posting-queue-v2 (entity-grouped queue); imported `run_with_judge_loop` from analyze.py
+  - `kb/templates/posting_queue.html` -- Major redesign: entity list in left panel with score badges/round counts/status, iteration detail in right panel with round navigator tabs, per-criterion score grid with delta badges, "Not judged" fallback, "Iterating..." spinner overlay, keyboard shortcuts (i=iterate, a=stage, c=copy, j/k=entities, up/down=rounds)
+  - `kb/tests/test_iteration_view.py` -- NEW: 25 tests covering stage endpoint (7 tests), iterate endpoint (5 tests), iterations endpoint (7 tests), posting-queue-v2 (5 tests), approve rewire (1 test)
+  - `kb/tests/test_serve_integration.py` -- Updated `test_approve_starts_background_thread` to use skool_post (non-auto-judge type); added `test_approve_does_not_trigger_visual_for_autojudge` verifying linkedin_v2 approve is gated
+- **Notes:**
+  - Pre-existing test failures in test_carousel_templates.py and test_render.py (dark-purple renamed to brand-purple in T024) are unrelated to Phase 2.
+  - 160 relevant tests pass (135 original + 25 new). Template tests excluded due to T024 rename.
+  - Migration already wired in Phase 1 (kb/migrate.py --reset-approved calls serve.migrate_approved_to_draft()).
+
+### Tasks Completed
+- [x] Task 2.1: Rewired approve handler -- `run_visual_pipeline()` gated for `AUTO_JUDGE_TYPES` in approve endpoint
+- [x] Task 2.2: Migration already wired in Phase 1 (`kb migrate --reset-approved`)
+- [x] Task 2.3: New API endpoints: POST /stage, POST /iterate, GET /iterations, GET /posting-queue-v2
+- [x] Task 2.4: Posting queue redesign -- entity list with iteration metadata, iteration detail with scores/deltas
+- [x] Task 2.5: Keyboard shortcuts -- i=iterate, a=stage (calls /stage NOT /approve), c=copy, j/k=entities, up/down=rounds
+- [x] Task 2.6: Iterating spinner -- yellow overlay with polling for background completion
+- [x] Task 2.7: Judge scores as metadata -- per-criterion grid with overall score and delta badges
+- [x] Task 2.8: "Not judged" fallback for pre-T023 content
+
+### Acceptance Criteria
+- [x] AC1: Posting queue shows linkedin_v2 as single entity (not one item per iteration) -- verified via test_returns_entities_not_iterations
+- [x] AC2: Enter drills into entity, showing post text + judge scores -- iteration detail pane loads on entity select
+- [x] AC3: Scores displayed per-criterion with overall score -- scores-grid with formatCriterion and scoreClass
+- [x] AC4: Deltas shown between rounds -- deltaText() and overallDelta() compute +/-/= badges
+- [x] AC5: Up/down arrows navigate between iterations within an entity -- ArrowUp/ArrowDown change selectedRoundIndex
+- [x] AC6: 'i' triggers improvement round, shows "Iterating..." spinner -- iterate endpoint + pollIteration() + iterating-overlay
+- [x] AC7: 'a' calls /stage (NOT /approve), does NOT trigger visual pipeline -- verified via test_stage_does_not_trigger_visual_pipeline
+- [x] AC8: Existing approved items migrated to draft state -- migrate_approved_to_draft() wired in Phase 1
+- [x] AC9: Posts without scores show "Not judged" fallback -- verified via test_pre_t023_content_no_versioned_keys
+- [x] AC10: Background iteration completes and updates UI without page refresh -- pollIteration() polls /iterations every 2s
+
+---
+
+## Code Review Log (continued)
+
+### Phase 2
+- **Gate:** PASS
+- **Reviewed:** 2026-02-08
+- **Issues:** 0 critical, 1 major, 4 minor
+- **Summary:** Solid implementation. Approve rewire correctly gates visual pipeline for AUTO_JUDGE_TYPES, four new endpoints are well-structured with proper validation, HTML template uses escapeHtml consistently, and 25 meaningful tests cover the key behaviors. 277/277 tests pass. Major issue (no server-side guard against concurrent iterations) is mitigated by client-side guard.
+
+-> Details: `code-review-phase-2.md`
 
 ---
 
