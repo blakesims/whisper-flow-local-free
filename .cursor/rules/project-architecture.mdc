@@ -33,4 +33,3 @@ The project follows a standard structure to organize code and resources:
 -   **`.gitignore`**: Specifies intentionally untracked files that Git should ignore.
 -   **`README.md`**: Project overview and setup instructions.
 -   **`requirements.txt`**: Python package dependencies. ([requirements.txt](mdc:requirements.txt))
--   **`setup.py`**: Build script for `py2app`. ([setup.py](mdc:setup.py))

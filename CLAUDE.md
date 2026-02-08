@@ -75,11 +75,6 @@ python transcribe_file.py /path/to/audio.mp3          # With 24h cache
 python transcribe_file.py --force /path/to/audio.mp3  # Bypass cache
 ```
 
-### Build macOS App
-```bash
-./scripts/build_app.sh  # Output: dist/Whisper Transcription UI.app
-```
-
 ## Architecture Overview
 
 ### Daemon Components (`app/daemon/`) - Primary

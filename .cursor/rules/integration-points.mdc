@@ -33,36 +33,20 @@ alwaysApply: false
     -   `language`: Optional language code (e.g., "en", "es"). If `None`, auto-detects.
     -   `task`: "transcribe" or "translate".
 
-## 3. Application Packaging (py2app)
-
--   **Build Script**: `setup.py` ([setup.py](mdc:setup.py))
--   **Main Application Entry Point**: `APP = ['app/main.py']` in `setup.py`.
--   **Included Packages**: Ensure all necessary Python packages are listed in `OPTIONS['packages']` within `setup.py` for proper bundling.
-    -   Key packages: `PySide6`, `faster_whisper`, `sounddevice`, `numpy`, `scipy`, `pyperclip`, `rapidfuzz`.
--   **Application Metadata (`plist` in `setup.py` OPTIONS):**
-    -   `CFBundleName`: "Whisper Transcription UI"
-    -   `CFBundleDisplayName`: "Whisper Transcription UI"
-    -   `CFBundleIdentifier`: e.g., "com.yourdomain.whispertranscribeui" (update as needed)
-    -   `NSMicrophoneUsageDescription`: Essential for microphone access permission on macOS.
-    -   `LSUIElement`: Set to `True` to make the app a "faceless" background application (no Dock icon, no main menu bar unless explicitly created).
--   **Application Icon**:
-    -   Specified by `iconfile: 'resources/app_icon.icns'` in `setup.py`.
-    -   The icon file should be placed at [resources/app_icon.icns](mdc:resources/app_icon.icns).
-
-## 4. Audio Recording (SoundDevice)
+## 3. Audio Recording (SoundDevice)
 
 -   **Library**: `sounddevice`
 -   **Core Module (Planned)**: `app.core.audio_recorder.AudioRecorder` ([app/core/audio_recorder.py](mdc:app/core/audio_recorder.py))
 -   **Functionality**: Will handle microphone input, audio data buffering, and saving to a temporary file.
 -   **Configuration**: Sample rate (e.g., 16000 Hz) and channels (e.g., 1 for mono) will be important. These should be configurable if necessary, but good defaults will be set.
 
-## 5. Clipboard Interaction (Pyperclip)
+## 4. Clipboard Interaction (Pyperclip)
 
 -   **Library**: `pyperclip`
 -   **Functionality**: Used to copy transcribed text (and potentially Fabric-processed text) to the system clipboard.
 -   **Usage**: `pyperclip.copy("text_to_copy")`.
 
-## 6. Fabric Pattern Processing (CLI)
+## 5. Fabric Pattern Processing (CLI)
 
 -   **Mechanism**: Interacts with the `fabric` CLI tool via `subprocess`.
 -   **Workflow**:
@@ -76,9 +60,9 @@ alwaysApply: false
     # output = subprocess.check_output(command, shell=True, universal_newlines=True)
     ```
 
-## 7. Raycast Integration (Planned)
+## 6. Raycast Integration (Planned)
 
 -   **Mechanism**: The application will be launchable via a Raycast keyboard shortcut.
--   **Implementation**: This typically involves configuring Raycast to run a script or open the packaged `.app` bundle. The `LSUIElement : True` setting in `setup.py` is relevant for how the app behaves when launched this way.
+-   **Implementation**: This typically involves configuring Raycast to run a script or open the packaged `.app` bundle.
 
 
