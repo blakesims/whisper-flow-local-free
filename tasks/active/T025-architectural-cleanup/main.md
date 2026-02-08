@@ -4,7 +4,7 @@
 T025
 
 ## Meta
-- **Status:** EXECUTING_PHASE_3
+- **Status:** COMPLETE
 - **Last Updated:** 2026-02-08
 - **Priority:** 3 (important but not blocking current work)
 
@@ -358,6 +358,42 @@ python3 -m pytest kb/tests/ -v
 - [x] AC7: APPLE_SILICON_OPTIMIZATION.md is NOT deleted -- verified exists
 - [x] AC8: All live app.core imports work -- verified via venv
 
+### Phase 3 (Transcription Wrapper): Extract Shared Transcription Wrapper
+- **Status:** COMPLETE
+- **Started:** 2026-02-08
+- **Completed:** 2026-02-08
+- **Commits:** `e94ee6a`
+- **Files Created:**
+  - `kb/transcription.py` -- NEW wrapper module (~15 lines), re-exports `get_transcription_service` and `ConfigManager`
+- **Files Modified:**
+  - `kb/core.py` -- removed inline sys.path hack (lines 417-418), changed imports to use `kb.transcription`
+  - `kb/sources/zoom.py` -- changed imports to use `kb.transcription` (kept module-level sys.path at line 46)
+  - `kb/sources/cap_clean.py` -- removed inline sys.path hack (lines 111-112), changed imports to use `kb.transcription`
+  - `kb/videos.py` -- changed imports to use `kb.transcription` (kept try/except ImportError pattern, kept module-level sys.path at line 34)
+- **Notes:** All 4 call sites updated. Only `kb/transcription.py` itself imports from `app.*`. Test suite: 395 pass, 2 pre-existing failures (carousel templates).
+- **Blockers:** None
+
+### Tasks Completed (Phase 3 Transcription Wrapper)
+- [x] Task 1.1: Created `kb/transcription.py` wrapper module
+- [x] Task 1.2: Verified wrapper imports successfully via venv
+- [x] Task 2.1: Updated `kb/core.py` -- removed sys.path hack, imports from wrapper
+- [x] Task 2.2: Updated `kb/sources/zoom.py` -- imports from wrapper
+- [x] Task 2.3: Updated `kb/sources/cap_clean.py` -- removed sys.path hack, imports from wrapper
+- [x] Task 2.4: Updated `kb/videos.py` -- imports from wrapper (kept try/except)
+- [x] Task 3.1: Full test suite passed (395 pass, 2 pre-existing failures)
+- [x] Task 3.2: Verified no `from app.*` imports in kb/ (only in wrapper itself)
+- [x] Task 3.3: Verified wrapper import works via venv
+
+### Acceptance Criteria (Phase 3 Transcription Wrapper)
+- [x] AC1: Wrapper module exists and exports both symbols -- verified via `from kb.transcription import get_transcription_service, ConfigManager`
+- [x] AC2: Wrapper has zero imports from any other `kb.*` module -- verified by inspection
+- [x] AC3: `grep -r "from app\." kb/ --include="*.py"` returns only `kb/transcription.py` -- verified
+- [x] AC4: All 4 call sites import from `kb.transcription` -- verified
+- [x] AC5: `kb/core.py:transcribe_audio()` no longer has inline `sys.path.insert` -- verified
+- [x] AC6: `kb/sources/cap_clean.py` transcription function no longer has inline `sys.path.insert` -- verified
+- [x] AC7: `kb/videos.py:transcribe_sample()` still has try/except ImportError wrapping -- verified
+- [x] AC8: Test suite passes (395 pass, 2 pre-existing failures) -- verified
+
 ---
 
 ## Code Review Log
@@ -377,6 +413,14 @@ python3 -m pytest kb/tests/ -v
 - **Summary:** Clean deletion of 11 dead files (2,462 lines). All 8 acceptance criteria verified independently. Test suite matches baseline (395 pass, 2 pre-existing failures). Live imports confirmed working via venv. Doc updates complete -- no stale references remain.
 
 -> Details: `code-review-phase-2.md`
+
+### Phase 3 (Transcription Wrapper)
+- **Gate:** PASS
+- **Reviewed:** 2026-02-08
+- **Issues:** 0 critical, 0 major, 3 minor (test count reporting, stale comment from Phase 1, sys.path side effect -- all non-blocking)
+- **Summary:** Clean wrapper extraction. All 8 ACs verified independently. Zero new test failures (baseline confirmed via git stash comparison). Wrapper is minimal, correct, and has no circular import risk.
+
+-> Details: `code-review-phase-3.md`
 
 ---
 
@@ -587,6 +631,184 @@ Each file below was verified dead by searching the ENTIRE codebase (not just `kb
 | `test_cpu_optimization.py` | 108 | Dead benchmark | Nothing |
 | `create_icon.py` | 145 | Dead generator | Nothing |
 | **TOTAL** | **2,426** | | |
+
+---
+
+## Phase 3 Plan: Extract Shared Transcription Wrapper
+
+### Objective
+
+Create `kb/transcription.py` to encapsulate all `app.core` and `app.utils` imports used by `kb/`, then update the 4 call sites to import from the wrapper instead. This decouples `kb/` from `app/` internal module structure -- future changes to `app.core` only need updating in one place.
+
+### Scope
+- **In:** Creating `kb/transcription.py` wrapper module, updating 4 call sites in `kb/` to use it, removing inline `sys.path.insert` hacks from transcription functions
+- **Out:** Not changing transcription behavior, not refactoring the usage pattern (ConfigManager + get_transcription_service), not touching `app/core/` or `app/utils/` source code, not addressing the `sys.path.insert` hacks at module level in other files (that is a separate concern)
+
+### Current State (Verified Against Live Code)
+
+All 4 call sites import the same 2 things:
+1. `get_transcription_service` from `app.core.transcription_service_cpp`
+2. `ConfigManager` from `app.utils.config_manager`
+
+All 4 use the identical pattern:
+```python
+config = ConfigManager()
+service = get_transcription_service(config)
+service.set_target_model_config(model_name, "cpu", "int8")
+service.load_model()
+```
+
+| File | Line(s) | Import Style | sys.path hack? |
+|------|---------|-------------|----------------|
+| `kb/core.py` | 417-420 | Lazy (inside `transcribe_audio()`) | Yes, lines 417-418 inside function |
+| `kb/sources/zoom.py` | 261-262 | Lazy (inside `transcribe_meeting()`) | No (module-level at line 46) |
+| `kb/sources/cap_clean.py` | 112-114 | Lazy (inside function) | Yes, line 112 inside function |
+| `kb/videos.py` | 189-191 | Lazy (inside `transcribe_sample()`, with try/except ImportError) | No (module-level at line 34) |
+
+### Naming Consideration
+
+The task doc originally proposed `kb/transcription.py`. However, `kb/transcribe.py` already exists as the CLI dispatcher for the `kb transcribe` subcommand. The names `transcribe.py` vs `transcription.py` are confusingly similar. This is surfaced as an open question below.
+
+### Phases
+
+#### Sub-phase 1: Create the wrapper module
+
+- **Objective:** Create the new wrapper module that re-exports `get_transcription_service` and `ConfigManager` from `app.*`, centralizing the cross-system imports in one place.
+- **Tasks:**
+  - [ ] Task 1.1: Create the wrapper module (name TBD per open question -- default: `kb/transcription.py`) with the following content:
+    ```python
+    """
+    Transcription service wrapper.
+
+    Centralizes all app.core and app.utils imports used by kb/ modules.
+    If the app/ transcription backend changes, only this file needs updating.
+    """
+    import os
+    import sys
+
+    # Ensure project root is on path for app.* imports
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+    from app.core.transcription_service_cpp import get_transcription_service
+    from app.utils.config_manager import ConfigManager
+
+    __all__ = ["get_transcription_service", "ConfigManager"]
+    ```
+  - [ ] Task 1.2: Verify the wrapper imports successfully: `python3 -c "from kb.transcription import get_transcription_service, ConfigManager; print('OK')"`
+- **Acceptance Criteria:**
+  - [ ] Wrapper module exists and exports both `get_transcription_service` and `ConfigManager`
+  - [ ] Wrapper has zero imports from any other `kb.*` module
+  - [ ] The `sys.path` fix is done once at module level, not repeated in each call site
+- **Files:**
+  - `kb/transcription.py` -- NEW file, ~15 lines
+- **Dependencies:** Phase 2 (dead code deletion) COMPLETE
+
+#### Sub-phase 2: Update all 4 call sites
+
+- **Objective:** Replace all `from app.core...` and `from app.utils...` imports in `kb/` with imports from the new wrapper module.
+- **Tasks:**
+  - [ ] Task 2.1: Update `kb/core.py` lines 416-420 (inside `transcribe_audio()`):
+    - REMOVE: `import sys` (line 417)
+    - REMOVE: `sys.path.insert(0, ...)` (line 418)
+    - CHANGE: `from app.core.transcription_service_cpp import get_transcription_service` -> `from kb.transcription import get_transcription_service`
+    - CHANGE: `from app.utils.config_manager import ConfigManager` -> `from kb.transcription import ConfigManager`
+    - Can combine to single line: `from kb.transcription import get_transcription_service, ConfigManager`
+    - Keep the comment `# Import here to avoid circular imports` (still true -- lazy import is intentional)
+  - [ ] Task 2.2: Update `kb/sources/zoom.py` lines 261-262 (inside `transcribe_meeting()`):
+    - CHANGE: `from app.core.transcription_service_cpp import get_transcription_service` -> `from kb.transcription import get_transcription_service`
+    - CHANGE: `from app.utils.config_manager import ConfigManager` -> `from kb.transcription import ConfigManager`
+    - Can combine to single line: `from kb.transcription import get_transcription_service, ConfigManager`
+    - NOTE: The module-level `sys.path.insert` at line 46 stays -- it is used by other imports (e.g. `from kb.core import ...`)
+  - [ ] Task 2.3: Update `kb/sources/cap_clean.py` lines 111-114 (inside function):
+    - REMOVE: `import sys` (line 111)
+    - REMOVE: `sys.path.insert(0, ...)` (line 112)
+    - CHANGE: `from app.core.transcription_service_cpp import get_transcription_service` -> `from kb.transcription import get_transcription_service`
+    - CHANGE: `from app.utils.config_manager import ConfigManager` -> `from kb.transcription import ConfigManager`
+    - Can combine to single line: `from kb.transcription import get_transcription_service, ConfigManager`
+  - [ ] Task 2.4: Update `kb/videos.py` lines 189-191 (inside `transcribe_sample()`):
+    - CHANGE: `from app.core.transcription_service_cpp import get_transcription_service` -> `from kb.transcription import get_transcription_service`
+    - CHANGE: `from app.utils.config_manager import ConfigManager` -> `from kb.transcription import ConfigManager`
+    - Can combine to single line: `from kb.transcription import get_transcription_service, ConfigManager`
+    - KEEP the `try/except ImportError` wrapper around the import -- this function gracefully handles missing transcription deps by returning `None`
+- **Acceptance Criteria:**
+  - [ ] `grep -r "from app\." kb/ --include="*.py"` returns zero results
+  - [ ] All 4 call sites import from `kb.transcription` instead
+  - [ ] `kb/core.py:transcribe_audio()` no longer has inline `sys.path.insert`
+  - [ ] `kb/sources/cap_clean.py` transcription function no longer has inline `sys.path.insert`
+  - [ ] `kb/videos.py:transcribe_sample()` still has try/except ImportError wrapping
+- **Files:**
+  - `kb/core.py` -- lines 416-420
+  - `kb/sources/zoom.py` -- lines 261-262
+  - `kb/sources/cap_clean.py` -- lines 111-114
+  - `kb/videos.py` -- lines 189-191
+- **Dependencies:** Sub-phase 1 complete
+
+#### Sub-phase 3: Verify
+
+- **Objective:** Confirm all tests pass and no `app.*` imports remain in `kb/`.
+- **Tasks:**
+  - [ ] Task 3.1: Run full test suite: `python3 -m pytest kb/tests/ -v`
+  - [ ] Task 3.2: Verify no `app.*` imports remain in `kb/`: `grep -r "from app\.\|import app\." kb/ --include="*.py"` returns nothing
+  - [ ] Task 3.3: Verify wrapper import works: `python3 -c "from kb.transcription import get_transcription_service, ConfigManager; print('OK')"`
+  - [ ] Task 3.4: Verify `kb/core.py` transcribe_audio function still works (imports resolve correctly)
+- **Acceptance Criteria:**
+  - [ ] All existing tests pass (395 pass, 2 pre-existing failures)
+  - [ ] Zero `from app.*` imports anywhere in `kb/`
+  - [ ] Wrapper module loads cleanly
+- **Files:** None (verification only)
+- **Dependencies:** Sub-phase 2 complete
+
+### Import Mapping Reference
+
+| File | Line(s) | Old Import | New Import |
+|------|---------|-----------|------------|
+| `kb/core.py` | 419 | `from app.core.transcription_service_cpp import get_transcription_service` | `from kb.transcription import get_transcription_service, ConfigManager` |
+| `kb/core.py` | 420 | `from app.utils.config_manager import ConfigManager` | (merged into line above) |
+| `kb/sources/zoom.py` | 261 | `from app.core.transcription_service_cpp import get_transcription_service` | `from kb.transcription import get_transcription_service, ConfigManager` |
+| `kb/sources/zoom.py` | 262 | `from app.utils.config_manager import ConfigManager` | (merged into line above) |
+| `kb/sources/cap_clean.py` | 113 | `from app.core.transcription_service_cpp import get_transcription_service` | `from kb.transcription import get_transcription_service, ConfigManager` |
+| `kb/sources/cap_clean.py` | 114 | `from app.utils.config_manager import ConfigManager` | (merged into line above) |
+| `kb/videos.py` | 190 | `from app.core.transcription_service_cpp import get_transcription_service` | `from kb.transcription import get_transcription_service, ConfigManager` |
+| `kb/videos.py` | 191 | `from app.utils.config_manager import ConfigManager` | (merged into line above) |
+
+### Lines Removed (sys.path hacks inside functions)
+
+| File | Lines Removed | Why Safe |
+|------|--------------|----------|
+| `kb/core.py` | 417-418 (`import sys` + `sys.path.insert`) | The wrapper module handles path setup at its own module level |
+| `kb/sources/cap_clean.py` | 111-112 (`import sys` + `sys.path.insert`) | The wrapper module handles path setup at its own module level |
+
+Note: `kb/sources/zoom.py` line 46 and `kb/videos.py` line 34 have module-level `sys.path.insert` -- these are NOT removed because they serve broader purposes (other non-transcription imports from the project).
+
+### Decision Matrix
+
+#### Open Questions (Need Human Input)
+| # | Question | Options | Impact | Resolution |
+|---|----------|---------|--------|------------|
+| 1 | Wrapper module name: `kb/transcription.py` exists alongside `kb/transcribe.py` (the CLI dispatcher). These names differ by one suffix but could cause confusion. | A) `kb/transcription.py` (as originally proposed -- clear noun form, "transcription service wrapper") B) `kb/whisper_service.py` (more specific, avoids name collision with transcribe.py) C) Keep `kb/transcription.py` and accept the naming similarity | Low impact on functionality, moderate impact on developer clarity. `transcribe.py` = CLI entry point, `transcription.py` = service wrapper. The semantic difference (verb vs noun) is intentional but subtle. | RESOLVED: Use `kb/transcription.py`. Verb (transcribe.py) vs noun (transcription.py) is standard convention. |
+
+#### Decisions Made (Autonomous)
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Keep lazy imports at call sites | Yes -- imports stay inside functions, not moved to module level | All 4 sites use lazy imports deliberately (the `# Import here to avoid circular imports` comment in core.py, the try/except in videos.py). Moving to module level would change import timing and could trigger circular imports or fail-at-import-time for optional deps. |
+| Remove inline sys.path hacks from transcription functions | Yes | The wrapper module handles sys.path setup once. Removing from `core.py:417-418` and `cap_clean.py:111-112` eliminates redundant path manipulation. |
+| Keep module-level sys.path hacks in zoom.py and videos.py | Yes | These serve other imports beyond transcription (e.g., `from kb.core import ...`). Out of scope to refactor all sys.path usage. |
+| Wrapper does NOT add higher-level helpers (e.g., `create_service(model)`) | Correct | The task scope is decoupling imports, not refactoring the usage pattern. Each call site has slightly different model/callback configuration. A higher-level helper would be a behavior change. |
+| Wrapper re-exports both symbols via `__all__` | Yes | Makes the public API explicit. Consumers can `from kb.transcription import get_transcription_service, ConfigManager`. |
+
+### Risk Assessment
+- **Risk:** LOW. Pure import reorganization. No behavior change.
+- **Rollback:** Delete wrapper module, revert 4 import lines. Git makes this trivial.
+- **Test coverage:** Transcription functions are not unit-tested directly (they require whisper model loading), but the import chain is validated by the test suite not crashing on import.
+
+### Phase 3 Plan Review
+- **Gate:** READY
+- **Reviewed:** 2026-02-08
+- **Summary:** Plan is accurate and well-verified. All 4 call sites (8 import lines) independently confirmed via grep with correct line numbers. sys.path handling is correct (remove inline hacks from core.py and cap_clean.py, keep module-level ones in zoom.py and videos.py). Wrapper design is minimal and correct. Naming question resolved: use `kb/transcription.py`.
+- **Issues:** 0 critical, 0 major, 3 minor
+- **Open Questions Finalized:** Naming question resolved (use `kb/transcription.py`). No remaining open questions needing human input.
+
+-> Details: `plan-review-phase3.md`
 
 ---
 
