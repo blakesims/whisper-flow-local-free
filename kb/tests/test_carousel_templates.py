@@ -1036,5 +1036,126 @@ class TestAllTemplatesContentTypes:
         assert "cta-heading" in html
 
 
+class TestEndToEndRender:
+    """End-to-end carousel render with all 3 templates via render_html_from_slides."""
+
+    FULL_SLIDES = [
+        {"slide_number": 1, "type": "hook", "content": "I automated my entire posting workflow.", "words": 6, "subtitle": "From transcription to publishing in 30 seconds"},
+        {"slide_number": 2, "type": "content", "content": "- Use Whisper API to convert audio recordings to text\n- Process meeting recordings, voice memos, and podcasts\n- Store transcripts in structured JSON for downstream processing", "words": 22, "title": "Set Up Transcription"},
+        {"slide_number": 3, "type": "content", "content": "1. Feed transcript chunks to Claude for topic extraction\n2. Generate structured summaries with key insights\n3. Identify quotable moments and actionable takeaways", "words": 20, "title": "Run LLM Analysis"},
+        {"slide_number": 4, "type": "content", "content": "Score each content piece for visual potential.\nClassify format: carousel, single image, text post.\nAuto-select the right template based on content type.", "words": 20, "title": "Visual Classification"},
+        {"slide_number": 5, "type": "mermaid", "content": "graph LR\n    A[Voice Note] --> B[Whisper]\n    B --> C[LLM Analysis]\n    C --> D[Visual Gen]\n    D --> E[PDF Carousel]", "words": 12, "mermaid_svg": None, "title": "The Full Pipeline"},
+        {"slide_number": 6, "type": "cta", "content": "Want to build your own AI content pipeline?", "words": 9, "subtitle": "Follow along as I automate everything."},
+    ]
+
+    @pytest.fixture(params=["brand-purple", "modern-editorial", "tech-minimal"])
+    def template_name(self, request):
+        return request.param
+
+    def test_full_carousel_renders(self, template_name):
+        """Full carousel with all slide types renders without error."""
+        from kb.render import render_html_from_slides
+        html = render_html_from_slides(self.FULL_SLIDES, template_name)
+        assert "<!DOCTYPE html>" in html
+        for slide in self.FULL_SLIDES:
+            assert f'id="slide-{slide["slide_number"]}"' in html
+
+    def test_all_content_types_present(self, template_name):
+        """Rendered HTML includes bullet list, numbered list, plain text."""
+        from kb.render import render_html_from_slides
+        html = render_html_from_slides(self.FULL_SLIDES, template_name)
+        assert "<ul>" in html  # bullets from slide 2
+        assert "<ol>" in html  # numbered list from slide 3
+        assert "<p>" in html   # plain text from slide 4
+
+    def test_header_on_all_slides(self, template_name):
+        """All slide types render the header bar."""
+        from kb.render import render_html_from_slides
+        html = render_html_from_slides(self.FULL_SLIDES, template_name)
+        assert "Blake Sims" in html
+        assert "Claude Code Architects" in html
+
+    def test_subtitle_on_hook(self, template_name):
+        """Hook slide subtitle renders."""
+        from kb.render import render_html_from_slides
+        html = render_html_from_slides(self.FULL_SLIDES, template_name)
+        assert "From transcription to publishing in 30 seconds" in html
+
+    def test_cta_button_text_from_config(self, template_name):
+        """CTA button text should come from brand.cta_text config."""
+        from kb.render import render_html_from_slides, load_carousel_config
+        config = load_carousel_config()
+        config["brand"]["cta_text"] = "Join the Community"
+        html = render_html_from_slides(self.FULL_SLIDES, template_name, config=config)
+        assert "Join the Community" in html
+
+    def test_no_summary_slide_type(self, template_name):
+        """Templates should not reference dead 'summary' slide type."""
+        from kb.render import render_html_from_slides
+        slides = [
+            {"slide_number": 1, "type": "hook", "content": "Test", "words": 1},
+            {"slide_number": 2, "type": "summary", "content": "Summary text", "words": 2},
+            {"slide_number": 3, "type": "cta", "content": "End", "words": 1},
+        ]
+        html = render_html_from_slides(slides, template_name)
+        # summary type should not produce a slide div (it falls through)
+        assert 'id="slide-2"' not in html
+
+    def test_mermaid_fallback_renders_code(self, template_name):
+        """Mermaid slide without SVG renders raw code."""
+        from kb.render import render_html_from_slides
+        html = render_html_from_slides(self.FULL_SLIDES, template_name)
+        assert "graph LR" in html
+
+
+class TestMermaidThemeConfig:
+    """Test that mermaid_theme is in config and usable."""
+
+    def test_config_has_mermaid_theme_per_template(self):
+        config_path = os.path.join(CAROUSEL_DIR, "config.json")
+        with open(config_path) as f:
+            config = json.load(f)
+        for name in ["brand-purple", "modern-editorial", "tech-minimal"]:
+            assert "mermaid_theme" in config["templates"][name], \
+                f"Missing mermaid_theme in template '{name}'"
+
+    def test_brand_purple_uses_dark_theme(self):
+        config_path = os.path.join(CAROUSEL_DIR, "config.json")
+        with open(config_path) as f:
+            config = json.load(f)
+        assert config["templates"]["brand-purple"]["mermaid_theme"] == "dark"
+
+    def test_modern_editorial_uses_neutral_theme(self):
+        config_path = os.path.join(CAROUSEL_DIR, "config.json")
+        with open(config_path) as f:
+            config = json.load(f)
+        assert config["templates"]["modern-editorial"]["mermaid_theme"] == "neutral"
+
+    def test_tech_minimal_uses_dark_theme(self):
+        config_path = os.path.join(CAROUSEL_DIR, "config.json")
+        with open(config_path) as f:
+            config = json.load(f)
+        assert config["templates"]["tech-minimal"]["mermaid_theme"] == "dark"
+
+
+class TestConfigBrandCtaText:
+    """Test that brand.cta_text is in config."""
+
+    def test_config_has_cta_text(self):
+        config_path = os.path.join(CAROUSEL_DIR, "config.json")
+        with open(config_path) as f:
+            config = json.load(f)
+        assert "cta_text" in config["brand"]
+
+    def test_prompt_mentions_title_and_subtitle(self):
+        """carousel_slides.json prompt should mention title and subtitle fields."""
+        path = os.path.join(KB_CONFIG_DIR, "carousel_slides.json")
+        with open(path) as f:
+            config = json.load(f)
+        prompt = config["prompt"]
+        assert "title:" in prompt.lower() or "- title:" in prompt
+        assert "subtitle:" in prompt.lower() or "- subtitle:" in prompt
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

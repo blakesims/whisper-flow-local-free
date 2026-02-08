@@ -13,7 +13,7 @@ Usage:
     svg_content = render_mermaid("graph LR\\n  A-->B", "/tmp/output")
 
     # Render carousel slides to PDF
-    pdf_path = render_carousel(slides, "dark-purple", "/tmp/output")
+    pdf_path = render_carousel(slides, "brand-purple", "/tmp/output")
 
     # Full pipeline: mermaid + carousel → PDF + thumbnails
     result = render_pipeline(decimal, analysis_results, config)
@@ -72,6 +72,7 @@ def render_mermaid(
     background: str = "transparent",
     theme: str = "dark",
     width: int = 860,
+    slide_number: Optional[int] = None,
 ) -> Optional[str]:
     """
     Render mermaid code to SVG using mmdc CLI.
@@ -96,7 +97,8 @@ def render_mermaid(
 
     output_dir = Path(output_path)
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_file = output_dir / "mermaid.svg"
+    filename = f"mermaid-{slide_number}.svg" if slide_number else "mermaid.svg"
+    output_file = output_dir / filename
 
     # Write mermaid code to temp file
     try:
@@ -591,10 +593,9 @@ def render_pipeline(
     # Step 1: Render mermaid diagrams if needed
     mermaid_svg = None
     if has_mermaid:
-        # Select mmdc theme based on template
-        mermaid_theme = "dark"
-        if template_name == "modern-editorial":
-            mermaid_theme = "neutral"
+        # Select mmdc theme from template config (fallback to dark)
+        template_config = config.get("templates", {}).get(template_name, {})
+        mermaid_theme = template_config.get("mermaid_theme", "dark")
 
         for slide in slides:
             if slide.get("type") == "mermaid" and slide.get("content"):
@@ -603,6 +604,7 @@ def render_pipeline(
                     slide["content"],
                     mermaid_out_dir,
                     theme=mermaid_theme,
+                    slide_number=slide.get("slide_number"),
                 )
                 if svg_content:
                     # Embed SVG inline via Markup() — trusted source (mmdc output)

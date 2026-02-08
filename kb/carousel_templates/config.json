@@ -31,7 +31,8 @@
         "body": "'Plus Jakarta Sans', 'Inter', system-ui, sans-serif",
         "mono": "'JetBrains Mono', 'Fira Code', monospace",
         "google_fonts_url": "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
-      }
+      },
+      "mermaid_theme": "dark"
     },
     "modern-editorial": {
       "file": "modern-editorial.html",
@@ -55,7 +56,8 @@
         "body": "'Source Sans 3', 'Source Sans Pro', system-ui, sans-serif",
         "mono": "'JetBrains Mono', 'Fira Code', monospace",
         "google_fonts_url": "https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800;900&family=Source+Sans+3:wght@400;500;600;700&display=swap"
-      }
+      },
+      "mermaid_theme": "neutral"
     },
     "tech-minimal": {
       "file": "tech-minimal.html",
@@ -84,7 +86,8 @@
         "body": "'Inter', system-ui, sans-serif",
         "mono": "'JetBrains Mono', monospace",
         "google_fonts_url": "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap"
-      }
+      },
+      "mermaid_theme": "dark"
     }
   },
   "defaults": {
@@ -104,7 +107,8 @@
     "profile_photo_path": "profile.png",
     "handle": "@blakesims",
     "tagline": "Building with AI",
-    "primary_color": "#2D1B69"
+    "primary_color": "#2D1B69",
+    "cta_text": "Follow for More"
   },
   "header": {
     "show_on_all_slides": true,

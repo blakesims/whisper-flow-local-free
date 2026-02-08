@@ -359,6 +359,7 @@
     justify-content: center;
     padding: 20px 60px 60px 60px;
     flex: 1;
+    overflow: hidden;
   }
   .mermaid-container svg {
     max-width: 880px;
@@ -397,7 +398,7 @@
     </div>
     <div class="header-divider"></div>
     <div class="title-page-body">
-      <div class="title-page-kicker">A Step-by-Step Guide</div>
+      <div class="title-page-kicker">{{ brand.tagline|default('A Step-by-Step Guide') }}</div>
       <div class="title-page-photo-row">
         <div class="title-page-photo">
           {% if profile_photo_data %}
@@ -463,7 +464,7 @@
   <div class="slide-title">{{ slide.title }}</div>
   <div class="pull-accent">
     <div class="pull-accent-line"></div>
-    <span class="pull-accent-text">Key Points</span>
+    <span class="pull-accent-text">{{ slide.title|default('Key Points') }}</span>
   </div>
   {% endif %}
   <div class="content">
@@ -491,7 +492,7 @@
   <div class="slide-title">{{ slide.title }}</div>
   <div class="pull-accent">
     <div class="pull-accent-line"></div>
-    <span class="pull-accent-text">Architecture</span>
+    <span class="pull-accent-text">{{ slide.title|default('Architecture') }}</span>
   </div>
   {% endif %}
   <div class="mermaid-container">
@@ -524,7 +525,7 @@
     {% if slide.subtitle %}
     <div class="cta-subtext">{{ slide.subtitle }}</div>
     {% endif %}
-    <div class="cta-button">Follow for More</div>
+    <div class="cta-button">{{ brand.cta_text|default('Follow for More') }}</div>
     {% if brand.handle %}
     <div class="cta-handle">{{ brand.handle }}</div>
     {% endif %}

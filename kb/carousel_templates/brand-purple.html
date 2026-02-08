@@ -340,6 +340,7 @@
     justify-content: center;
     padding: 20px 56px 56px 56px;
     flex: 1;
+    overflow: hidden;
   }
   .mermaid-container svg {
     max-width: 860px;
@@ -502,7 +503,7 @@
     {% if slide.subtitle %}
     <div class="cta-subtext">{{ slide.subtitle }}</div>
     {% endif %}
-    <div class="cta-button">Follow for More</div>
+    <div class="cta-button">{{ brand.cta_text|default('Follow for More') }}</div>
     {% if brand.handle %}
     <div class="cta-handle">{{ brand.handle }}</div>
     {% endif %}

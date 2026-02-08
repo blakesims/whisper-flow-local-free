@@ -4,7 +4,8 @@
 T024
 
 ## Meta
-- **Status:** CODE_REVIEW
+- **Status:** EXECUTING_PHASE_4
+- **Phase 4 Started:** 2026-02-08
 - **Last Updated:** 2026-02-08
 
 ## Overview
@@ -426,6 +427,14 @@ Note: Q2 (timeline style) and Q4 (font choice) folded into Phase 0 mockup scope 
 - **Summary:** Solid implementation. markdown_to_html filter works correctly for LLM-generated content, lstrip hack removed, header.show_on_all_slides guard applied to all 3 templates, 111 tests pass (342 full suite). Major: no HTML escaping inside list items (low risk, LLM source), schema missing title/subtitle fields. Both deferrable to Phase 4.
 
 -> Details: `code-review-phase-2.md`
+
+### Phase 3
+- **Gate:** PASS
+- **Reviewed:** 2026-02-08
+- **Issues:** 0 critical, 0 major, 4 minor
+- **Summary:** Clean SVG transition. render_mermaid() outputs SVG, render_pipeline() embeds inline via Markup(), markdown_to_html() now escapes HTML, title/subtitle added to schema. Both Phase 2 review issues (M1 escaping, M2 schema) addressed. 370 full suite tests pass. Minor: hardcoded theme mapping, prompt missing title/subtitle mention, shared output filename, no overflow control on SVG container. All deferrable to Phase 4.
+
+-> Details: `code-review-phase-3.md`
 
 ---
 

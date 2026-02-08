@@ -365,6 +365,7 @@
     justify-content: center;
     padding: 16px 48px 48px 48px;
     flex: 1;
+    overflow: hidden;
   }
   .mermaid-container svg {
     max-width: 880px;
@@ -395,7 +396,7 @@
     <div class="terminal-dot red"></div>
     <div class="terminal-dot yellow"></div>
     <div class="terminal-dot green"></div>
-    <span class="terminal-tab">content-pipeline.md</span>
+    <span class="terminal-tab">carousel.md</span>
   </div>
   <div class="header">
     {% if header.author_position == 'left' %}
@@ -422,7 +423,7 @@
         {% endif %}
       </div>
     </div>
-    <div class="title-page-command"><span class="prompt-sym">$</span> <span class="cmd">cat pipeline-guide.md</span></div>
+    <div class="title-page-command"><span class="prompt-sym">$</span> <span class="cmd">cat carousel.md</span></div>
     <div class="title-page-main-title {% if slide.content|length < 40 %}title-short{% elif slide.content|length < 65 %}title-medium{% else %}title-long{% endif %}">{{ slide.content }}</div>
     <div class="title-page-divider"></div>
     {% if slide.subtitle %}
@@ -526,7 +527,7 @@
   {% endif %}
   {% if slide.title %}
   <div class="slide-title">{{ slide.title }}</div>
-  <div class="code-comment">// Architecture overview</div>
+  <div class="code-comment">// {{ slide.title|default('Architecture overview') }}</div>
   {% endif %}
   <div class="mermaid-container">
     {% if slide.mermaid_svg %}
@@ -545,7 +546,7 @@
     <div class="terminal-dot red"></div>
     <div class="terminal-dot yellow"></div>
     <div class="terminal-dot green"></div>
-    <span class="terminal-tab">follow.md</span>
+    <span class="terminal-tab">cta.md</span>
   </div>
   <div class="header">
     {% if header.author_position == 'left' %}
@@ -559,13 +560,13 @@
   {% endif %}
   <div class="cta-tech">
     {% if brand.handle %}
-    <div class="cta-prompt">$ follow --user {{ brand.handle.lstrip('@') }} --topic ai-automation</div>
+    <div class="cta-prompt">$ follow --user {{ brand.handle.lstrip('@') }}</div>
     {% endif %}
     <div class="cta-heading">{{ slide.content }}</div>
     {% if slide.subtitle %}
     <div class="cta-subtext">{{ slide.subtitle }}</div>
     {% endif %}
-    <div class="cta-button">Follow for More</div>
+    <div class="cta-button">{{ brand.cta_text|default('Follow for More') }}</div>
     {% if brand.handle %}
     <div class="cta-handle">{{ brand.handle }}</div>
     {% endif %}
