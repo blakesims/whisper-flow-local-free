@@ -252,9 +252,9 @@ class TestPostingQueueVisualFields:
 class TestApproveTriggersThread:
     """Tests that approve endpoint starts background pipeline thread."""
 
-    def test_approve_starts_background_thread(self, tmp_path):
-        """Approve should trigger a background thread for visual pipeline."""
-        # Create transcript
+    def test_approve_starts_background_thread_for_non_autojudge(self, tmp_path):
+        """Approve should trigger visual pipeline for non-auto-judge types (e.g., skool_post)."""
+        # Create transcript with skool_post (non-auto-judge type)
         decimal_dir = tmp_path / "50.01.01"
         decimal_dir.mkdir(parents=True)
         transcript = {
@@ -264,8 +264,8 @@ class TestApproveTriggersThread:
             "transcript": "test",
             "source": {"type": "audio"},
             "analysis": {
-                "linkedin_v2": {
-                    "post": "Test post",
+                "skool_post": {
+                    "skool_post": "Test post content",
                     "_model": "gemini",
                     "_analyzed_at": "2026-02-07T10:00:00",
                 }
@@ -290,18 +290,59 @@ class TestApproveTriggersThread:
             from kb.serve import app
             app.config["TESTING"] = True
             with app.test_client() as client:
+                response = client.post("/api/action/test-id--skool_post/approve")
+                assert response.status_code == 200
+
+                data = response.get_json()
+                assert data["success"] is True
+
+                # Thread should have been created and started for non-auto-judge type
+                mock_thread_cls.assert_called_once()
+                call_kwargs = mock_thread_cls.call_args[1]
+                assert call_kwargs["target"] == mock_pipeline
+                assert call_kwargs["daemon"] is True
+                mock_thread.start.assert_called_once()
+
+    def test_approve_does_not_trigger_visual_for_autojudge(self, tmp_path):
+        """Approve should NOT trigger visual pipeline for auto-judge types (linkedin_v2)."""
+        decimal_dir = tmp_path / "50.01.01"
+        decimal_dir.mkdir(parents=True)
+        transcript = {
+            "id": "test-id",
+            "title": "Test",
+            "decimal": "50.01.01",
+            "transcript": "test",
+            "source": {"type": "audio"},
+            "analysis": {
+                "linkedin_v2": {
+                    "post": "Test post",
+                    "_model": "gemini",
+                    "_analyzed_at": "2026-02-07T10:00:00",
+                }
+            }
+        }
+        (decimal_dir / "test-id.json").write_text(json.dumps(transcript))
+
+        state = {"actions": {}}
+        state_file = tmp_path / "action-state.json"
+        state_file.write_text(json.dumps(state))
+
+        with patch("kb.serve.ACTION_STATE_PATH", state_file), \
+             patch("kb.serve.KB_ROOT", tmp_path), \
+             patch("kb.serve.threading.Thread") as mock_thread_cls, \
+             patch("kb.serve.pyperclip.copy"):
+
+            from kb.serve import app
+            app.config["TESTING"] = True
+            with app.test_client() as client:
                 response = client.post("/api/action/test-id--linkedin_v2/approve")
                 assert response.status_code == 200
 
                 data = response.get_json()
                 assert data["success"] is True
 
-                # Thread should have been created and started
-                mock_thread_cls.assert_called_once()
-                call_kwargs = mock_thread_cls.call_args[1]
-                assert call_kwargs["target"] == mock_pipeline
-                assert call_kwargs["daemon"] is True
-                mock_thread.start.assert_called_once()
+                # Thread should NOT have been created for auto-judge type
+                mock_thread_cls.assert_not_called()
 
     def test_approve_returns_immediately(self, tmp_path):
         """Approve should return < 1s (not waiting for pipeline)."""

@@ -30,7 +30,7 @@ from kb.videos import (
     load_inventory, save_inventory, scan_videos, INVENTORY_PATH,
     queue_transcription, get_queue_status, start_worker, load_queue
 )
-from kb.analyze import list_analysis_types, load_analysis_type, ANALYSIS_TYPES_DIR, AUTO_JUDGE_TYPES
+from kb.analyze import list_analysis_types, load_analysis_type, ANALYSIS_TYPES_DIR, AUTO_JUDGE_TYPES, run_with_judge_loop
 
 logger = logging.getLogger(__name__)
 
@@ -832,23 +832,322 @@ def approve_action(action_id: str):
     except Exception:
         copied = False
 
-    # Trigger visual pipeline in background thread
-    transcript_path = None
-    for item in items:
-        if item["id"] == action_id:
-            transcript_path = item.get("transcript_path")
-            break
+    # Trigger visual pipeline in background thread — but NOT for auto-judge types
+    # (linkedin_v2 items go through the iteration workflow: iterate -> stage -> generate visuals)
+    parts = action_id.split(ACTION_ID_SEP)
+    analysis_type = parts[1] if len(parts) == 2 else ""
 
-    if transcript_path:
-        thread = threading.Thread(
-            target=run_visual_pipeline,
-            args=(action_id, transcript_path),
-            daemon=True,
-        )
-        thread.start()
-        logger.info("[KB Serve] Visual pipeline started for %s", action_id)
+    if analysis_type not in AUTO_JUDGE_TYPES:
+        transcript_path = None
+        for item in items:
+            if item["id"] == action_id:
+                transcript_path = item.get("transcript_path")
+                break
+
+        if transcript_path:
+            thread = threading.Thread(
+                target=run_visual_pipeline,
+                args=(action_id, transcript_path),
+                daemon=True,
+            )
+            thread.start()
+            logger.info("[KB Serve] Visual pipeline started for %s", action_id)
 
     return jsonify({"success": True, "copied": copied})
+
+
+@app.route('/api/action/<action_id>/stage', methods=['POST'])
+def stage_action(action_id: str):
+    """Stage an iteration for the curation workflow.
+
+    Sets status to 'staged'. Does NOT trigger visual pipeline.
+    Used by 'a' shortcut in iteration view for linkedin_v2 items.
+    Requires item to be in 'pending' or 'draft' status.
+    """
+    if not validate_action_id(action_id):
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    # Get item content for clipboard copy
+    items = scan_actionable_items()
+    item_content = None
+    for item in items:
+        if item["id"] == action_id:
+            item_content = item["content"]
+            break
+
+    if item_content is None:
+        return jsonify({"error": "Action not found"}), 404
+
+    # Update state
+    state = load_action_state()
+
+    # Validate state transition: must be pending or draft
+    current_status = state["actions"].get(action_id, {}).get("status", "pending")
+    if current_status not in ("pending", "draft"):
+        return jsonify({"error": f"Cannot stage item with status '{current_status}'. Item must be pending or draft."}), 400
+
+    if action_id not in state["actions"]:
+        state["actions"][action_id] = {
+            "status": "staged",
+            "copied_count": 0,
+            "created_at": datetime.now().isoformat(),
+        }
+    else:
+        state["actions"][action_id]["status"] = "staged"
+
+    state["actions"][action_id]["staged_at"] = datetime.now().isoformat()
+    save_action_state(state)
+
+    # Auto-copy to clipboard
+    try:
+        pyperclip.copy(item_content)
+        copied = True
+    except Exception:
+        copied = False
+
+    return jsonify({"success": True, "copied": copied})
+
+
+@app.route('/api/action/<action_id>/iterate', methods=['POST'])
+def iterate_action(action_id: str):
+    """Trigger next improvement round in background thread.
+
+    Calls run_with_judge_loop() for the next iteration.
+    Returns immediately; client polls /iterations for updates.
+    """
+    if not validate_action_id(action_id):
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    parts = action_id.split(ACTION_ID_SEP)
+    if len(parts) != 2:
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    analysis_type = parts[1]
+    if analysis_type not in AUTO_JUDGE_TYPES:
+        return jsonify({"error": f"Analysis type '{analysis_type}' does not support iteration"}), 400
+
+    judge_type = AUTO_JUDGE_TYPES[analysis_type]
+
+    # Find transcript file
+    transcript_path = _find_transcript_file(action_id)
+    if not transcript_path:
+        return jsonify({"error": "Transcript file not found"}), 404
+
+    # Update state to show iterating
+    state = load_action_state()
+    if action_id not in state["actions"]:
+        state["actions"][action_id] = {
+            "status": "pending",
+            "copied_count": 0,
+            "created_at": datetime.now().isoformat(),
+        }
+    state["actions"][action_id]["iterating"] = True
+    save_action_state(state)
+
+    def _run_iteration():
+        try:
+            with open(str(transcript_path)) as f:
+                transcript_data = json.load(f)
+
+            existing_analysis = transcript_data.get("analysis", {})
+
+            run_with_judge_loop(
+                transcript_data=transcript_data,
+                analysis_type=analysis_type,
+                judge_type=judge_type,
+                max_rounds=1,
+                existing_analysis=existing_analysis,
+                save_path=str(transcript_path),
+            )
+        except Exception as e:
+            logger.error("[KB Serve] Iteration failed for %s: %s", action_id, e)
+        finally:
+            # Clear iterating flag
+            st = load_action_state()
+            if action_id in st["actions"]:
+                st["actions"][action_id]["iterating"] = False
+                save_action_state(st)
+
+    thread = threading.Thread(target=_run_iteration, daemon=True)
+    thread.start()
+    logger.info("[KB Serve] Iteration started for %s", action_id)
+
+    return jsonify({"success": True, "message": "Iteration started"})
+
+
+@app.route('/api/action/<action_id>/iterations')
+def get_iterations(action_id: str):
+    """Return all iterations with scores for an entity.
+
+    Returns versioned drafts and judge scores for display in iteration view.
+    Uses alias-based action_id (e.g., transcript_id--linkedin_v2).
+    """
+    if not validate_action_id(action_id):
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    parts = action_id.split(ACTION_ID_SEP)
+    if len(parts) != 2:
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    transcript_id = parts[0]
+    analysis_type = parts[1]
+
+    if analysis_type not in AUTO_JUDGE_TYPES:
+        return jsonify({"error": f"Analysis type '{analysis_type}' does not support iterations"}), 400
+
+    judge_type = AUTO_JUDGE_TYPES[analysis_type]
+
+    # Find transcript file
+    transcript_path = _find_transcript_file(action_id)
+    if not transcript_path:
+        return jsonify({"error": "Transcript file not found"}), 404
+
+    with open(str(transcript_path)) as f:
+        transcript_data = json.load(f)
+
+    analysis = transcript_data.get("analysis", {})
+    alias = analysis.get(analysis_type, {})
+
+    # Build iterations list
+    iterations = []
+    round_num = 0
+    while True:
+        draft_key = f"{analysis_type}_{round_num}"
+        judge_key = f"{judge_type}_{round_num}"
+
+        if draft_key not in analysis:
+            break
+
+        draft_data = analysis[draft_key]
+        judge_data = analysis.get(judge_key)
+
+        iteration = {
+            "round": round_num,
+            "post": draft_data.get("post", ""),
+            "model": draft_data.get("_model", ""),
+            "analyzed_at": draft_data.get("_analyzed_at", ""),
+            "scores": None,
+        }
+
+        if judge_data and isinstance(judge_data, dict):
+            iteration["scores"] = {
+                "overall": judge_data.get("overall_score", 0),
+                "criteria": judge_data.get("scores", {}),
+                "improvements": judge_data.get("improvements", []),
+                "rewritten_hook": judge_data.get("rewritten_hook"),
+            }
+
+        iterations.append(iteration)
+        round_num += 1
+
+    # If no versioned keys but alias exists (pre-T023 content), show alias as round 0
+    if not iterations and alias:
+        iteration = {
+            "round": 0,
+            "post": alias.get("post", ""),
+            "model": alias.get("_model", ""),
+            "analyzed_at": alias.get("_analyzed_at", ""),
+            "scores": None,
+        }
+        # Check for unversioned judge
+        judge_data = analysis.get(judge_type)
+        if judge_data and isinstance(judge_data, dict):
+            iteration["scores"] = {
+                "overall": judge_data.get("overall_score", 0),
+                "criteria": judge_data.get("scores", {}),
+                "improvements": judge_data.get("improvements", []),
+                "rewritten_hook": judge_data.get("rewritten_hook"),
+            }
+        iterations.append(iteration)
+
+    # Get iterating status from action state
+    state = load_action_state()
+    iterating = state.get("actions", {}).get(action_id, {}).get("iterating", False)
+
+    # Current round from alias
+    current_round = alias.get("_round", 0) if alias else 0
+    score_history = alias.get("_history", {}).get("scores", []) if alias else []
+
+    return jsonify({
+        "action_id": action_id,
+        "iterations": iterations,
+        "current_round": current_round,
+        "score_history": score_history,
+        "iterating": iterating,
+        "total_rounds": len(iterations),
+    })
+
+
+@app.route('/api/posting-queue-v2')
+def get_posting_queue_v2():
+    """Get items for the iteration view posting queue.
+
+    Returns items grouped as entities (not individual iterations).
+    Includes iteration counts and latest scores for each entity.
+    Draft and pending items for linkedin_v2 types.
+    """
+    state = load_action_state()
+    items = scan_actionable_items()
+
+    entities = []
+
+    for item in items:
+        item_state = state["actions"].get(item["id"], {})
+        status = item_state.get("status", "pending")
+
+        # Include pending, draft, and staged items
+        if status in ("pending", "draft", "staged"):
+            # Load iteration data for auto-judge types
+            parts = item["id"].split(ACTION_ID_SEP)
+            analysis_type = parts[1] if len(parts) == 2 else ""
+
+            iteration_count = 0
+            latest_score = None
+            score_history = []
+            iterating = item_state.get("iterating", False)
+
+            if analysis_type in AUTO_JUDGE_TYPES:
+                # Parse iteration info from raw_data (alias metadata)
+                raw = item.get("raw_data", {}) or {}
+                current_round = 0
+
+                # Try to get _round and _history from the transcript file
+                transcript_path = item.get("transcript_path")
+                if transcript_path:
+                    try:
+                        with open(transcript_path) as f:
+                            tdata = json.load(f)
+                        alias = tdata.get("analysis", {}).get(analysis_type, {})
+                        current_round = alias.get("_round", 0)
+                        score_history = alias.get("_history", {}).get("scores", [])
+                        iteration_count = current_round + 1  # 0-indexed rounds
+
+                        if score_history:
+                            latest = score_history[-1]
+                            latest_score = latest.get("overall", 0)
+                    except (json.JSONDecodeError, IOError, KeyError):
+                        pass
+
+            item["status"] = status
+            item["iteration_count"] = iteration_count
+            item["latest_score"] = latest_score
+            item["score_history"] = score_history
+            item["iterating"] = iterating
+            item["relative_time"] = format_relative_time(item["analyzed_at"])
+
+            entities.append(item)
+
+    # Sort: iterating first, then by latest_score descending, then by analyzed_at
+    entities.sort(key=lambda x: (
+        not x.get("iterating", False),
+        -(x.get("latest_score") or 0),
+        x.get("analyzed_at", ""),
+    ), reverse=False)
+
+    return jsonify({
+        "items": entities,
+        "total": len(entities),
+    })
 
 
 @app.route('/api/action/<action_id>/posted', methods=['POST'])

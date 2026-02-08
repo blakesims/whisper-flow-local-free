@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KB Serve - Posting Queue (Runway)</title>
+    <title>KB Serve - Iteration View</title>
     <style>
         /* Catppuccin Mocha palette */
         :root {
@@ -53,7 +53,7 @@
         /* Tmux-style layout */
         .tmux-container {
             display: grid;
-            grid-template-columns: 1fr 400px;
+            grid-template-columns: 320px 1fr;
             grid-template-rows: 1fr auto;
             height: 100vh;
             gap: 1px;
@@ -90,193 +90,86 @@
             padding: 0;
         }
 
-        /* Runway counter */
-        .runway-counter {
-            background: var(--mantle);
-            padding: 16px;
+        /* Entity list items */
+        .entity-item {
+            padding: 12px 16px;
             border-bottom: 1px solid var(--surface0);
-            display: flex;
-            gap: 16px;
-            flex-wrap: wrap;
+            cursor: pointer;
+            transition: background 0.1s;
         }
 
-        .runway-stat {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 12px;
+        .entity-item:hover {
+            background: var(--mantle);
+        }
+
+        .entity-item.selected {
             background: var(--surface0);
-            border-radius: 6px;
+            border-left: 3px solid var(--sapphire);
         }
 
-        .runway-stat-count {
-            font-size: 18px;
+        .entity-title {
+            font-size: 12px;
+            color: var(--text);
             font-weight: 600;
-            color: var(--green);
+            margin-bottom: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
-        .runway-stat-label {
+        .entity-meta {
+            display: flex;
+            gap: 8px;
+            align-items: center;
             font-size: 11px;
-            color: var(--subtext0);
+            color: var(--overlay0);
         }
 
-        .runway-stat.linkedin .runway-stat-count {
-            color: var(--blue);
+        .entity-score {
+            font-weight: 600;
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-size: 10px;
         }
 
-        .runway-stat.skool .runway-stat-count {
-            color: var(--green);
+        .entity-score.high { background: var(--green); color: var(--crust); }
+        .entity-score.mid { background: var(--yellow); color: var(--crust); }
+        .entity-score.low { background: var(--red); color: var(--crust); }
+        .entity-score.none { background: var(--surface1); color: var(--overlay0); }
+
+        .entity-rounds {
+            color: var(--overlay0);
+            font-size: 10px;
+        }
+
+        .entity-status {
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 3px;
+        }
+
+        .entity-status.staged { background: var(--mauve); color: var(--crust); }
+        .entity-status.draft { background: var(--surface1); color: var(--overlay0); }
+        .entity-status.iterating { background: var(--yellow); color: var(--crust); }
+
+        .entity-decimal {
+            color: var(--mauve);
+            font-size: 10px;
         }
 
         /* Platform badges */
         .platform-badge {
             font-size: 10px;
             font-weight: 600;
-            padding: 3px 8px;
-            border-radius: 4px;
+            padding: 2px 6px;
+            border-radius: 3px;
             text-transform: uppercase;
         }
 
-        .platform-badge.linkedin {
-            background: var(--blue);
-            color: var(--crust);
-        }
+        .platform-badge.linkedin { background: var(--blue); color: var(--crust); }
+        .platform-badge.skool { background: var(--green); color: var(--crust); }
 
-        .platform-badge.skool {
-            background: var(--green);
-            color: var(--crust);
-        }
-
-        /* Section headers */
-        .section-header {
-            background: var(--mantle);
-            padding: 12px 16px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid var(--surface0);
-            position: sticky;
-            top: 0;
-            z-index: 10;
-        }
-
-        .section-title {
-            color: var(--text);
-            font-weight: 600;
-            font-size: 12px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .section-count {
-            background: var(--sapphire);
-            color: var(--crust);
-            padding: 2px 8px;
-            border-radius: 10px;
-            font-size: 11px;
-            font-weight: 600;
-        }
-
-        .section-count.empty {
-            background: var(--surface1);
-            color: var(--overlay0);
-        }
-
-        /* Action items */
-        .action-item {
-            padding: 16px;
-            border-bottom: 1px solid var(--surface0);
-            cursor: pointer;
-            transition: background 0.1s;
-        }
-
-        .action-item:hover {
-            background: var(--mantle);
-        }
-
-        .action-item.selected {
-            background: var(--surface0);
-            border-left: 3px solid var(--sapphire);
-        }
-
-        .action-item-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 8px;
-        }
-
-        .action-type {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .action-icon {
-            font-size: 16px;
-        }
-
-        .action-label {
-            font-weight: 600;
-            color: var(--text);
-        }
-
-        .action-destination {
-            font-size: 11px;
-            color: var(--overlay0);
-            background: var(--surface0);
-            padding: 2px 8px;
-            border-radius: 4px;
-        }
-
-        .action-source {
-            color: var(--subtext0);
-            font-size: 12px;
-            margin-bottom: 8px;
-        }
-
-        .action-source-title {
-            color: var(--sapphire);
-        }
-
-        .action-meta {
-            display: flex;
-            gap: 16px;
-            font-size: 11px;
-            color: var(--overlay0);
-        }
-
-        .meta-item {
-            display: flex;
-            align-items: center;
-            gap: 4px;
-        }
-
-        .action-preview {
-            margin-top: 12px;
-            padding: 12px;
-            background: var(--mantle);
-            border-radius: 6px;
-            font-size: 12px;
-            color: var(--subtext1);
-            line-height: 1.6;
-            max-height: 80px;
-            overflow: hidden;
-            position: relative;
-        }
-
-        .action-preview::after {
-            content: '';
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            height: 30px;
-            background: linear-gradient(transparent, var(--mantle));
-        }
-
-        /* Right pane - Preview */
+        /* Right pane - Iteration view */
         .preview-empty {
             display: flex;
             flex-direction: column;
@@ -294,28 +187,173 @@
             opacity: 0.5;
         }
 
-        .preview-content {
+        .iteration-view {
             padding: 20px;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
         }
 
-        .preview-title {
+        .iteration-header {
+            margin-bottom: 16px;
+        }
+
+        .iteration-title {
             color: var(--sapphire);
-            font-size: 16px;
+            font-size: 14px;
             font-weight: 600;
             margin-bottom: 4px;
         }
 
-        .preview-subtitle {
+        .iteration-subtitle {
+            color: var(--overlay0);
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Round navigator */
+        .round-nav {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 16px;
+            padding: 8px 12px;
+            background: var(--mantle);
+            border-radius: 6px;
+        }
+
+        .round-nav-label {
+            color: var(--subtext0);
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .round-tabs {
+            display: flex;
+            gap: 4px;
+        }
+
+        .round-tab {
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            cursor: pointer;
+            background: var(--surface0);
+            color: var(--overlay0);
+            border: none;
+            font-family: inherit;
+            transition: all 0.1s;
+        }
+
+        .round-tab:hover { background: var(--surface1); color: var(--text); }
+        .round-tab.active { background: var(--sapphire); color: var(--crust); font-weight: 600; }
+
+        .round-nav-hint {
+            color: var(--overlay0);
+            font-size: 10px;
+            margin-left: auto;
+        }
+
+        .round-nav-hint .key-hint {
+            background: var(--surface0);
+            color: var(--sapphire);
+            padding: 1px 4px;
+            border-radius: 2px;
+            font-size: 9px;
+            font-weight: 600;
+        }
+
+        /* Scores section */
+        .scores-section {
+            margin-bottom: 16px;
+        }
+
+        .scores-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .scores-title {
+            color: var(--overlay0);
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .overall-score {
+            font-size: 16px;
+            font-weight: 700;
+        }
+
+        .overall-score.high { color: var(--green); }
+        .overall-score.mid { color: var(--yellow); }
+        .overall-score.low { color: var(--red); }
+
+        .scores-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+        }
+
+        .score-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 10px;
+            background: var(--mantle);
+            border-radius: 4px;
+            font-size: 11px;
+        }
+
+        .score-label {
+            color: var(--subtext0);
+        }
+
+        .score-value {
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .score-value.high { color: var(--green); }
+        .score-value.mid { color: var(--yellow); }
+        .score-value.low { color: var(--red); }
+
+        .delta-badge {
+            font-size: 9px;
+            font-weight: 600;
+            padding: 1px 4px;
+            border-radius: 2px;
+        }
+
+        .delta-badge.up { background: rgba(166, 227, 161, 0.2); color: var(--green); }
+        .delta-badge.down { background: rgba(243, 139, 168, 0.2); color: var(--red); }
+        .delta-badge.same { background: rgba(108, 112, 134, 0.15); color: var(--overlay0); }
+
+        .not-judged {
+            padding: 12px;
+            background: var(--mantle);
+            border-radius: 6px;
             color: var(--overlay0);
             font-size: 12px;
-            margin-bottom: 20px;
+            text-align: center;
+            font-style: italic;
         }
 
-        .preview-section {
-            margin-bottom: 20px;
+        /* Post content */
+        .post-section {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
         }
 
-        .preview-section-title {
+        .post-section-title {
             color: var(--overlay0);
             font-size: 10px;
             text-transform: uppercase;
@@ -323,59 +361,27 @@
             margin-bottom: 8px;
         }
 
-        .preview-text {
+        .post-text {
+            flex: 1;
             background: var(--mantle);
             padding: 16px;
             border-radius: 6px;
             font-size: 13px;
             line-height: 1.7;
             color: var(--text);
-            max-height: 400px;
             overflow-y: auto;
             white-space: pre-wrap;
         }
 
-        .preview-meta-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-        }
-
-        .preview-meta-item {
-            background: var(--mantle);
-            padding: 10px 12px;
-            border-radius: 6px;
-        }
-
-        .preview-meta-label {
-            color: var(--overlay0);
-            font-size: 10px;
-            text-transform: uppercase;
-            margin-bottom: 4px;
-        }
-
-        .preview-meta-value {
-            color: var(--text);
-            font-size: 13px;
-        }
-
-        .preview-meta-value.decimal { color: var(--mauve); }
-        .preview-meta-value.date { color: var(--yellow); }
-
-        .preview-actions {
+        /* Actions bar */
+        .actions-bar {
             display: flex;
             gap: 8px;
-            margin-top: 20px;
-        }
-
-        .preview-actions .btn {
-            flex: 1;
-            justify-content: center;
-            padding: 10px;
+            margin-top: 12px;
         }
 
         .btn {
-            padding: 6px 12px;
+            padding: 8px 14px;
             border-radius: 4px;
             font-size: 11px;
             font-family: inherit;
@@ -393,24 +399,63 @@
             font-weight: 600;
         }
 
-        .btn-primary:hover {
-            background: var(--teal);
-        }
+        .btn-primary:hover { background: var(--teal); }
 
         .btn-secondary {
             background: var(--surface0);
             color: var(--text);
         }
 
-        .btn-secondary:hover {
-            background: var(--surface1);
+        .btn-secondary:hover { background: var(--surface1); }
+
+        .btn-iterate {
+            background: var(--mauve);
+            color: var(--crust);
+            font-weight: 600;
         }
+
+        .btn-iterate:hover { background: var(--lavender); }
 
         .btn .key {
             background: rgba(0,0,0,0.2);
             padding: 2px 6px;
             border-radius: 3px;
             font-size: 10px;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Iterating spinner overlay */
+        .iterating-overlay {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 16px;
+            background: var(--yellow);
+            color: var(--crust);
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+
+        /* Spinner animation */
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border: 2px solid var(--crust);
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
         }
 
         /* Status bar */
@@ -501,22 +546,10 @@
         }
 
         /* Scrollbar styling */
-        ::-webkit-scrollbar {
-            width: 8px;
-        }
-
-        ::-webkit-scrollbar-track {
-            background: var(--mantle);
-        }
-
-        ::-webkit-scrollbar-thumb {
-            background: var(--surface1);
-            border-radius: 4px;
-        }
-
-        ::-webkit-scrollbar-thumb:hover {
-            background: var(--surface2);
-        }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: var(--mantle); }
+        ::-webkit-scrollbar-thumb { background: var(--surface1); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--surface2); }
 
         /* Shortcut hints */
         .shortcut-bar {
@@ -525,14 +558,15 @@
             font-size: 11px;
             color: var(--subtext0);
             display: flex;
-            gap: 20px;
+            gap: 16px;
             border-top: 1px solid var(--surface0);
+            flex-wrap: wrap;
         }
 
         .shortcut {
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 4px;
         }
 
         .key-hint {
@@ -572,119 +606,60 @@
             color: var(--crust);
         }
 
-        .mode-btn:hover:not(.active) {
-            color: var(--text);
-        }
+        .mode-btn:hover:not(.active) { color: var(--text); }
 
         .mode-btn .key-hint {
             background: rgba(0,0,0,0.2);
         }
 
-        /* Visual status badges */
-        .visual-badge {
-            font-size: 10px;
-            font-weight: 600;
-            padding: 3px 8px;
-            border-radius: 4px;
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-        }
-
-        .visual-badge.generating {
-            background: var(--yellow);
-            color: var(--crust);
-        }
-
-        .visual-badge.ready {
-            background: var(--green);
-            color: var(--crust);
-        }
-
-        .visual-badge.text-only {
-            background: var(--surface1);
-            color: var(--subtext0);
-        }
-
-        .visual-badge.failed {
-            background: var(--red);
-            color: var(--crust);
-        }
-
-        .visual-badge.pending {
-            background: var(--surface0);
-            color: var(--overlay0);
-        }
-
-        /* Spinner animation */
-        @keyframes spin {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-        }
-
-        .spinner {
-            display: inline-block;
-            width: 10px;
-            height: 10px;
-            border: 2px solid var(--crust);
-            border-top-color: transparent;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-        }
-
-        /* Carousel thumbnail */
-        .carousel-thumbnail {
-            margin-top: 8px;
-            border-radius: 6px;
-            overflow: hidden;
-            max-height: 120px;
-        }
-
-        .carousel-thumbnail img {
-            width: 100%;
-            height: auto;
-            display: block;
-            border-radius: 6px;
-        }
-
-        /* Preview visual section */
-        .preview-visual {
-            margin-bottom: 16px;
-        }
-
-        .preview-visual img {
-            width: 100%;
-            max-height: 300px;
-            object-fit: contain;
-            border-radius: 6px;
+        /* Section header */
+        .section-header {
             background: var(--mantle);
+            padding: 10px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--surface0);
+            position: sticky;
+            top: 0;
+            z-index: 10;
         }
 
-        .pdf-download-btn {
-            display: inline-flex;
+        .section-title {
+            color: var(--text);
+            font-weight: 600;
+            font-size: 12px;
+            display: flex;
             align-items: center;
-            gap: 6px;
-            padding: 8px 14px;
-            background: var(--mauve);
+            gap: 8px;
+        }
+
+        .section-count {
+            background: var(--sapphire);
             color: var(--crust);
-            border-radius: 4px;
-            text-decoration: none;
+            padding: 2px 8px;
+            border-radius: 10px;
             font-size: 11px;
             font-weight: 600;
-            margin-top: 8px;
         }
 
-        .pdf-download-btn:hover {
-            opacity: 0.85;
+        /* Overall delta in header */
+        .overall-delta {
+            font-size: 11px;
+            font-weight: 600;
+            margin-left: 6px;
         }
+        .overall-delta.up { color: var(--green); }
+        .overall-delta.down { color: var(--red); }
+        .overall-delta.same { color: var(--overlay0); }
     </style>
 </head>
 <body>
     <div class="tmux-container">
-        <!-- Left Pane: Posting Queue -->
+        <!-- Left Pane: Entity List -->
         <div class="pane">
             <div class="pane-header">
-                <span><span class="pane-index">0:</span> posting-queue</span>
+                <span><span class="pane-index">0:</span> iterations</span>
                 <div style="display: flex; align-items: center; gap: 12px;">
                     <div class="mode-toggle">
                         <a href="/" class="mode-btn"><span class="key-hint">q</span></a>
@@ -697,36 +672,29 @@
                 </div>
             </div>
 
-            <!-- Runway counter -->
-            <div class="runway-counter" id="runway-counter">
-                <!-- Populated by JavaScript -->
-            </div>
-
-            <div class="pane-body" id="queue-list">
+            <div class="pane-body" id="entity-list">
                 <!-- Populated by JavaScript -->
             </div>
             <div class="shortcut-bar">
-                <span class="shortcut"><span class="key-hint">j/k</span> navigate</span>
+                <span class="shortcut"><span class="key-hint">j/k</span> entities</span>
+                <span class="shortcut"><span class="key-hint">Up/Dn</span> rounds</span>
+                <span class="shortcut"><span class="key-hint">i</span> iterate</span>
+                <span class="shortcut"><span class="key-hint">a</span> stage</span>
                 <span class="shortcut"><span class="key-hint">c</span> copy</span>
-                <span class="shortcut"><span class="key-hint">m</span> mark posted</span>
-                <span class="shortcut"><span class="key-hint">q</span> queue</span>
             </div>
         </div>
 
-        <!-- Right Pane: Preview -->
+        <!-- Right Pane: Iteration Detail -->
         <div class="pane">
             <div class="pane-header">
-                <span><span class="pane-index">1:</span> preview</span>
+                <span><span class="pane-index">1:</span> detail</span>
                 <span id="preview-type-label" style="color: var(--sapphire);"></span>
             </div>
             <div class="pane-body" id="preview-pane">
                 <div class="preview-empty">
-                    <div class="preview-empty-icon">📤</div>
-                    <div>Select an item to preview</div>
+                    <div class="preview-empty-icon">&#x1F504;</div>
+                    <div>Select an entity to view iterations</div>
                 </div>
-            </div>
-            <div class="shortcut-bar">
-                <span class="shortcut"><span class="key-hint">Ctrl+C</span> quit</span>
             </div>
         </div>
 
@@ -734,7 +702,7 @@
         <div class="status-bar">
             <div class="status-section">
                 <span>[kb-serve]</span>
-                <span id="status-runway">0 in runway</span>
+                <span id="status-count">0 entities</span>
             </div>
             <div class="status-section">
                 <span class="status-item"><span class="status-key">q</span> queue</span>
@@ -755,9 +723,11 @@
 
     <script>
         // State
-        let queueData = { items: [], runway_counts: {}, total: 0 };
-        let selectedIndex = 0;
-        let selectedItem = null;
+        let queueData = { items: [], total: 0 };
+        let selectedEntityIndex = 0;
+        let selectedEntity = null;
+        let iterationsData = null;  // from /api/action/<id>/iterations
+        let selectedRoundIndex = -1; // which round is active in the detail pane
 
         // XSS protection helper
         function escapeHtml(text) {
@@ -766,85 +736,78 @@
             return div.innerHTML;
         }
 
-        // Action type icons
-        const ACTION_ICONS = {
-            'skool_post': '📝',
-            'skool_weekly_catchup': '📅',
-            'linkedin_post': '💼',
-            'linkedin_v2': '💼',
-            'student_guide': '📚',
-            'guide': '📚',
-            'summary': '📋',
-            'lead_magnet': '🧲',
-        };
-
-        // Platform colors for badges
         const PLATFORM_CLASS = {
             'LinkedIn': 'linkedin',
             'Skool': 'skool',
         };
 
-        // Fetch posting queue data
+        // Score class helper
+        function scoreClass(score) {
+            if (score === null || score === undefined) return 'none';
+            if (score >= 4) return 'high';
+            if (score >= 3) return 'mid';
+            return 'low';
+        }
+
+        // Format criterion name
+        function formatCriterion(name) {
+            return name.replace(/_/g, ' ');
+        }
+
+        // Delta text helper
+        function deltaText(prev, curr) {
+            if (prev === null || prev === undefined || curr === null || curr === undefined) return '';
+            const diff = curr - prev;
+            if (diff > 0) return `<span class="delta-badge up">+${diff}</span>`;
+            if (diff < 0) return `<span class="delta-badge down">${diff}</span>`;
+            return `<span class="delta-badge same">=</span>`;
+        }
+
+        // Overall delta text
+        function overallDelta(prev, curr) {
+            if (prev === null || prev === undefined) return '';
+            const diff = (curr - prev).toFixed(1);
+            if (diff > 0) return `<span class="overall-delta up">+${diff}</span>`;
+            if (diff < 0) return `<span class="overall-delta down">${diff}</span>`;
+            return `<span class="overall-delta same">=</span>`;
+        }
+
+        // Fetch entity list
         async function fetchQueue() {
             try {
-                const response = await fetch('/api/posting-queue');
+                const response = await fetch('/api/posting-queue-v2');
                 queueData = await response.json();
-                renderRunwayCounter();
-                renderQueue();
+                renderEntityList();
                 updateStatusBar();
 
                 // Auto-select first item if none selected
-                if (selectedItem === null && queueData.items.length > 0) {
-                    selectItem(0);
+                if (selectedEntity === null && queueData.items.length > 0) {
+                    selectEntity(0);
+                }
+
+                // If an entity is selected and iterating, refresh iterations
+                if (selectedEntity && selectedEntity.iterating) {
+                    await fetchIterations(selectedEntity.id);
                 }
             } catch (error) {
-                console.error('Failed to fetch posting queue:', error);
+                console.error('Failed to fetch queue:', error);
                 document.getElementById('connection-status').innerHTML = 'disconnected';
                 document.getElementById('connection-status').style.color = 'var(--red)';
             }
         }
 
-        // Render runway counter
-        function renderRunwayCounter() {
-            const counter = document.getElementById('runway-counter');
-
-            if (queueData.total === 0) {
-                counter.innerHTML = `
-                    <div class="runway-stat">
-                        <span class="runway-stat-count">0</span>
-                        <span class="runway-stat-label">posts ready</span>
-                    </div>
-                `;
-                return;
-            }
-
-            let html = '';
-            for (const [platform, count] of Object.entries(queueData.runway_counts)) {
-                const platformClass = PLATFORM_CLASS[platform] || '';
-                html += `
-                    <div class="runway-stat ${platformClass}">
-                        <span class="runway-stat-count">${count}</span>
-                        <span class="runway-stat-label">${platform} ready</span>
-                    </div>
-                `;
-            }
-
-            counter.innerHTML = html;
-        }
-
-        // Render queue list
-        function renderQueue() {
-            const queueList = document.getElementById('queue-list');
-            queueList.innerHTML = '';
+        // Render entity list
+        function renderEntityList() {
+            const list = document.getElementById('entity-list');
+            list.innerHTML = '';
 
             if (queueData.items.length === 0) {
-                const emptyState = document.createElement('div');
-                emptyState.className = 'empty-state';
-                emptyState.innerHTML = `
-                    <div class="empty-state-icon">📤</div>
-                    <div class="empty-state-text">No approved posts in runway.<br>Approve items from the action queue.</div>
+                list.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">&#x1F4DD;</div>
+                        <div class="empty-state-text">No items to review.<br>Run <code>kb analyze -t linkedin_v2</code> to generate content.</div>
+                    </div>
                 `;
-                queueList.appendChild(emptyState);
                 return;
             }
 
@@ -853,202 +816,351 @@
             header.className = 'section-header';
             header.innerHTML = `
                 <div class="section-title">
-                    <span>📤 Ready to Post</span>
+                    <span>Iterations</span>
                     <span class="section-count">${queueData.total}</span>
                 </div>
             `;
-            queueList.appendChild(header);
+            list.appendChild(header);
 
             queueData.items.forEach((item, index) => {
-                const actionItem = createActionItem(item, index);
-                queueList.appendChild(actionItem);
+                const el = document.createElement('div');
+                el.className = 'entity-item';
+                if (index === selectedEntityIndex) el.classList.add('selected');
+
+                const platformClass = PLATFORM_CLASS[item.destination] || '';
+                const sc = scoreClass(item.latest_score);
+                const scoreHtml = item.latest_score !== null
+                    ? `<span class="entity-score ${sc}">${item.latest_score.toFixed(1)}</span>`
+                    : `<span class="entity-score none">--</span>`;
+
+                let statusHtml = '';
+                if (item.iterating) {
+                    statusHtml = '<span class="entity-status iterating"><span class="spinner" style="width:8px;height:8px;border-width:1.5px;"></span> iterating</span>';
+                } else if (item.status === 'staged') {
+                    statusHtml = '<span class="entity-status staged">staged</span>';
+                } else if (item.status === 'draft') {
+                    statusHtml = '<span class="entity-status draft">draft</span>';
+                }
+
+                const roundsText = item.iteration_count > 0
+                    ? `${item.iteration_count} round${item.iteration_count > 1 ? 's' : ''}`
+                    : '';
+
+                el.innerHTML = `
+                    <div class="entity-title">${escapeHtml(item.source_title)}</div>
+                    <div class="entity-meta">
+                        ${scoreHtml}
+                        <span class="entity-rounds">${roundsText}</span>
+                        ${statusHtml}
+                        <span class="entity-decimal">${escapeHtml(item.source_decimal)}</span>
+                        <span class="platform-badge ${platformClass}" style="margin-left:auto;">${escapeHtml(item.destination)}</span>
+                    </div>
+                `;
+
+                el.addEventListener('click', () => selectEntity(index));
+                list.appendChild(el);
             });
         }
 
-        // Create action item element
-        function createActionItem(item, index) {
-            const div = document.createElement('div');
-            div.className = 'action-item';
-            if (index === selectedIndex) {
-                div.classList.add('selected');
-            }
-
-            const icon = ACTION_ICONS[item.type] || '📄';
-            const preview = item.content.substring(0, 100);
-            const platformClass = PLATFORM_CLASS[item.destination] || '';
-
-            const visualBadge = renderVisualBadge(item.visual_status);
-            const thumbnailHtml = item.thumbnail_url && item.visual_status === 'ready'
-                ? `<div class="carousel-thumbnail"><img src="${escapeHtml(item.thumbnail_url)}" alt="Slide 1" loading="lazy"></div>`
-                : '';
-
-            div.innerHTML = `
-                <div class="action-item-header">
-                    <div class="action-type">
-                        <span class="action-icon">${icon}</span>
-                        <span class="action-label">${escapeHtml(formatActionType(item.type))}</span>
-                    </div>
-                    <div style="display: flex; gap: 6px; align-items: center;">
-                        ${visualBadge}
-                        <span class="platform-badge ${platformClass}">${escapeHtml(item.destination)}</span>
-                    </div>
-                </div>
-                <div class="action-source">
-                    from <span class="action-source-title">"${escapeHtml(item.source_title)}"</span>
-                </div>
-                <div class="action-meta">
-                    <span class="meta-item">
-                        <span style="color: var(--mauve)">${escapeHtml(item.source_decimal)}</span>
-                    </span>
-                    <span class="meta-item">
-                        <span>~${item.word_count} words</span>
-                    </span>
-                </div>
-                ${thumbnailHtml}
-                <div class="action-preview">${escapeHtml(preview)}...</div>
-            `;
-
-            div.addEventListener('click', () => selectItem(index));
-            return div;
-        }
-
-        // Format action type for display
-        function formatActionType(type) {
-            return type.split('_').map(word =>
-                word.charAt(0).toUpperCase() + word.slice(1)
-            ).join(' ');
-        }
-
-        // Render visual status badge HTML
-        function renderVisualBadge(status) {
-            switch (status) {
-                case 'generating':
-                    return '<span class="visual-badge generating"><span class="spinner"></span> Generating</span>';
-                case 'ready':
-                    return '<span class="visual-badge ready">Carousel</span>';
-                case 'text_only':
-                    return '<span class="visual-badge text-only">Text Only</span>';
-                case 'failed':
-                    return '<span class="visual-badge failed">Failed</span>';
-                case 'pending':
-                default:
-                    return '<span class="visual-badge pending">...</span>';
-            }
-        }
-
-        // Select an item
-        function selectItem(index) {
+        // Select an entity
+        async function selectEntity(index) {
             if (index < 0 || index >= queueData.items.length) return;
 
-            selectedIndex = index;
-            selectedItem = queueData.items[index];
+            selectedEntityIndex = index;
+            selectedEntity = queueData.items[index];
 
             // Update UI
-            document.querySelectorAll('.action-item').forEach((el, i) => {
+            document.querySelectorAll('.entity-item').forEach((el, i) => {
                 el.classList.toggle('selected', i === index);
-                // Scroll selected item into view
                 if (i === index) {
                     el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
                 }
             });
 
-            loadPreview(selectedItem);
+            document.getElementById('preview-type-label').textContent = selectedEntity.type;
+
+            await fetchIterations(selectedEntity.id);
         }
 
-        // Load preview pane
-        async function loadPreview(item) {
-            const previewPane = document.getElementById('preview-pane');
-            const previewTypeLabel = document.getElementById('preview-type-label');
-            const platformClass = PLATFORM_CLASS[item.destination] || '';
+        // Fetch iterations for selected entity
+        async function fetchIterations(actionId) {
+            try {
+                const response = await fetch(`/api/action/${actionId}/iterations`);
+                iterationsData = await response.json();
 
-            previewTypeLabel.textContent = item.type;
+                // Default to latest round
+                if (iterationsData.iterations.length > 0) {
+                    selectedRoundIndex = iterationsData.iterations.length - 1;
+                } else {
+                    selectedRoundIndex = -1;
+                }
 
-            // Build visual section
-            let visualHtml = '';
-            if (item.visual_status === 'ready' && item.thumbnail_url) {
-                visualHtml = `
-                    <div class="preview-section preview-visual">
-                        <div class="preview-section-title">Carousel Preview</div>
-                        <img src="${escapeHtml(item.thumbnail_url)}" alt="Carousel slide 1">
-                        ${item.pdf_url ? `<a href="${escapeHtml(item.pdf_url)}" target="_blank" class="pdf-download-btn">Download PDF</a>` : ''}
+                renderIterationView();
+            } catch (error) {
+                console.error('Failed to fetch iterations:', error);
+                document.getElementById('preview-pane').innerHTML = `
+                    <div class="preview-empty">
+                        <div class="preview-empty-icon">&#x26A0;</div>
+                        <div>Failed to load iterations</div>
                     </div>
                 `;
-            } else if (item.visual_status === 'generating') {
-                visualHtml = `
-                    <div class="preview-section">
-                        <div class="preview-section-title">Visual</div>
-                        <div style="padding: 16px; background: var(--mantle); border-radius: 6px; text-align: center; color: var(--yellow);">
-                            <span class="spinner" style="border-color: var(--yellow); border-top-color: transparent;"></span>
-                            Generating carousel...
+            }
+        }
+
+        // Render the iteration detail view
+        function renderIterationView() {
+            const pane = document.getElementById('preview-pane');
+
+            if (!iterationsData || iterationsData.iterations.length === 0) {
+                pane.innerHTML = `
+                    <div class="preview-empty">
+                        <div class="preview-empty-icon">&#x1F4DD;</div>
+                        <div>No iterations yet</div>
+                    </div>
+                `;
+                return;
+            }
+
+            const iterations = iterationsData.iterations;
+            const current = iterations[selectedRoundIndex] || iterations[iterations.length - 1];
+            const prevRound = selectedRoundIndex > 0 ? iterations[selectedRoundIndex - 1] : null;
+
+            // Build round tabs
+            let roundTabsHtml = '';
+            iterations.forEach((iter, i) => {
+                const active = i === selectedRoundIndex ? ' active' : '';
+                const sc = iter.scores ? scoreClass(iter.scores.overall) : 'none';
+                const label = iter.scores
+                    ? `R${iter.round} (${iter.scores.overall.toFixed(1)})`
+                    : `R${iter.round}`;
+                roundTabsHtml += `<button class="round-tab${active}" data-round="${i}">${label}</button>`;
+            });
+
+            // Build scores section
+            let scoresHtml = '';
+            if (current.scores) {
+                const sc = scoreClass(current.scores.overall);
+                const prevScores = prevRound && prevRound.scores ? prevRound.scores : null;
+
+                let overallDeltaHtml = prevScores
+                    ? overallDelta(prevScores.overall, current.scores.overall)
+                    : '';
+
+                let criteriaHtml = '';
+                for (const [criterion, score] of Object.entries(current.scores.criteria || {})) {
+                    const csc = scoreClass(score);
+                    const prevScore = prevScores && prevScores.criteria ? prevScores.criteria[criterion] : null;
+                    const delta = prevScore !== null && prevScore !== undefined
+                        ? deltaText(prevScore, score)
+                        : '';
+
+                    criteriaHtml += `
+                        <div class="score-item">
+                            <span class="score-label">${formatCriterion(criterion)}</span>
+                            <span class="score-value ${csc}">${score}/5 ${delta}</span>
+                        </div>
+                    `;
+                }
+
+                scoresHtml = `
+                    <div class="scores-section">
+                        <div class="scores-header">
+                            <span class="scores-title">Judge Scores</span>
+                            <span class="overall-score ${sc}">${current.scores.overall.toFixed(1)}/5.0 ${overallDeltaHtml}</span>
+                        </div>
+                        <div class="scores-grid">
+                            ${criteriaHtml}
                         </div>
                     </div>
                 `;
-            } else if (item.visual_status === 'text_only') {
-                visualHtml = `
-                    <div class="preview-section">
-                        <div class="preview-section-title">Visual</div>
-                        <div style="padding: 12px; background: var(--mantle); border-radius: 6px; color: var(--subtext0); font-size: 12px;">
-                            Text-only post (no carousel)
-                        </div>
-                    </div>
-                `;
-            } else if (item.visual_status === 'failed') {
-                visualHtml = `
-                    <div class="preview-section">
-                        <div class="preview-section-title">Visual</div>
-                        <div style="padding: 12px; background: var(--mantle); border-radius: 6px; color: var(--red); font-size: 12px;">
-                            Visual generation failed. Post is still ready for text-only publishing.
-                        </div>
+            } else {
+                scoresHtml = `
+                    <div class="scores-section">
+                        <div class="not-judged">Not judged</div>
                     </div>
                 `;
             }
 
-            previewPane.innerHTML = `
-                <div class="preview-content">
-                    <div class="preview-title">${escapeHtml(formatActionType(item.type))}</div>
-                    <div class="preview-subtitle">
-                        ${escapeHtml(item.source_title)}
-                        <span class="platform-badge ${platformClass}" style="margin-left: 8px;">${escapeHtml(item.destination)}</span>
-                        ${renderVisualBadge(item.visual_status)}
+            // Iterating overlay
+            let iteratingHtml = '';
+            if (iterationsData.iterating) {
+                iteratingHtml = `
+                    <div class="iterating-overlay">
+                        <span class="spinner"></span>
+                        Iterating... generating next round
                     </div>
+                `;
+            }
 
-                    ${visualHtml}
+            const isIterating = iterationsData.iterating;
 
-                    <div class="preview-section">
-                        <div class="preview-meta-grid">
-                            <div class="preview-meta-item">
-                                <div class="preview-meta-label">Category</div>
-                                <div class="preview-meta-value decimal">${escapeHtml(item.source_decimal)}</div>
-                            </div>
-                            <div class="preview-meta-item">
-                                <div class="preview-meta-label">Word Count</div>
-                                <div class="preview-meta-value">~${item.word_count} words</div>
-                            </div>
+            pane.innerHTML = `
+                <div class="iteration-view">
+                    <div class="iteration-header">
+                        <div class="iteration-title">${escapeHtml(selectedEntity.source_title)}</div>
+                        <div class="iteration-subtitle">
+                            <span>${escapeHtml(selectedEntity.source_decimal)}</span>
+                            <span class="platform-badge ${PLATFORM_CLASS[selectedEntity.destination] || ''}">${escapeHtml(selectedEntity.destination)}</span>
+                            <span>~${selectedEntity.word_count} words</span>
                         </div>
                     </div>
 
-                    <div class="preview-section">
-                        <div class="preview-section-title">Content</div>
-                        <div class="preview-text">${escapeHtml(item.content)}</div>
+                    ${iteratingHtml}
+
+                    <div class="round-nav">
+                        <span class="round-nav-label">Round:</span>
+                        <div class="round-tabs">${roundTabsHtml}</div>
+                        <span class="round-nav-hint"><span class="key-hint">Up</span>/<span class="key-hint">Dn</span></span>
                     </div>
 
-                    <div class="preview-actions">
-                        <button class="btn btn-primary" onclick="copyAndMarkPosted()">
-                            <span>Copy & Mark Posted</span>
-                            <span class="key">m</span>
+                    ${scoresHtml}
+
+                    <div class="post-section">
+                        <div class="post-section-title">Post Content (Round ${current.round})</div>
+                        <div class="post-text">${escapeHtml(current.post)}</div>
+                    </div>
+
+                    <div class="actions-bar">
+                        <button class="btn btn-iterate" onclick="triggerIterate()" ${isIterating ? 'disabled' : ''}>
+                            <span>${isIterating ? 'Iterating...' : 'Iterate'}</span>
+                            <span class="key">i</span>
                         </button>
-                        <button class="btn btn-secondary" onclick="copyOnly()">
-                            <span>Copy Only</span>
+                        <button class="btn btn-primary" onclick="stageItem()">
+                            <span>Stage</span>
+                            <span class="key">a</span>
+                        </button>
+                        <button class="btn btn-secondary" onclick="copyContent()">
+                            <span>Copy</span>
                             <span class="key">c</span>
                         </button>
                     </div>
                 </div>
             `;
+
+            // Attach round tab click handlers
+            pane.querySelectorAll('.round-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    selectedRoundIndex = parseInt(tab.dataset.round);
+                    renderIterationView();
+                });
+            });
+        }
+
+        // Trigger iteration
+        async function triggerIterate() {
+            if (!selectedEntity || iterationsData.iterating) return;
+
+            try {
+                const response = await fetch(`/api/action/${selectedEntity.id}/iterate`, {
+                    method: 'POST',
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    showToast('Iteration started...');
+                    // Immediately update UI to show iterating state
+                    iterationsData.iterating = true;
+                    selectedEntity.iterating = true;
+                    renderIterationView();
+                    renderEntityList();
+
+                    // Start polling for completion
+                    pollIteration();
+                } else {
+                    showToast(data.error || 'Iterate failed');
+                }
+            } catch (error) {
+                console.error('Iterate failed:', error);
+                showToast('Iterate failed');
+            }
+        }
+
+        // Poll for iteration completion
+        async function pollIteration() {
+            if (!selectedEntity) return;
+
+            const actionId = selectedEntity.id;
+            const check = async () => {
+                try {
+                    const response = await fetch(`/api/action/${actionId}/iterations`);
+                    const data = await response.json();
+
+                    if (!data.iterating) {
+                        // Iteration complete - refresh everything
+                        iterationsData = data;
+                        selectedRoundIndex = data.iterations.length - 1;
+                        renderIterationView();
+
+                        // Also refresh the entity list for updated scores
+                        await fetchQueue();
+
+                        showToast('Iteration complete!');
+                        return;
+                    }
+
+                    // Still iterating, poll again
+                    setTimeout(check, 2000);
+                } catch (error) {
+                    console.error('Poll failed:', error);
+                    setTimeout(check, 3000);
+                }
+            };
+
+            setTimeout(check, 2000);
+        }
+
+        // Stage item
+        async function stageItem() {
+            if (!selectedEntity) return;
+
+            try {
+                const response = await fetch(`/api/action/${selectedEntity.id}/stage`, {
+                    method: 'POST',
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    showToast('Staged! Content copied to clipboard.');
+                    await fetchQueue();
+
+                    // Re-select the same entity
+                    if (selectedEntityIndex < queueData.items.length) {
+                        selectEntity(selectedEntityIndex);
+                    }
+                } else {
+                    showToast(data.error || 'Stage failed');
+                }
+            } catch (error) {
+                console.error('Stage failed:', error);
+                showToast('Stage failed');
+            }
+        }
+
+        // Copy content
+        async function copyContent() {
+            if (!selectedEntity || !iterationsData) return;
+
+            const current = iterationsData.iterations[selectedRoundIndex];
+            if (!current) return;
+
+            try {
+                await navigator.clipboard.writeText(current.post);
+                showToast('Copied to clipboard!');
+            } catch (error) {
+                // Fallback to server-side
+                try {
+                    await fetch(`/api/action/${selectedEntity.id}/copy`, { method: 'POST' });
+                    showToast('Copied to clipboard!');
+                } catch (err) {
+                    console.error('Copy failed:', err);
+                    showToast('Copy failed');
+                }
+            }
         }
 
         // Update status bar
         function updateStatusBar() {
-            document.getElementById('status-runway').textContent = `${queueData.total} in runway`;
+            document.getElementById('status-count').textContent = `${queueData.total} entities`;
         }
 
         // Show toast notification
@@ -1060,73 +1172,6 @@
             setTimeout(() => {
                 toast.classList.remove('show');
             }, 2000);
-        }
-
-        // Copy to clipboard only
-        async function copyOnly() {
-            if (!selectedItem) return;
-
-            try {
-                // Try client-side clipboard API first
-                await navigator.clipboard.writeText(selectedItem.content);
-                showToast(`Copied! Paste to ${selectedItem.destination}.`);
-            } catch (error) {
-                // Fallback to server-side pyperclip
-                try {
-                    const response = await fetch(`/api/action/${selectedItem.id}/copy`, {
-                        method: 'POST',
-                    });
-                    if (response.ok) {
-                        showToast(`Copied! Paste to ${selectedItem.destination}.`);
-                    }
-                } catch (err) {
-                    console.error('Copy failed:', err);
-                    showToast('Copy failed - please try manually');
-                }
-            }
-        }
-
-        // Copy and mark as posted
-        async function copyAndMarkPosted() {
-            if (!selectedItem) return;
-
-            try {
-                // Copy to clipboard first
-                try {
-                    await navigator.clipboard.writeText(selectedItem.content);
-                } catch (error) {
-                    // Fallback to server-side
-                    await fetch(`/api/action/${selectedItem.id}/copy`, { method: 'POST' });
-                }
-
-                // Mark as posted
-                const response = await fetch(`/api/action/${selectedItem.id}/posted`, {
-                    method: 'POST',
-                });
-                if (response.ok) {
-                    showToast(`Copied & marked posted!`);
-                    await fetchQueue();
-
-                    // Move to next item
-                    if (selectedIndex >= queueData.items.length) {
-                        selectedIndex = Math.max(0, queueData.items.length - 1);
-                    }
-                    if (queueData.items.length > 0) {
-                        selectItem(selectedIndex);
-                    } else {
-                        selectedItem = null;
-                        document.getElementById('preview-pane').innerHTML = `
-                            <div class="preview-empty">
-                                <div class="preview-empty-icon">📤</div>
-                                <div>No more posts in runway!</div>
-                            </div>
-                        `;
-                    }
-                }
-            } catch (error) {
-                console.error('Failed to mark posted:', error);
-                showToast('Failed to mark as posted');
-            }
         }
 
         // Keyboard navigation
@@ -1149,30 +1194,45 @@
                 return;
             }
 
-            if (queueData.items.length === 0) {
-                return;
-            }
+            if (queueData.items.length === 0) return;
 
             if (e.key === 'j') {
-                // Move down
-                selectItem(Math.min(selectedIndex + 1, queueData.items.length - 1));
+                // Move down through entities
+                selectEntity(Math.min(selectedEntityIndex + 1, queueData.items.length - 1));
             } else if (e.key === 'k') {
-                // Move up
-                selectItem(Math.max(selectedIndex - 1, 0));
+                // Move up through entities
+                selectEntity(Math.max(selectedEntityIndex - 1, 0));
+            } else if (e.key === 'ArrowDown') {
+                // Move to next round within entity
+                e.preventDefault();
+                if (iterationsData && selectedRoundIndex < iterationsData.iterations.length - 1) {
+                    selectedRoundIndex++;
+                    renderIterationView();
+                }
+            } else if (e.key === 'ArrowUp') {
+                // Move to previous round within entity
+                e.preventDefault();
+                if (iterationsData && selectedRoundIndex > 0) {
+                    selectedRoundIndex--;
+                    renderIterationView();
+                }
+            } else if (e.key === 'i') {
+                // Iterate
+                triggerIterate();
+            } else if (e.key === 'a') {
+                // Stage (NOT approve)
+                stageItem();
             } else if (e.key === 'c') {
-                // Copy only
-                copyOnly();
-            } else if (e.key === 'm') {
-                // Mark posted (copy + mark)
-                copyAndMarkPosted();
+                // Copy
+                copyContent();
             }
         });
 
         // Initialize
         fetchQueue();
 
-        // Poll for updates every 10 seconds (less aggressive than main queue)
-        setInterval(fetchQueue, 10000);
+        // Poll for updates every 5 seconds
+        setInterval(fetchQueue, 5000);
     </script>
 </body>
 </html>
