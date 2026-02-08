@@ -1316,7 +1316,7 @@ def run_analysis_with_auto_judge(
     save: bool = True,
     skip_existing: bool = True,
     force: bool = False,
-    judge_rounds: int = 1,
+    judge_rounds: int = 0,
 ) -> dict:
     """
     Run analyses, auto-invoking the judge loop for types that have one.
@@ -1324,6 +1324,9 @@ def run_analysis_with_auto_judge(
     For analysis types in AUTO_JUDGE_TYPES (e.g., linkedin_v2), this runs
     run_with_judge_loop() instead of the plain analyze_transcript_file().
     Other types fall through to the standard pipeline.
+
+    judge_rounds=0 (default): generate draft + judge scores only, no improvement.
+    Improvement rounds happen interactively via kb serve 'i' shortcut.
 
     Called from CLI when `kb analyze -t linkedin_v2` is invoked.
 
