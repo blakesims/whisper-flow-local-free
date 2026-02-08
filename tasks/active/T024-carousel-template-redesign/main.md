@@ -409,6 +409,56 @@ Note: Q2 (timeline style) and Q4 (font choice) folded into Phase 0 mockup scope 
 
 ---
 
+## Code Review Log
+
+### Phase 1
+- **Gate:** PASS
+- **Reviewed:** 2026-02-08
+- **Issues:** 0 critical, 3 major, 4 minor
+- **Summary:** Solid implementation. 3 Jinja2 templates, config schema, profile photo loading all work. 117 tests pass, 277 total suite green. Major issues: hardcoded strings in "parameterized" templates, hardcoded color values in CSS, test env missing autoescape. None block Phase 2 -- defer to Phase 4 (Polish).
+
+-> Details: `code-review-phase-1.md`
+
+---
+
+### Phase 2: Content Slide Template
+- **Status:** COMPLETE
+- **Started:** 2026-02-08
+- **Completed:** 2026-02-08
+- **Commits:** `2c493cc`
+- **Files Modified:**
+  - `kb/render.py` -- added `markdown_to_html()` filter function (parses `- ` bullets, `1. ` numbered lists, plain text to `<p>`/`<br>`); registered filter with Jinja2 env; added `import re` and `from markupsafe import Markup`
+  - `kb/carousel_templates/brand-purple.html` -- replaced `lstrip('- ')` content rendering with `|markdown_to_html` filter; added `.content p` CSS styling
+  - `kb/carousel_templates/modern-editorial.html` -- replaced `lstrip('- ')` with `|markdown_to_html`; added `{% if header.show_on_all_slides %}` guard on content/mermaid/CTA slides; added `.content p` CSS
+  - `kb/carousel_templates/tech-minimal.html` -- replaced `lstrip('- ')` with `|markdown_to_html`; added `{% if header.show_on_all_slides %}` guard on content/mermaid/CTA slides; added `.content p` CSS
+  - `kb/config/analysis_types/carousel_slides.json` -- added CONTENT FORMATTING section to LLM prompt: instructs `- ` for bullets, `1. ` for numbered lists, newlines for line breaks
+  - `kb/tests/test_carousel_templates.py` -- rewritten: 111 tests (was 69). Added `autoescape=select_autoescape(["html"])` to all env fixtures matching production. New test classes: TestMarkdownToHtml (10 tests), TestAllTemplatesContentTypes (15 parameterized tests). New tests per template: timeline indicators, content-as-bullets, numbered lists, plain text, header.show_on_all_slides, CTA styling
+- **Notes:**
+  - `markdown_to_html` returns `Markup` type (safe HTML) so Jinja2 autoescape does not double-escape the generated HTML
+  - Timeline indicators already existed from Phase 1 in all 3 templates -- Phase 2 verified and tested them
+  - Phase 1 code review issues addressed: (1) `lstrip('- ')` replaced with proper markdown parsing, (2) `header.show_on_all_slides` now honored by all 3 templates, (3) test env now uses autoescape matching production
+  - Full suite: 342 tests pass
+
+### Tasks Completed
+- [x] Task 2.1: Added `markdown_to_html()` filter to render.py with Markup return type
+- [x] Task 2.2: Registered filter with Jinja2 environment in `render_html_from_slides()`
+- [x] Task 2.3: Replaced `lstrip('- ')` content parsing in all 3 templates with `|markdown_to_html`
+- [x] Task 2.4: Added `<p>` CSS styling for plain text content in all 3 templates
+- [x] Task 2.5: Added `header.show_on_all_slides` guard to modern-editorial and tech-minimal
+- [x] Task 2.6: Added markdown formatting instruction to carousel_slides.json LLM prompt
+- [x] Task 2.7: Updated tests with autoescape, markdown parsing tests, timeline tests, content type tests
+
+### Acceptance Criteria Verification
+- [x] AC1: Content slides render with timeline indicator showing position -- brand-purple has numbered circles with connecting lines, modern-editorial has editorial big numbers (01/02) + pip bar, tech-minimal has breadcrumb path + colored bar segments. Verified by tests.
+- [x] AC2: Timeline fills in as slides progress -- active/filled/unfilled states verified in all 3 templates
+- [x] AC3: Bullet points render as actual bullets (not raw text) -- `- ` lines parsed to `<ul><li>` by markdown_to_html filter. Verified by TestMarkdownToHtml and cross-template tests.
+- [x] AC4: Numbered lists render with proper numbering -- `1. ` lines parsed to `<ol><li>`. Verified by tests.
+- [x] AC5: Free-form text has line breaks (not single block) -- plain text parsed to `<p>` with `<br>`. Verified by tests.
+- [x] AC6: Header bar consistent across all slides -- `header.show_on_all_slides` now honored by all 3 templates. Verified by header_show_on_all_slides_respected tests.
+- [x] AC7: Text is readable at 1080x1350 dimensions -- font sizes set in CSS (26-27px body, 44-50px titles). Visual verification deferred to Phase 4 (requires Playwright render).
+
+---
+
 ## Notes & Updates
 - 2026-02-08: Task created from Blake's visual feedback on T022 carousel output. Boring layout, pixelated mermaid, no profile photo, block text. Redesign with mockup-first approach.
 - 2026-02-08: Blake's template vision: book-style title page, timeline/progress circles on content slides, header with name + community, profile photo circular cutout. Each slide should be informative standalone.
