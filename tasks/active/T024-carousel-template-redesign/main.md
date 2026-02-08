@@ -4,7 +4,7 @@
 T024
 
 ## Meta
-- **Status:** EXECUTING_PHASE_0
+- **Status:** CODE_REVIEW
 - **Last Updated:** 2026-02-08
 
 ## Overview
@@ -327,7 +327,46 @@ Note: Q2 (timeline style) and Q4 (font choice) folded into Phase 0 mockup scope 
 
 ## Execution Log
 
-*(To be filled during execution)*
+### Phase 0: Mockup Ideation
+- **Status:** COMPLETE
+- **Started:** 2026-02-08
+- **Completed:** 2026-02-08
+- **Commits:** `6a30a82`
+- **Files Created:**
+  - `kb/carousel_templates/mockups/1-clean-professional.html` — white/light bg, Inter font, dot-based timeline with labels, thin accent lines, minimal layout
+  - `kb/carousel_templates/mockups/2-dark-bold.html` — dark #0A0A0F bg, Space Grotesk headings, gradient bar progress (orange-to-pink), step badges, rounded CTA button
+  - `kb/carousel_templates/mockups/3-brand-purple.html` — #2D1B69 gradient bg, Plus Jakarta Sans, numbered circle timeline with connecting lines, purple accent palette, corner glow
+  - `kb/carousel_templates/mockups/4-modern-editorial.html` — cream #FAF8F5 bg, Playfair Display serif headings, large editorial step numbers (01/02/03), magazine-style pip progress, pull-quote accents, issue numbering
+  - `kb/carousel_templates/mockups/5-tech-minimal.html` — GitHub-dark #0D1117 bg, JetBrains Mono accents, terminal window chrome, breadcrumb path + bar progress, code-highlight spans, green prompt symbols
+- **Notes:**
+  - All 5 mockups are self-contained HTML, no build step, viewable in any browser
+  - Each has 6 slides: title page, 3 content slides, 1 mermaid (inline SVG), 1 CTA
+  - All slides 1080x1350px with `page-break-after: always`
+  - Header bar (Blake Sims / Claude Code Architects) on every slide
+  - Profile photo placeholder (gray circle with person SVG icon) on every title page
+  - Timeline/progress indicators on all content slides — each style uses a visually distinct approach
+  - Content uses bullets (ul) and numbered lists (ol), not block text
+  - Mermaid diagrams are hand-crafted inline SVG styled to match each template's color palette
+  - Google Fonts loaded via link tag (Inter, Space Grotesk, Plus Jakarta Sans, Playfair Display, Source Sans 3, JetBrains Mono)
+  - Realistic AI/automation dummy content throughout
+
+### Tasks Completed
+- [x] Task 0.1: Created mockup directory at `kb/carousel_templates/mockups/`
+- [x] Task 0.2: Built 1-clean-professional.html — light/minimal style
+- [x] Task 0.3: Built 2-dark-bold.html — dark bg, bold gradients
+- [x] Task 0.4: Built 3-brand-purple.html — evolved CCA purple
+- [x] Task 0.5: Built 4-modern-editorial.html — magazine/serif layout
+- [x] Task 0.6: Built 5-tech-minimal.html — code-editor/terminal style
+
+### Acceptance Criteria Verification
+- [x] AC1: 5 distinct HTML mockup files generated — all in `kb/carousel_templates/mockups/`
+- [x] AC2: Each shows title page, 3 content slides, mermaid slide, CTA slide — 6 slides per file
+- [x] AC3: Header bar visible on each slide with name + community
+- [x] AC4: Profile photo placeholder on title slide — SVG person icon in styled circle
+- [x] AC5: Timeline/progress indicator visible on content slides — 5 different approaches (dots, bar, numbered circles, editorial numbers+pips, breadcrumb+bar)
+- [x] AC6: Content uses bullets/lists (not block text) — ul and ol elements with styled markers
+- [x] AC7: Each file opens in browser at correct dimensions (1080x1350) — width/height set on `.slide` class
+- [ ] AC8: Blake reviews and selects winner(s) — PENDING: requires human review
 
 ---
 
