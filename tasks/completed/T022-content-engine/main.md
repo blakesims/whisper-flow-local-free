@@ -4,7 +4,7 @@
 T022
 
 ## Meta
-- **Status:** ACTIVE
+- **Status:** COMPLETE
 - **Last Updated:** 2026-02-08
 
 ## Overview
@@ -399,7 +399,7 @@ New function `run_with_judge_loop(decimal, analysis_type, judge_type, max_rounds
 - [ ] `linkedin_v2` appears in action queue; old `linkedin_post` items don't
 
 ### Phase 5: Iterative Judge Loop with Versioned History
-**Status**: PLANNING
+**Status**: SUPERSEDED (by T023 + T024)
 
 **Objectives:**
 
@@ -414,11 +414,37 @@ The current judge loop (`--judge`) overwrites the initial draft — no audit tra
 - `linkedin_v2` — alias/pointer to the latest version (for downstream consumers like visual_format, carousel_slides, posting queue)
 
 **Key behaviors:**
-1. **Always judge automatically.** Running `linkedin_v2` generates the draft AND runs the judge. The raw judge score is visible alongside the draft in kb serve.
-2. **Explicit opt-in to improve.** Blake reviews draft + scores in kb serve, then decides whether to trigger a round of improvement. Could be a button: "Improve" or keyboard shortcut.
-3. **Full history in judgment context.** Each improvement round receives the FULL history: all prior drafts, all prior judge evaluations, and all prior feedback. This prevents the LLM from ping-ponging on conflicting judge feedback — it can see "Round 1 judge said X, that made me do Y, Round 2 judge said Z which contradicts X" and self-correct.
+1. **Auto-judge in CLI only.** Running `kb analyze -t linkedin_v2` generates the draft AND auto-runs the judge. This auto-judge happens in a new wrapper function `run_analysis_with_auto_judge()` called from the CLI entry point only. The `--judge` flag is kept for backward compatibility but is effectively a no-op for linkedin_v2 (since judge always runs). Other callers (`run_visual_pipeline()`, `run_analysis_with_deps()`, `kb publish`) do NOT auto-judge — they use the existing `linkedin_v2` result as-is. Rationale: the approve flow in kb serve already approved the content, and adding 2 extra LLM calls to background visual pipeline would triple the latency for no benefit.
+2. **Explicit opt-in to improve.** Blake reviews draft + scores in kb serve, then clicks "Improve" button to trigger the next round.
+3. **Full history in judgment context.** Each improvement round receives the FULL history as a JSON array via the existing `{{#if judge_feedback}}` template variable. Format:
+   ```json
+   [
+     {
+       "round": 0,
+       "draft": "the full post text from round 0",
+       "judge": {
+         "overall_score": 3.4,
+         "scores": {"hook_strength": 3, "structure": 4, ...},
+         "improvements": ["...", "..."],
+         "rewritten_hook": "..."
+       }
+     },
+     {
+       "round": 1,
+       "draft": "the full post text from round 1",
+       "judge": {
+         "overall_score": 4.1,
+         "scores": {"hook_strength": 4, "structure": 4, ...},
+         "improvements": ["...", "..."],
+         "rewritten_hook": "..."
+       }
+     }
+   ]
+   ```
+   This prevents the LLM from ping-ponging on conflicting judge feedback — it can see "Round 1 judge said X, that made me do Y, Round 2 judge said Z which contradicts X" and self-correct. Context window note: at ~2KB per round (draft + judge), 5 rounds = ~10KB of history — well within Gemini's context limits even with a long transcript.
 4. **Score deltas visible.** kb serve shows per-criterion score changes between rounds: hook_strength 3→4 (+1), structure 4→4 (=), etc. Overall score delta shown prominently.
 5. **Indefinite rounds.** No hard cap on rounds. Blake can keep improving until satisfied. In practice, 1-2 rounds expected.
+6. **Visual pipeline re-trigger after Improve.** After an Improve round succeeds and `linkedin_v2` is updated with the new content, `visual_status` is reset to "pending" and the visual pipeline is automatically re-triggered in a background thread (same pattern as approve). This keeps text and carousel in sync. State transitions: approved → improving → approved (new round saved) → generating (visual) → ready.
 
 **Future vision (out of scope for Phase 5):**
 - Analytics engine: "Round 1 improves average score by X, Round 2 by Y" — tracked over time across all posts
@@ -429,38 +455,57 @@ The current judge loop (`--judge`) overwrites the initial draft — no audit tra
 ```json
 {
   "analysis": {
-    "linkedin_v2": { ... },          // latest version (alias)
-    "linkedin_v2_0": { ... },        // round 0 draft
-    "linkedin_judge_0": { ... },     // round 0 evaluation
-    "linkedin_v2_1": { ... },        // round 1 improved
-    "linkedin_judge_1": { ... },     // round 1 evaluation
-    "linkedin_v2_rounds": 2,         // total rounds completed
-    "linkedin_v2_history": {         // delta tracking
-      "scores": [
-        {"round": 0, "overall": 3.4, "scores": {...}},
-        {"round": 1, "overall": 4.1, "scores": {...}}
-      ]
-    }
+    "linkedin_v2": {
+      "post": "...",
+      "_round": 2,
+      "_history": {
+        "scores": [
+          {"round": 0, "overall": 3.4, "scores": {...}},
+          {"round": 1, "overall": 4.1, "scores": {...}}
+        ]
+      },
+      "_model": "gemini-2.0-flash",
+      "_analyzed_at": "2026-02-08T..."
+    },
+    "linkedin_v2_0": { ... },        // round 0 draft (frozen)
+    "linkedin_judge_0": { ... },     // round 0 evaluation (frozen)
+    "linkedin_v2_1": { ... },        // round 1 improved (frozen)
+    "linkedin_judge_1": { ... }      // round 1 evaluation (frozen)
   }
 }
 ```
+Note: `_round` and `_history` live INSIDE the `linkedin_v2` dict (following existing `_model`, `_analyzed_at` prefix convention). This avoids polluting the top-level analysis namespace with non-analysis metadata that would confuse `scan_actionable_items()` and the browse view.
+
+**Backward compatibility:** Existing `linkedin_v2` results (from Phase 1-4 usage) will not have `_round` or `_history`. The Improve button handles this gracefully — if no `_round` exists, treat the current `linkedin_v2` as round 0 and create `linkedin_v2_0` retroactively before starting round 1.
+
+**Improve API endpoint:**
+- **Endpoint:** `POST /api/action/<action_id>/improve`
+- **Behavior:** Runs in a background thread (same pattern as visual pipeline). Loads transcript, determines current round N from `linkedin_v2._round` (default 0 if missing), runs linkedin_v2 improvement with full history injected via `judge_feedback` template variable, saves as `linkedin_v2_{N+1}`, auto-judges the improvement, saves as `linkedin_judge_{N+1}`, updates `linkedin_v2` alias to point to latest content, resets `visual_status` to "pending", triggers visual pipeline re-run.
+- **State transitions:** `visual_status: ready/text_only` → `improving` (new status during improve round) → `pending` (after improve, before visual re-render) → `generating` → `ready/text_only`
+- **Error handling:** If improve fails, `visual_status` reverts to previous state, error logged, post remains usable.
+- **Response:** Returns immediately with `{"status": "improving"}`. Frontend polls for completion (same pattern as visual pipeline).
 
 **Files:**
-- `kb/analyze.py` — MODIFY: refactor `run_with_judge_loop()` to save versioned outputs, inject full history, always auto-judge
-- `kb/serve.py` — MODIFY: show judge scores in posting queue, "Improve" button triggers next round
-- `kb/templates/posting_queue.html` — MODIFY: score display, delta badges, round selector
-- `kb/config/analysis_types/linkedin_v2.json` — MODIFY: update `{{#if judge_feedback}}` block to accept full history context
+- `kb/analyze.py` — MODIFY: refactor `run_with_judge_loop()` to save versioned outputs (`linkedin_v2_N`, `linkedin_judge_N`), build full history JSON array for prompt injection, update `linkedin_v2` alias with `_round` and `_history` metadata. Add `run_analysis_with_auto_judge()` wrapper for CLI.
+- `kb/serve.py` — MODIFY: add `POST /api/action/<action_id>/improve` endpoint with background thread, show judge scores in posting queue API, add `improving` to visual_status state machine, re-trigger visual pipeline after improve
+- `kb/templates/posting_queue.html` — MODIFY: score display with per-criterion values, delta badges (↑/↓/=) between rounds, "Improve" button (shown when judge scores exist), round indicator, fallback "Not judged" display for pre-Phase-5 posts
+- `kb/config/analysis_types/linkedin_v2.json` — MODIFY: update `{{#if judge_feedback}}` block instruction to tell LLM it receives a JSON array of all prior rounds and should consider the full history
 
 **Acceptance Criteria:**
 - [ ] `kb analyze -t linkedin_v2` generates draft AND auto-runs judge (no separate `--judge` flag needed)
+- [ ] Auto-judge happens in CLI only — `run_visual_pipeline()` and `run_analysis_with_deps()` do NOT auto-judge
 - [ ] Initial draft saved as `linkedin_v2_0`, judge as `linkedin_judge_0`
-- [ ] `linkedin_v2` always points to latest version
-- [ ] kb serve posting queue shows judge scores alongside the post
-- [ ] "Improve" action in kb serve triggers next round (saved as `linkedin_v2_1`, etc.)
-- [ ] Each improvement round receives full history (all prior drafts + all prior feedback)
+- [ ] `linkedin_v2` always points to latest version with `_round` and `_history` metadata inside it
+- [ ] `_round` and `_history` are inside `linkedin_v2` dict (not top-level analysis keys)
+- [ ] kb serve posting queue shows judge scores alongside the post (fallback "Not judged" for old posts)
+- [ ] `POST /api/action/<action_id>/improve` triggers next round in background thread
+- [ ] After Improve completes, `visual_status` resets to "pending" and visual pipeline re-triggers
+- [ ] Each improvement round receives full history JSON array (all prior drafts + all prior feedback)
 - [ ] Score deltas visible per criterion (e.g. hook_strength: 3→4)
 - [ ] Can run indefinite rounds without data loss
+- [ ] Existing linkedin_v2 results without `_round` handled gracefully (treated as round 0)
 - [ ] Downstream consumers (visual_format, carousel_slides, posting queue) read from `linkedin_v2` (latest) transparently
+- [ ] `--judge` flag still works but is no-op for linkedin_v2 (auto-judge is default)
 
 ---
 
@@ -504,6 +549,32 @@ All 3 critical and 5 major issues addressed:
   - Consider thread safety if approving multiple posts quickly (see plan-review.md recommendations)
 
 -> Details: `plan-review.md`
+
+### Phase 5 Review — Round 1
+- **Gate:** NEEDS_WORK
+- **Reviewed:** 2026-02-08
+- **Summary:** Core concept is sound (versioned outputs, full history injection, score deltas). But 2 critical issues would cause bugs: versioned keys create stale visual/text mismatch in posting queue after Improve, and "always auto-judge" is underspecified (where in call stack?). 3 major gaps: no prompt template format for history injection, no API endpoint spec for Improve button, metadata keys pollute analysis dict. 3 minor issues.
+- **Issues:** 2 critical, 3 major, 3 minor
+- **Required Fixes Before Execution:**
+  1. Specify visual pipeline re-trigger after Improve round (C1)
+  2. Specify where auto-judge lives: CLI only vs. all callers (C2)
+  3. Define history injection format for prompt template (M1)
+  4. Add Improve button API endpoint spec (M2)
+  5. Move rounds/history metadata inside linkedin_v2 dict using _ prefix (M3)
+
+-> Details: `plan-review-phase-5.md`
+
+### Phase 5 Review — Round 2
+- **Gate:** READY
+- **Reviewed:** 2026-02-08
+- **Summary:** All 5 required fixes from Round 1 verified as adequately addressed. C1 (visual re-trigger) specified with state transitions. C2 (auto-judge scope) narrowed to CLI-only via new wrapper function. M1 (history format) defined as JSON array with context window budget. M2 (Improve endpoint) fully specified with background thread, state transitions, error handling. M3 (metadata) moved inside linkedin_v2 dict using _ prefix convention. 3 minor non-blocking issues noted.
+- **Issues:** 0 critical, 0 major, 3 minor (non-blocking)
+- **Notes for executor:**
+  - Clear `visual_format` and `carousel_slides` from analysis dict before re-triggering visual pipeline after Improve (stale classification data)
+  - Build prompt history array from versioned keys (`linkedin_v2_N`, `linkedin_judge_N`), not from compact `_history.scores`
+  - Add `improving` status to `renderVisualBadge()` switch in posting_queue.html
+
+-> Details: `plan-review-phase-5-r2.md`
 
 ---
 
