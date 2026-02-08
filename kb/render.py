@@ -4,16 +4,16 @@ KB Rendering Pipeline — HTML carousel → PDF + Mermaid diagrams.
 Converts carousel slide data + Jinja2 templates into:
 - Multi-page PDF (one page per slide at 1080x1350px)
 - Individual slide PNGs (for posting queue thumbnails)
-- Mermaid diagram PNGs (embedded in carousel slides)
+- Mermaid diagram SVGs (embedded inline in carousel slides)
 
 Usage:
     from kb.render import render_carousel, render_mermaid, render_pipeline
 
-    # Render mermaid diagram to PNG
-    png_path = render_mermaid("graph LR\\n  A-->B", "/tmp/output")
+    # Render mermaid diagram to SVG
+    svg_content = render_mermaid("graph LR\\n  A-->B", "/tmp/output")
 
     # Render carousel slides to PDF
-    pdf_path = render_carousel(slides, "dark-purple", "/tmp/output")
+    pdf_path = render_carousel(slides, "brand-purple", "/tmp/output")
 
     # Full pipeline: mermaid + carousel → PDF + thumbnails
     result = render_pipeline(decimal, analysis_results, config)
@@ -23,6 +23,7 @@ import base64
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -30,6 +31,7 @@ from pathlib import Path
 from typing import Optional
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from markupsafe import Markup, escape
 
 logger = logging.getLogger(__name__)
 
@@ -70,20 +72,21 @@ def render_mermaid(
     background: str = "transparent",
     theme: str = "dark",
     width: int = 860,
+    slide_number: Optional[int] = None,
 ) -> Optional[str]:
     """
-    Render mermaid code to PNG using mmdc CLI.
+    Render mermaid code to SVG using mmdc CLI.
 
     Args:
         mermaid_code: Mermaid diagram code (e.g. "graph LR\\n  A-->B")
-        output_path: Directory to write the output PNG
+        output_path: Directory to write the output SVG
         mmdc_path: Path to mmdc binary (auto-detected if None)
         background: Background color (default: transparent)
         theme: Mermaid theme (dark, default, forest, neutral)
         width: Output width in pixels
 
     Returns:
-        Path to generated PNG, or None if rendering failed.
+        SVG content string (ready for inline embedding), or None if rendering failed.
     """
     if mmdc_path is None:
         mmdc_path = _find_mmdc()
@@ -94,7 +97,8 @@ def render_mermaid(
 
     output_dir = Path(output_path)
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_file = output_dir / "mermaid.png"
+    filename = f"mermaid-{slide_number}.svg" if slide_number else "mermaid.svg"
+    output_file = output_dir / filename
 
     # Write mermaid code to temp file
     try:
@@ -130,8 +134,9 @@ def render_mermaid(
             return None
 
         if output_file.exists() and output_file.stat().st_size > 0:
-            logger.info("Mermaid rendered: %s", output_file)
-            return str(output_file)
+            svg_content = output_file.read_text(encoding="utf-8")
+            logger.info("Mermaid SVG rendered: %s (%d bytes)", output_file, len(svg_content))
+            return svg_content
 
         logger.warning("mmdc produced no output file")
         return None
@@ -150,9 +155,132 @@ def render_mermaid(
             pass
 
 
+def load_profile_photo_base64(config: Optional[dict] = None) -> Optional[str]:
+    """
+    Load profile photo from configured path and return as base64 data URI.
+
+    Falls back to None if the file doesn't exist (template should render
+    a placeholder with initials instead).
+
+    Args:
+        config: Carousel config dict (loaded from config.json if None)
+
+    Returns:
+        Base64 data URI string (e.g. "data:image/png;base64,...") or None.
+    """
+    if config is None:
+        config = load_carousel_config()
+
+    brand = config.get("brand", {})
+    photo_path_str = brand.get("profile_photo_path")
+    if not photo_path_str:
+        return None
+
+    # Resolve relative to carousel_templates dir
+    photo_path = CAROUSEL_TEMPLATES_DIR / photo_path_str
+    if not photo_path.exists():
+        logger.info(
+            "Profile photo not found at %s — template will use placeholder.",
+            photo_path,
+        )
+        return None
+
+    try:
+        with open(photo_path, "rb") as f:
+            photo_bytes = f.read()
+
+        # Detect MIME type from extension
+        ext = photo_path.suffix.lower()
+        mime_map = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".webp": "image/webp",
+        }
+        mime_type = mime_map.get(ext, "image/png")
+
+        encoded = base64.b64encode(photo_bytes).decode("ascii")
+        return f"data:{mime_type};base64,{encoded}"
+    except (IOError, OSError) as e:
+        logger.warning("Could not read profile photo: %s", e)
+        return None
+
+
+def markdown_to_html(text: str) -> Markup:
+    """
+    Convert markdown-style content string to HTML.
+
+    Parses line-by-line:
+    - Lines starting with '- ' or '* ' become <ul><li> bullet points
+    - Lines starting with 'N. ' (e.g. '1. ', '2. ') become <ol><li> numbered lists
+    - Plain text lines become <p> paragraphs with <br> for line breaks within a block
+
+    Adjacent lines of the same type are grouped into the same list element.
+    Returns Markup (safe HTML) for direct injection into Jinja2 templates.
+
+    Args:
+        text: Content string with optional markdown formatting.
+
+    Returns:
+        Markup-wrapped HTML string.
+    """
+    if not text:
+        return Markup("")
+
+    lines = text.split("\n")
+    html_parts = []
+    current_type = None  # 'ul', 'ol', or 'p'
+    current_items = []
+
+    def flush():
+        nonlocal current_type, current_items
+        if not current_items:
+            return
+        if current_type == "ul":
+            items = "".join(f"<li>{item}</li>" for item in current_items)
+            html_parts.append(f"<ul>{items}</ul>")
+        elif current_type == "ol":
+            items = "".join(f"<li>{item}</li>" for item in current_items)
+            html_parts.append(f"<ol>{items}</ol>")
+        elif current_type == "p":
+            html_parts.append(f"<p>{'<br>'.join(current_items)}</p>")
+        current_type = None
+        current_items = []
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            flush()
+            continue
+
+        # Check for unordered list: '- ' or '* '
+        if stripped.startswith("- ") or stripped.startswith("* "):
+            item_text = escape(stripped[2:])
+            if current_type != "ul":
+                flush()
+                current_type = "ul"
+            current_items.append(item_text)
+        # Check for ordered list: 'N. '
+        elif re.match(r"^\d+\.\s", stripped):
+            item_text = escape(re.sub(r"^\d+\.\s", "", stripped))
+            if current_type != "ol":
+                flush()
+                current_type = "ol"
+            current_items.append(item_text)
+        else:
+            # Plain text
+            if current_type != "p":
+                flush()
+                current_type = "p"
+            current_items.append(escape(stripped))
+
+    flush()
+    return Markup("".join(html_parts))
+
+
 def render_html_from_slides(
     slides: list[dict],
-    template_name: str = "dark-purple",
+    template_name: str = "brand-purple",
     config: Optional[dict] = None,
 ) -> str:
     """
@@ -160,7 +288,8 @@ def render_html_from_slides(
 
     Args:
         slides: List of slide dicts with {slide_number, type, content, words, ...}
-        template_name: Template name from config.json (e.g. "dark-purple", "light")
+        template_name: Template name from config.json (e.g. "brand-purple",
+                       "modern-editorial", "tech-minimal")
         config: Carousel config dict (loaded from config.json if None)
 
     Returns:
@@ -184,6 +313,20 @@ def render_html_from_slides(
     template_file = template_config["file"]
     dimensions = config.get("dimensions", {"width": 1080, "height": 1350})
     brand = config.get("brand", {})
+    header = config.get("header", {
+        "show_on_all_slides": True,
+        "author_position": "left",
+        "community_position": "right",
+    })
+
+    # Backward compatibility: brand.name -> brand.author_name
+    if "author_name" not in brand and "name" in brand:
+        brand["author_name"] = brand["name"]
+    if "community_name" not in brand:
+        brand["community_name"] = ""
+
+    # Load profile photo as base64 data URI
+    profile_photo_data = load_profile_photo_base64(config)
 
     # Verify template file exists
     template_path = CAROUSEL_TEMPLATES_DIR / template_file
@@ -194,6 +337,7 @@ def render_html_from_slides(
         loader=FileSystemLoader(str(CAROUSEL_TEMPLATES_DIR)),
         autoescape=select_autoescape(["html"]),
     )
+    env.filters["markdown_to_html"] = markdown_to_html
     template = env.get_template(template_file)
 
     html = template.render(
@@ -203,6 +347,8 @@ def render_html_from_slides(
         colors=template_config["colors"],
         fonts=template_config["fonts"],
         brand=brand,
+        header=header,
+        profile_photo_data=profile_photo_data,
     )
 
     return html
@@ -353,7 +499,7 @@ def render_slide_thumbnails(
 
 def render_carousel(
     slides: list[dict],
-    template_name: str = "dark-purple",
+    template_name: str = "brand-purple",
     output_dir: str = ".",
     config: Optional[dict] = None,
     generate_thumbnails: bool = True,
@@ -430,7 +576,7 @@ def render_pipeline(
         Dict with:
             - pdf_path: str
             - thumbnail_paths: list[str]
-            - mermaid_path: str or None
+            - mermaid_svg: str or None (raw SVG content)
             - html: str
             - errors: list[str]
     """
@@ -438,32 +584,32 @@ def render_pipeline(
         config = load_carousel_config()
 
     if template_name is None:
-        template_name = config.get("defaults", {}).get("template", "dark-purple")
+        template_name = config.get("defaults", {}).get("template", "brand-purple")
 
     slides = slides_data.get("slides", [])
     has_mermaid = slides_data.get("has_mermaid", False)
     errors = []
 
     # Step 1: Render mermaid diagrams if needed
-    mermaid_path = None
+    mermaid_svg = None
     if has_mermaid:
+        # Select mmdc theme from template config (fallback to dark)
+        template_config = config.get("templates", {}).get(template_name, {})
+        mermaid_theme = template_config.get("mermaid_theme", "dark")
+
         for slide in slides:
             if slide.get("type") == "mermaid" and slide.get("content"):
                 mermaid_out_dir = os.path.join(output_dir, "mermaid")
-                mermaid_path = render_mermaid(
+                svg_content = render_mermaid(
                     slide["content"],
                     mermaid_out_dir,
+                    theme=mermaid_theme,
+                    slide_number=slide.get("slide_number"),
                 )
-                if mermaid_path:
-                    # Convert local file path to base64 data URI for Playwright
-                    # (Chromium security blocks local file:// paths in set_content)
-                    try:
-                        with open(mermaid_path, "rb") as img_f:
-                            img_data = base64.b64encode(img_f.read()).decode("ascii")
-                        slide["mermaid_image_path"] = f"data:image/png;base64,{img_data}"
-                    except (IOError, OSError) as read_err:
-                        logger.warning("Could not read mermaid PNG for base64: %s", read_err)
-                        slide["mermaid_image_path"] = mermaid_path
+                if svg_content:
+                    # Embed SVG inline via Markup() — trusted source (mmdc output)
+                    slide["mermaid_svg"] = Markup(svg_content)
+                    mermaid_svg = svg_content
                 else:
                     errors.append(
                         f"Mermaid render failed for slide {slide.get('slide_number')}. "
@@ -488,7 +634,7 @@ def render_pipeline(
         return {
             "pdf_path": None,
             "thumbnail_paths": [],
-            "mermaid_path": mermaid_path,
+            "mermaid_svg": mermaid_svg,
             "html": None,
             "errors": errors + [f"Carousel render failed: {e}"],
         }
@@ -496,7 +642,7 @@ def render_pipeline(
     return {
         "pdf_path": carousel_result["pdf_path"],
         "thumbnail_paths": carousel_result["thumbnail_paths"],
-        "mermaid_path": mermaid_path,
+        "mermaid_svg": mermaid_svg,
         "html": carousel_result["html"],
         "errors": errors,
     }

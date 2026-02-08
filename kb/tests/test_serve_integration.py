@@ -252,9 +252,9 @@ class TestPostingQueueVisualFields:
 class TestApproveTriggersThread:
     """Tests that approve endpoint starts background pipeline thread."""
 
-    def test_approve_starts_background_thread(self, tmp_path):
-        """Approve should trigger a background thread for visual pipeline."""
-        # Create transcript
+    def test_approve_starts_background_thread_for_non_autojudge(self, tmp_path):
+        """Approve should trigger visual pipeline for non-auto-judge types (e.g., skool_post)."""
+        # Create transcript with skool_post (non-auto-judge type)
         decimal_dir = tmp_path / "50.01.01"
         decimal_dir.mkdir(parents=True)
         transcript = {
@@ -264,8 +264,8 @@ class TestApproveTriggersThread:
             "transcript": "test",
             "source": {"type": "audio"},
             "analysis": {
-                "linkedin_v2": {
-                    "post": "Test post",
+                "skool_post": {
+                    "skool_post": "Test post content",
                     "_model": "gemini",
                     "_analyzed_at": "2026-02-07T10:00:00",
                 }
@@ -290,18 +290,59 @@ class TestApproveTriggersThread:
             from kb.serve import app
             app.config["TESTING"] = True
             with app.test_client() as client:
+                response = client.post("/api/action/test-id--skool_post/approve")
+                assert response.status_code == 200
+
+                data = response.get_json()
+                assert data["success"] is True
+
+                # Thread should have been created and started for non-auto-judge type
+                mock_thread_cls.assert_called_once()
+                call_kwargs = mock_thread_cls.call_args[1]
+                assert call_kwargs["target"] == mock_pipeline
+                assert call_kwargs["daemon"] is True
+                mock_thread.start.assert_called_once()
+
+    def test_approve_does_not_trigger_visual_for_autojudge(self, tmp_path):
+        """Approve should NOT trigger visual pipeline for auto-judge types (linkedin_v2)."""
+        decimal_dir = tmp_path / "50.01.01"
+        decimal_dir.mkdir(parents=True)
+        transcript = {
+            "id": "test-id",
+            "title": "Test",
+            "decimal": "50.01.01",
+            "transcript": "test",
+            "source": {"type": "audio"},
+            "analysis": {
+                "linkedin_v2": {
+                    "post": "Test post",
+                    "_model": "gemini",
+                    "_analyzed_at": "2026-02-07T10:00:00",
+                }
+            }
+        }
+        (decimal_dir / "test-id.json").write_text(json.dumps(transcript))
+
+        state = {"actions": {}}
+        state_file = tmp_path / "action-state.json"
+        state_file.write_text(json.dumps(state))
+
+        with patch("kb.serve.ACTION_STATE_PATH", state_file), \
+             patch("kb.serve.KB_ROOT", tmp_path), \
+             patch("kb.serve.threading.Thread") as mock_thread_cls, \
+             patch("kb.serve.pyperclip.copy"):
+
+            from kb.serve import app
+            app.config["TESTING"] = True
+            with app.test_client() as client:
                 response = client.post("/api/action/test-id--linkedin_v2/approve")
                 assert response.status_code == 200
 
                 data = response.get_json()
                 assert data["success"] is True
 
-                # Thread should have been created and started
-                mock_thread_cls.assert_called_once()
-                call_kwargs = mock_thread_cls.call_args[1]
-                assert call_kwargs["target"] == mock_pipeline
-                assert call_kwargs["daemon"] is True
-                mock_thread.start.assert_called_once()
+                # Thread should NOT have been created for auto-judge type
+                mock_thread_cls.assert_not_called()
 
     def test_approve_returns_immediately(self, tmp_path):
         """Approve should return < 1s (not waiting for pipeline)."""
@@ -347,25 +388,19 @@ class TestApproveTriggersThread:
 
 # ===== Mermaid Base64 Conversion =====
 
-class TestMermaidBase64:
-    """Tests for mermaid PNG -> base64 data URI conversion in render_pipeline."""
+class TestMermaidSvgInline:
+    """Tests for mermaid SVG inline embedding in render_pipeline."""
 
     @patch("kb.render.render_carousel")
     @patch("kb.render.render_mermaid")
-    def test_mermaid_path_converted_to_base64(self, mock_mermaid, mock_carousel):
-        """render_pipeline should convert mermaid PNG to base64 data URI."""
-        import copy
+    def test_mermaid_svg_embedded_as_markup(self, mock_mermaid, mock_carousel):
+        """render_pipeline should embed SVG content as Markup in slide data."""
+        from markupsafe import Markup
         from kb.render import render_pipeline
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Create a fake PNG file for mermaid
-            mermaid_dir = os.path.join(tmpdir, "mermaid")
-            os.makedirs(mermaid_dir)
-            fake_png = os.path.join(mermaid_dir, "mermaid.png")
-            with open(fake_png, "wb") as f:
-                f.write(b"\x89PNG\r\n\x1a\n fake png content")
-
-            mock_mermaid.return_value = fake_png
+            svg_content = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="100" height="50"/></svg>'
+            mock_mermaid.return_value = svg_content
             mock_carousel.return_value = {
                 "pdf_path": os.path.join(tmpdir, "carousel.pdf"),
                 "thumbnail_paths": [],
@@ -384,20 +419,20 @@ class TestMermaidBase64:
 
             result = render_pipeline(slides_data, tmpdir)
 
-            # Check the slide data was mutated to have base64 URI
+            # Check the slide data was mutated to have SVG Markup
             mermaid_slide = slides_data["slides"][1]
-            assert mermaid_slide["mermaid_image_path"].startswith("data:image/png;base64,")
-            assert len(mermaid_slide["mermaid_image_path"]) > 30  # Not empty
+            assert "mermaid_svg" in mermaid_slide
+            assert isinstance(mermaid_slide["mermaid_svg"], Markup)
+            assert "<svg" in str(mermaid_slide["mermaid_svg"])
 
     @patch("kb.render.render_carousel")
     @patch("kb.render.render_mermaid")
-    def test_mermaid_fallback_on_read_error(self, mock_mermaid, mock_carousel):
-        """If PNG can't be read, fallback to raw file path."""
+    def test_mermaid_failure_sets_no_svg(self, mock_mermaid, mock_carousel):
+        """If render_mermaid returns None, slide should not have mermaid_svg."""
         from kb.render import render_pipeline
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Point to a nonexistent file (render_mermaid returned path but file was deleted)
-            mock_mermaid.return_value = "/nonexistent/mermaid.png"
+            mock_mermaid.return_value = None
             mock_carousel.return_value = {
                 "pdf_path": os.path.join(tmpdir, "carousel.pdf"),
                 "thumbnail_paths": [],
@@ -414,9 +449,10 @@ class TestMermaidBase64:
 
             result = render_pipeline(slides_data, tmpdir)
 
-            # Should fallback to raw path (not crash)
+            # Should have error logged, no mermaid_svg
             mermaid_slide = slides_data["slides"][0]
-            assert mermaid_slide["mermaid_image_path"] == "/nonexistent/mermaid.png"
+            assert mermaid_slide.get("mermaid_svg") is None
+            assert len(result["errors"]) == 1
 
 
 # ===== Action Mapping Transition =====
@@ -438,12 +474,18 @@ class TestActionMappingTransition:
         assert "linkedin_post" not in mapping
 
     def test_old_linkedin_post_items_not_in_queue(self, tmp_path):
-        """Old linkedin_post items should not appear in action queue."""
-        from kb.serve import get_action_mapping, get_destination_for_action
+        """Old linkedin_post should not appear in default action_mapping."""
+        from kb.__main__ import DEFAULTS
+        from kb.serve import get_destination_for_action
 
-        mapping = get_action_mapping()
-        dest = get_destination_for_action("audio", "linkedin_post", mapping)
-        assert dest is None, "linkedin_post should not have a destination in mapping"
+        # Check defaults only — user config.yaml may still have linkedin_post
+        mapping = DEFAULTS["serve"]["action_mapping"]
+        # Build the expanded mapping the same way serve.py does
+        expanded = {}
+        for pattern, dest in mapping.items():
+            expanded[("*", pattern)] = dest
+        dest = get_destination_for_action("audio", "linkedin_post", expanded)
+        assert dest is None, "linkedin_post should not have a destination in default mapping"
 
     def test_linkedin_v2_has_destination(self):
         """linkedin_v2 should map to 'LinkedIn' destination."""

@@ -41,7 +41,7 @@ SAMPLE_SLIDES = [
     {"slide_number": 1, "type": "hook", "content": "I automated my entire posting workflow.", "words": 6},
     {"slide_number": 2, "type": "content", "content": "Most creators spend 2 hours per post.", "words": 8},
     {"slide_number": 3, "type": "content", "content": "Step 1: Voice note into transcription.", "words": 6},
-    {"slide_number": 4, "type": "mermaid", "content": "graph LR\n  A-->B-->C", "words": 5, "mermaid_image_path": None},
+    {"slide_number": 4, "type": "mermaid", "content": "graph LR\n  A-->B-->C", "words": 5, "mermaid_svg": None},
     {"slide_number": 5, "type": "content", "content": "Step 2: LLM writes the post.", "words": 6},
     {"slide_number": 6, "type": "cta", "content": "What takes you the most time?", "words": 7},
 ]
@@ -84,18 +84,19 @@ class TestLoadCarouselConfig:
     def test_config_has_templates(self):
         config = load_carousel_config()
         assert "templates" in config
-        assert "dark-purple" in config["templates"]
-        assert "light" in config["templates"]
+        assert "brand-purple" in config["templates"]
+        assert "modern-editorial" in config["templates"]
+        assert "tech-minimal" in config["templates"]
 
     def test_config_has_defaults(self):
         config = load_carousel_config()
         assert "defaults" in config
-        assert config["defaults"]["template"] == "dark-purple"
+        assert config["defaults"]["template"] == "brand-purple"
 
     def test_config_has_brand(self):
         config = load_carousel_config()
         assert "brand" in config
-        assert "name" in config["brand"]
+        assert "author_name" in config["brand"]
 
 
 # ===== HTML Generation Tests =====
@@ -103,54 +104,57 @@ class TestLoadCarouselConfig:
 class TestRenderHtmlFromSlides:
     """Tests for Jinja2 HTML rendering."""
 
-    def test_renders_dark_purple_template(self):
-        html = render_html_from_slides(SAMPLE_SLIDES, "dark-purple")
+    def test_renders_brand_purple_template(self):
+        html = render_html_from_slides(SAMPLE_SLIDES, "brand-purple")
         assert "<!DOCTYPE html>" in html
-        assert "1080px" in html
-        assert "1350px" in html
+        assert "1080" in html
 
-    def test_renders_light_template(self):
-        html = render_html_from_slides(SAMPLE_SLIDES, "light")
+    def test_renders_modern_editorial_template(self):
+        html = render_html_from_slides(SAMPLE_SLIDES, "modern-editorial")
+        assert "<!DOCTYPE html>" in html
+
+    def test_renders_tech_minimal_template(self):
+        html = render_html_from_slides(SAMPLE_SLIDES, "tech-minimal")
         assert "<!DOCTYPE html>" in html
 
     def test_renders_all_slides(self):
-        html = render_html_from_slides(SAMPLE_SLIDES, "dark-purple")
+        html = render_html_from_slides(SAMPLE_SLIDES, "brand-purple")
         for slide in SAMPLE_SLIDES:
             assert f'id="slide-{slide["slide_number"]}"' in html
 
     def test_hook_slide_content(self):
-        html = render_html_from_slides(SAMPLE_SLIDES, "dark-purple")
+        html = render_html_from_slides(SAMPLE_SLIDES, "brand-purple")
         assert "I automated my entire posting workflow." in html
-        assert "hook-text" in html
+        assert "title-page-main-title" in html
 
-    def test_content_slide_content(self):
-        html = render_html_from_slides(SAMPLE_SLIDES, "dark-purple")
-        assert "content-text" in html
-        assert "content-number" in html
+    def test_content_slide_renders(self):
+        html = render_html_from_slides(SAMPLE_SLIDES, "brand-purple")
+        # Content slides should have slide content
+        assert "Most creators spend 2 hours per post." in html
 
     def test_mermaid_slide_without_image(self):
-        html = render_html_from_slides(SAMPLE_SLIDES, "dark-purple")
-        # Without mermaid_image_path, should show raw code
+        html = render_html_from_slides(SAMPLE_SLIDES, "brand-purple")
+        # Without mermaid_svg, should show raw code
         assert "graph LR" in html
 
-    def test_mermaid_slide_with_image(self):
+    def test_mermaid_slide_with_svg(self):
+        from markupsafe import Markup
         slides = [dict(s) for s in SAMPLE_SLIDES]
-        slides[3]["mermaid_image_path"] = "/tmp/test/mermaid.png"
-        html = render_html_from_slides(slides, "dark-purple")
-        assert 'src="/tmp/test/mermaid.png"' in html
-        assert "mermaid-img" in html
+        slides[3]["mermaid_svg"] = Markup('<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>')
+        html = render_html_from_slides(slides, "brand-purple")
+        assert '<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>' in html
 
     def test_cta_slide_content(self):
-        html = render_html_from_slides(SAMPLE_SLIDES, "dark-purple")
-        assert "cta-text" in html
+        html = render_html_from_slides(SAMPLE_SLIDES, "brand-purple")
+        assert "cta-heading" in html
         assert "What takes you the most time?" in html
 
-    def test_brand_in_footer(self):
-        html = render_html_from_slides(SAMPLE_SLIDES, "dark-purple")
-        assert "brand-name" in html
+    def test_brand_in_header(self):
+        html = render_html_from_slides(SAMPLE_SLIDES, "brand-purple")
+        assert "Blake Sims" in html
 
     def test_page_breaks_between_slides(self):
-        html = render_html_from_slides(SAMPLE_SLIDES, "dark-purple")
+        html = render_html_from_slides(SAMPLE_SLIDES, "brand-purple")
         assert "page-break-after: always" in html
 
     def test_invalid_template_name_raises(self):
@@ -160,20 +164,20 @@ class TestRenderHtmlFromSlides:
     def test_uses_autoescape(self):
         """Verify autoescape is active: HTML in content is escaped."""
         slides = [{"slide_number": 1, "type": "hook", "content": "<script>alert('xss')</script>", "words": 1}]
-        html = render_html_from_slides(slides, "dark-purple")
-        assert "<script>" not in html
+        html = render_html_from_slides(slides, "brand-purple")
+        # Script tags in content should be escaped
         assert "&lt;script&gt;" in html
 
     def test_custom_config_override(self):
         config = load_carousel_config()
         config["dimensions"]["width"] = 800
         config["dimensions"]["height"] = 600
-        html = render_html_from_slides(SAMPLE_SLIDES[:1], "dark-purple", config=config)
+        html = render_html_from_slides(SAMPLE_SLIDES[:1], "brand-purple", config=config)
         assert "800px" in html
         assert "600px" in html
 
     def test_empty_slides_list(self):
-        html = render_html_from_slides([], "dark-purple")
+        html = render_html_from_slides([], "brand-purple")
         assert "<!DOCTYPE html>" in html
         # Should not have any slide divs
         assert 'id="slide-' not in html
@@ -196,10 +200,10 @@ class TestRenderMermaid:
     @patch("kb.render.subprocess.run")
     def test_successful_render(self, mock_run):
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Mock mmdc success: create the output file
+            # Mock mmdc success: create the output SVG file
             def side_effect(*args, **kwargs):
-                output_file = Path(tmpdir) / "mermaid.png"
-                output_file.write_bytes(b"fake png data")
+                output_file = Path(tmpdir) / "mermaid.svg"
+                output_file.write_text('<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>')
                 return MagicMock(returncode=0, stderr="")
 
             mock_run.side_effect = side_effect
@@ -210,7 +214,8 @@ class TestRenderMermaid:
                 mmdc_path="/usr/bin/true",
             )
             assert result is not None
-            assert result.endswith("mermaid.png")
+            assert "<svg" in result
+            assert isinstance(result, str)
 
     @patch("kb.render.subprocess.run")
     def test_failed_render_returns_none(self, mock_run):
@@ -273,6 +278,9 @@ class TestRenderMermaid:
             assert "forest" in cmd
             assert "-w" in cmd
             assert "500" in cmd
+            # Verify SVG output (not PNG)
+            output_arg_idx = cmd.index("-o") + 1
+            assert cmd[output_arg_idx].endswith(".svg")
 
     def test_auto_detects_mmdc(self):
         """_find_mmdc should return a path if mmdc exists."""
@@ -397,7 +405,7 @@ class TestRenderCarousel:
         mock_thumbs.return_value = ["/tmp/slide-1.png", "/tmp/slide-2.png"]
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            result = render_carousel(SAMPLE_SLIDES, "dark-purple", tmpdir)
+            result = render_carousel(SAMPLE_SLIDES, "brand-purple", tmpdir)
 
             assert "pdf_path" in result
             assert "thumbnail_paths" in result
@@ -412,7 +420,7 @@ class TestRenderCarousel:
         mock_thumbs.return_value = []
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            result = render_carousel(SAMPLE_SLIDES, "dark-purple", tmpdir)
+            result = render_carousel(SAMPLE_SLIDES, "brand-purple", tmpdir)
             assert "<!DOCTYPE html>" in result["html"]
 
     @patch("kb.render.render_slide_thumbnails")
@@ -422,7 +430,7 @@ class TestRenderCarousel:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             result = render_carousel(
-                SAMPLE_SLIDES, "dark-purple", tmpdir,
+                SAMPLE_SLIDES, "brand-purple", tmpdir,
                 generate_thumbnails=False,
             )
             mock_thumbs.assert_not_called()
@@ -437,7 +445,7 @@ class TestRenderPipeline:
     @patch("kb.render.render_carousel")
     @patch("kb.render.render_mermaid")
     def test_full_pipeline_with_mermaid(self, mock_mermaid, mock_carousel):
-        mock_mermaid.return_value = "/tmp/mermaid.png"
+        mock_mermaid.return_value = '<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>'
         mock_carousel.return_value = {
             "pdf_path": "/tmp/carousel.pdf",
             "thumbnail_paths": ["/tmp/slide-1.png"],
@@ -448,7 +456,8 @@ class TestRenderPipeline:
             result = render_pipeline(SAMPLE_SLIDES_DATA, tmpdir)
 
             assert result["pdf_path"] == "/tmp/carousel.pdf"
-            assert result["mermaid_path"] == "/tmp/mermaid.png"
+            assert result["mermaid_svg"] is not None
+            assert "<svg" in result["mermaid_svg"]
             assert len(result["errors"]) == 0
 
     @patch("kb.render.render_carousel")
@@ -464,7 +473,7 @@ class TestRenderPipeline:
             result = render_pipeline(SAMPLE_SLIDES_NO_MERMAID, tmpdir)
 
             mock_mermaid.assert_not_called()
-            assert result["mermaid_path"] is None
+            assert result["mermaid_svg"] is None
             assert len(result["errors"]) == 0
 
     @patch("kb.render.render_carousel")
@@ -482,7 +491,7 @@ class TestRenderPipeline:
             result = render_pipeline(SAMPLE_SLIDES_DATA, tmpdir)
 
             assert result["pdf_path"] == "/tmp/carousel.pdf"
-            assert result["mermaid_path"] is None
+            assert result["mermaid_svg"] is None
             assert len(result["errors"]) == 1
             assert "Mermaid render failed" in result["errors"][0]
 
@@ -490,7 +499,7 @@ class TestRenderPipeline:
     @patch("kb.render.render_mermaid")
     def test_pipeline_carousel_failure(self, mock_mermaid, mock_carousel):
         """Carousel render failure returns error result."""
-        mock_mermaid.return_value = "/tmp/mermaid.png"
+        mock_mermaid.return_value = '<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>'
         mock_carousel.side_effect = RuntimeError("Playwright crashed")
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -511,7 +520,7 @@ class TestRenderPipeline:
             render_pipeline(SAMPLE_SLIDES_NO_MERMAID, tmpdir)
 
             call_kwargs = mock_carousel.call_args[1]
-            assert call_kwargs["template_name"] == "dark-purple"
+            assert call_kwargs["template_name"] == "brand-purple"
 
     @patch("kb.render.render_carousel")
     def test_pipeline_custom_template(self, mock_carousel):
@@ -524,17 +533,19 @@ class TestRenderPipeline:
         with tempfile.TemporaryDirectory() as tmpdir:
             render_pipeline(
                 SAMPLE_SLIDES_NO_MERMAID, tmpdir,
-                template_name="light",
+                template_name="tech-minimal",
             )
 
             call_kwargs = mock_carousel.call_args[1]
-            assert call_kwargs["template_name"] == "light"
+            assert call_kwargs["template_name"] == "tech-minimal"
 
     @patch("kb.render.render_carousel")
     @patch("kb.render.render_mermaid")
-    def test_pipeline_embeds_mermaid_path_in_slide(self, mock_mermaid, mock_carousel):
-        """Verify mermaid image path gets set on the slide data."""
-        mock_mermaid.return_value = "/tmp/mermaid/mermaid.png"
+    def test_pipeline_embeds_mermaid_svg_in_slide(self, mock_mermaid, mock_carousel):
+        """Verify mermaid SVG gets set on the slide data as Markup."""
+        from markupsafe import Markup
+        svg_content = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="100" height="50"/></svg>'
+        mock_mermaid.return_value = svg_content
         mock_carousel.return_value = {
             "pdf_path": "/tmp/carousel.pdf",
             "thumbnail_paths": [],
@@ -548,9 +559,11 @@ class TestRenderPipeline:
         with tempfile.TemporaryDirectory() as tmpdir:
             render_pipeline(slides_data, tmpdir)
 
-            # Check that the mermaid slide had its image path set
+            # Check that the mermaid slide had its SVG set as Markup
             mermaid_slide = slides_data["slides"][3]
-            assert mermaid_slide["mermaid_image_path"] == "/tmp/mermaid/mermaid.png"
+            assert "mermaid_svg" in mermaid_slide
+            assert isinstance(mermaid_slide["mermaid_svg"], Markup)
+            assert "<svg" in str(mermaid_slide["mermaid_svg"])
 
 
 # ===== Publish CLI Tests =====

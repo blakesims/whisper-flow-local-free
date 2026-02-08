@@ -5,9 +5,9 @@
     "unit": "px"
   },
   "templates": {
-    "dark-purple": {
-      "file": "dark-purple.html",
-      "description": "Dark purple brand template — CCA/zen-ai identity",
+    "brand-purple": {
+      "file": "brand-purple.html",
+      "description": "Brand purple gradient — evolved CCA identity with timeline indicators",
       "colors": {
         "background": "#2D1B69",
         "background_gradient_end": "#1A0F3C",
@@ -15,37 +15,83 @@
         "text_secondary": "#C4B5E3",
         "accent": "#8B5CF6",
         "accent_light": "#A78BFA",
-        "divider": "rgba(139, 92, 246, 0.3)",
-        "slide_number": "rgba(255, 255, 255, 0.4)"
+        "divider": "rgba(139, 92, 246, 0.2)",
+        "slide_number": "rgba(255, 255, 255, 0.2)",
+        "header_border": "rgba(139, 92, 246, 0.2)",
+        "timeline_dot_border": "rgba(139, 92, 246, 0.3)",
+        "timeline_connector": "rgba(139, 92, 246, 0.15)",
+        "timeline_connector_filled": "rgba(139, 92, 246, 0.4)",
+        "corner_glow": "rgba(139, 92, 246, 0.1)",
+        "highlight_bg": "rgba(139, 92, 246, 0.08)",
+        "highlight_border": "rgba(139, 92, 246, 0.2)",
+        "bullet_border": "rgba(139, 92, 246, 0.15)"
       },
       "fonts": {
-        "heading": "'Inter', 'Segoe UI', system-ui, sans-serif",
-        "body": "'Inter', 'Segoe UI', system-ui, sans-serif",
-        "mono": "'JetBrains Mono', 'Fira Code', monospace"
-      }
+        "heading": "'Plus Jakarta Sans', 'Inter', system-ui, sans-serif",
+        "body": "'Plus Jakarta Sans', 'Inter', system-ui, sans-serif",
+        "mono": "'JetBrains Mono', 'Fira Code', monospace",
+        "google_fonts_url": "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+      },
+      "mermaid_theme": "dark"
     },
-    "light": {
-      "file": "light.html",
-      "description": "Clean light template — professional, minimal",
+    "modern-editorial": {
+      "file": "modern-editorial.html",
+      "description": "Magazine-style editorial layout with serif headings and warm tones",
       "colors": {
-        "background": "#FFFFFF",
-        "background_gradient_end": "#F8F9FA",
-        "text_primary": "#1A1A2E",
-        "text_secondary": "#4A4A6A",
-        "accent": "#2D1B69",
-        "accent_light": "#8B5CF6",
-        "divider": "rgba(45, 27, 105, 0.15)",
-        "slide_number": "rgba(26, 26, 46, 0.3)"
+        "background": "#FAF8F5",
+        "background_gradient_end": "#FAF8F5",
+        "text_primary": "#1C1C1C",
+        "text_secondary": "#4A4A42",
+        "accent": "#B8A080",
+        "accent_light": "#E8E2D8",
+        "divider": "#EDE8E0",
+        "slide_number": "#C8C0B0",
+        "header_border": "#1C1C1C",
+        "editorial_muted": "#6A6A60",
+        "editorial_kicker": "#B8A080",
+        "editorial_big_number_inactive": "#E8E2D8"
       },
       "fonts": {
-        "heading": "'Inter', 'Segoe UI', system-ui, sans-serif",
-        "body": "'Inter', 'Segoe UI', system-ui, sans-serif",
-        "mono": "'JetBrains Mono', 'Fira Code', monospace"
-      }
+        "heading": "'Playfair Display', Georgia, serif",
+        "body": "'Source Sans 3', 'Source Sans Pro', system-ui, sans-serif",
+        "mono": "'JetBrains Mono', 'Fira Code', monospace",
+        "google_fonts_url": "https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800;900&family=Source+Sans+3:wght@400;500;600;700&display=swap"
+      },
+      "mermaid_theme": "neutral"
+    },
+    "tech-minimal": {
+      "file": "tech-minimal.html",
+      "description": "GitHub-dark code editor feel with terminal chrome and monospace accents",
+      "colors": {
+        "background": "#0D1117",
+        "background_gradient_end": "#0D1117",
+        "text_primary": "#C9D1D9",
+        "text_secondary": "#8B949E",
+        "accent": "#58A6FF",
+        "accent_light": "#79C0FF",
+        "divider": "#21262D",
+        "slide_number": "#484F58",
+        "terminal_bg": "#161B22",
+        "terminal_border": "#30363D",
+        "green": "#3FB950",
+        "red": "#FF5F57",
+        "yellow": "#FFBD2E",
+        "cta_button": "#238636",
+        "breadcrumb_inactive": "#484F58",
+        "breadcrumb_separator": "#30363D",
+        "code_highlight_bg": "rgba(88, 166, 255, 0.1)"
+      },
+      "fonts": {
+        "heading": "'Inter', system-ui, sans-serif",
+        "body": "'Inter', system-ui, sans-serif",
+        "mono": "'JetBrains Mono', monospace",
+        "google_fonts_url": "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap"
+      },
+      "mermaid_theme": "dark"
     }
   },
   "defaults": {
-    "template": "dark-purple",
+    "template": "brand-purple",
     "slide_range": {
       "min": 6,
       "max": 10
@@ -56,9 +102,17 @@
     }
   },
   "brand": {
-    "name": "Blake Sims",
-    "tagline": "Building with AI",
+    "author_name": "Blake Sims",
+    "community_name": "Claude Code Architects",
+    "profile_photo_path": "profile.png",
     "handle": "@blakesims",
-    "primary_color": "#2D1B69"
+    "tagline": "Building with AI",
+    "primary_color": "#2D1B69",
+    "cta_text": "Follow for More"
+  },
+  "header": {
+    "show_on_all_slides": true,
+    "author_position": "left",
+    "community_position": "right"
   }
 }

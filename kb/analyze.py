@@ -957,6 +957,106 @@ def run_analysis_with_deps(
     return result, prerequisites_run
 
 
+def _get_starting_round(existing_analysis: dict, analysis_type: str) -> int:
+    """Determine the starting round number for versioned judge loop.
+
+    If there are already versioned keys (e.g., linkedin_v2_0, linkedin_v2_1),
+    returns the next round number. If the alias exists without _round metadata,
+    treats it as round 0 (backward compat).
+
+    Returns:
+        The round number to start from (0 if fresh, N if continuing).
+    """
+    # Check for existing versioned keys
+    max_round = -1
+    for key in existing_analysis:
+        if key.startswith(f"{analysis_type}_"):
+            suffix = key[len(f"{analysis_type}_"):]
+            # Match linkedin_v2_N (not linkedin_v2_N_M which is edit versions)
+            if suffix.isdigit():
+                max_round = max(max_round, int(suffix))
+
+    if max_round >= 0:
+        return max_round + 1
+
+    # Check if alias exists without _round (backward compat: treat as round 0)
+    alias_data = existing_analysis.get(analysis_type)
+    if alias_data and isinstance(alias_data, dict) and "_round" not in alias_data:
+        return 0
+
+    return 0
+
+
+def _build_history_from_existing(existing_analysis: dict, analysis_type: str, judge_type: str) -> list[dict]:
+    """Build history array from existing versioned keys.
+
+    Returns list of dicts with round, draft, and judge data for all
+    completed rounds found in existing_analysis.
+    """
+    history = []
+    round_num = 0
+    while True:
+        draft_key = f"{analysis_type}_{round_num}"
+        judge_key = f"{judge_type}_{round_num}"
+
+        if draft_key not in existing_analysis:
+            break
+
+        entry = {
+            "round": round_num,
+            "draft": existing_analysis[draft_key].get("post", ""),
+        }
+
+        if judge_key in existing_analysis:
+            judge_data = existing_analysis[judge_key]
+            entry["judge"] = {
+                "overall_score": judge_data.get("overall_score", 0),
+                "scores": judge_data.get("scores", {}),
+                "improvements": judge_data.get("improvements", []),
+                "rewritten_hook": judge_data.get("rewritten_hook"),
+            }
+
+        history.append(entry)
+        round_num += 1
+
+    return history
+
+
+def _build_score_history(existing_analysis: dict, judge_type: str) -> list[dict]:
+    """Build score history array for _history metadata in alias.
+
+    Returns list of dicts with round, overall, and criteria scores.
+    """
+    scores = []
+    round_num = 0
+    while True:
+        judge_key = f"{judge_type}_{round_num}"
+        if judge_key not in existing_analysis:
+            break
+        judge_data = existing_analysis[judge_key]
+        scores.append({
+            "round": round_num,
+            "overall": judge_data.get("overall_score", 0),
+            "criteria": judge_data.get("scores", {}),
+        })
+        round_num += 1
+    return scores
+
+
+def _update_alias(existing_analysis: dict, analysis_type: str, judge_type: str,
+                  draft_result: dict, current_round: int):
+    """Update the alias key (e.g., linkedin_v2) to point to the latest version.
+
+    Adds _round and _history metadata to the alias.
+    """
+    alias = dict(draft_result)  # shallow copy
+    alias["_round"] = current_round
+    alias["_history"] = {
+        "scores": _build_score_history(existing_analysis, judge_type),
+    }
+    existing_analysis[analysis_type] = alias
+
+
 def run_with_judge_loop(
     transcript_data: dict,
     analysis_type: str,
@@ -967,12 +1067,21 @@ def run_with_judge_loop(
     save_path: str | None = None
 ) -> tuple[dict, dict]:
     """
-    Run an analysis type with an LLM judge improvement loop.
+    Run an analysis type with an LLM judge improvement loop, saving versioned outputs.
 
-    1. Run analysis_type -> produces draft
-    2. Run judge_type (requires analysis_type output) -> structured feedback
-    3. Re-run analysis_type with feedback injected via {{judge_feedback}} -> improved draft
-    4. Judge output preserved alongside final post
+    Produces versioned keys:
+    - {analysis_type}_0: initial draft
+    - {judge_type}_0: judge evaluation of draft 0
+    - {analysis_type}_1: improved draft after judge feedback
+    - {judge_type}_1: judge evaluation of draft 1
+    - ...
+    - {analysis_type}: alias pointing to latest, with _round and _history metadata
+
+    History injection: each improvement round receives a JSON array of all prior
+    drafts + judge evaluations via the {{judge_feedback}} template variable.
+
+    Backward compat: if the alias exists without _round, it is preserved as-is
+    and the versioned loop starts from round 0.
 
     Args:
         transcript_data: Full transcript data dict
@@ -984,41 +1093,88 @@ def run_with_judge_loop(
         save_path: Path to transcript file for saving results
 
     Returns:
-        Tuple of (final_analysis_result, judge_result)
+        Tuple of (final_analysis_result, final_judge_result)
     """
     if existing_analysis is None:
         existing_analysis = transcript_data.get("analysis", {})
 
     transcript_text = transcript_data.get("transcript", "")
 
-    # Step 1: Run initial analysis
-    console.print(f"\n[bold cyan]Round 0: Generating initial draft...[/bold cyan]")
-    draft_result, prereqs = run_analysis_with_deps(
-        transcript_data=transcript_data,
-        analysis_type=analysis_type,
-        model=model,
-        existing_analysis=existing_analysis
-    )
+    # Determine starting round (handles backward compat)
+    start_round = _get_starting_round(existing_analysis, analysis_type)
+
+    # If alias exists without versioned keys, migrate it to round 0
+    alias_data = existing_analysis.get(analysis_type)
+    if start_round == 0 and alias_data and isinstance(alias_data, dict) and "_round" not in alias_data:
+        # Existing unversioned result: save as _0 for history, then continue
+        existing_analysis[f"{analysis_type}_0"] = dict(alias_data)
+        # Check if there's also an unversioned judge
+        if judge_type in existing_analysis:
+            judge_data = existing_analysis[judge_type]
+            if isinstance(judge_data, dict):
+                existing_analysis[f"{judge_type}_0"] = dict(judge_data)
+        start_round = 1  # Next round will be 1
+
+    current_round = start_round
+
+    # Step 1: Generate initial draft (round N)
+    console.print(f"\n[bold cyan]Round {current_round}: Generating initial draft...[/bold cyan]")
+
+    # Build history for judge_feedback injection (all prior rounds)
+    history = _build_history_from_existing(existing_analysis, analysis_type, judge_type)
+
+    if history:
+        # We have prior rounds, inject history as judge_feedback
+        judge_feedback_text = json.dumps(history, indent=2)
+
+        analysis_def = load_analysis_type(analysis_type)
+        prompt_context = resolve_optional_inputs(analysis_def, existing_analysis, transcript_text)
+        prompt_context["judge_feedback"] = judge_feedback_text
+
+        for req in analysis_def.get("requires", []):
+            if req in existing_analysis:
+                prompt_context[req] = format_prerequisite_output(existing_analysis[req])
+
+        draft_result = analyze_transcript(
+            transcript_text=transcript_text,
+            analysis_type=analysis_type,
+            title=transcript_data.get("title", ""),
+            model=model,
+            prerequisite_context=prompt_context
+        )
+    else:
+        # Fresh start, no history
+        draft_result, prereqs = run_analysis_with_deps(
+            transcript_data=transcript_data,
+            analysis_type=analysis_type,
+            model=model,
+            existing_analysis=existing_analysis
+        )
 
     if "error" in draft_result:
         raise ValueError(f"Initial analysis failed: {draft_result.get('error')}")
 
-    # Store the draft in existing_analysis so judge can access it
+    # Add metadata and save as versioned key
     draft_result["_model"] = model
     draft_result["_analyzed_at"] = datetime.now().isoformat()
-    existing_analysis[analysis_type] = draft_result
 
-    # Save initial draft
+    versioned_draft_key = f"{analysis_type}_{current_round}"
+    existing_analysis[versioned_draft_key] = draft_result
+
+    # Update alias to point to latest
+    _update_alias(existing_analysis, analysis_type, judge_type, draft_result, current_round)
+
+    # Save after draft
     if save_path:
         _save_analysis_to_file(save_path, transcript_data, existing_analysis)
 
-    console.print(f"[green]Draft generated.[/green] Character count: {draft_result.get('character_count', 'N/A')}")
+    console.print(f"[green]Draft generated (round {current_round}).[/green] Character count: {draft_result.get('character_count', 'N/A')}")
 
     judge_result = None
 
-    for round_num in range(1, max_rounds + 1):
-        # Step 2: Run judge
-        console.print(f"\n[bold cyan]Round {round_num}: Running judge evaluation...[/bold cyan]")
+    for i in range(max_rounds):
+        # Step 2: Run judge on the current draft
+        console.print(f"\n[bold cyan]Round {current_round}: Running judge evaluation...[/bold cyan]")
         judge_result, _ = run_analysis_with_deps(
             transcript_data=transcript_data,
             analysis_type=judge_type,
@@ -1044,21 +1200,27 @@ def run_with_judge_loop(
             for imp in improvements:
                 console.print(f"  [yellow]- {imp.get('criterion', '')}: {imp.get('suggestion', '')[0:100]}...[/yellow]")
 
-        # Store judge output
+        # Save judge as versioned key
         judge_result["_model"] = model
         judge_result["_analyzed_at"] = datetime.now().isoformat()
+        versioned_judge_key = f"{judge_type}_{current_round}"
+        existing_analysis[versioned_judge_key] = judge_result
+        # Also store under the base judge key so run_analysis_with_deps can find it
         existing_analysis[judge_type] = judge_result
 
-        # Step 3: Re-run analysis with judge feedback injected
-        console.print(f"\n[bold cyan]Round {round_num}: Improving draft with feedback...[/bold cyan]")
+        # Update alias history with new judge score
+        _update_alias(existing_analysis, analysis_type, judge_type, draft_result, current_round)
 
-        # Format judge feedback for injection into prompt
-        judge_feedback_text = json.dumps({
-            "scores": judge_result.get("scores", {}),
-            "overall_score": judge_result.get("overall_score", 0),
-            "improvements": judge_result.get("improvements", []),
-            "rewritten_hook": judge_result.get("rewritten_hook")
-        }, indent=2)
+        if save_path:
+            _save_analysis_to_file(save_path, transcript_data, existing_analysis)
+
+        # Step 3: Generate improved draft (next round)
+        current_round += 1
+        console.print(f"\n[bold cyan]Round {current_round}: Improving draft with feedback...[/bold cyan]")
+
+        # Build full history for injection
+        history = _build_history_from_existing(existing_analysis, analysis_type, judge_type)
+        judge_feedback_text = json.dumps(history, indent=2)
 
         # Build context with judge_feedback for conditional template
         analysis_def = load_analysis_type(analysis_type)
@@ -1082,22 +1244,136 @@ def run_with_judge_loop(
         if "error" not in improved_result:
             improved_result["_model"] = model
             improved_result["_analyzed_at"] = datetime.now().isoformat()
-            improved_result["_judge_improved"] = True
-            improved_result["_judge_round"] = round_num
-            existing_analysis[analysis_type] = improved_result
+
+            # Save as versioned key
+            versioned_draft_key = f"{analysis_type}_{current_round}"
+            existing_analysis[versioned_draft_key] = improved_result
             draft_result = improved_result
 
-            console.print(f"[green]Improved draft generated.[/green] Character count: {improved_result.get('character_count', 'N/A')}")
+            # Update alias
+            _update_alias(existing_analysis, analysis_type, judge_type, draft_result, current_round)
+
+            if save_path:
+                _save_analysis_to_file(save_path, transcript_data, existing_analysis)
+
+            console.print(f"[green]Improved draft generated (round {current_round}).[/green] Character count: {improved_result.get('character_count', 'N/A')}")
         else:
             console.print(f"[yellow]Improvement round failed. Keeping previous draft.[/yellow]")
+            current_round -= 1  # Revert round increment
             break
 
-    # Save final results
+    # Final save
     if save_path:
         _save_analysis_to_file(save_path, transcript_data, existing_analysis)
         console.print(f"\n[green]Results saved to {save_path}[/green]")
 
     return draft_result, judge_result
+
+
+# Mapping of analysis types that should auto-run a judge loop
+AUTO_JUDGE_TYPES = {
+    "linkedin_v2": "linkedin_judge",
+}
+
+
+def run_analysis_with_auto_judge(
+    transcript_path: str,
+    analysis_types: list[str],
+    model: str = DEFAULT_MODEL,
+    save: bool = True,
+    skip_existing: bool = True,
+    force: bool = False,
+    judge_rounds: int = 1,
+) -> dict:
+    """
+    Run analyses, auto-invoking the judge loop for types that have one.
+
+    For analysis types in AUTO_JUDGE_TYPES (e.g., linkedin_v2), this runs
+    run_with_judge_loop() instead of the plain analyze_transcript_file().
+    Other types fall through to the standard pipeline.
+
+    Called from CLI when `kb analyze -t linkedin_v2` is invoked.
+
+    Args:
+        transcript_path: Path to transcript JSON file
+        analysis_types: List of analysis type names to run
+        model: Gemini model to use
+        save: Whether to save results
+        skip_existing: Skip types already done with same model
+        force: Force re-run
+        judge_rounds: Number of judge improvement rounds
+
+    Returns:
+        Dict of analysis results keyed by type name
+    """
+    # Split into auto-judge types and regular types
+    auto_judge = []
+    regular = []
+    for t in analysis_types:
+        if t in AUTO_JUDGE_TYPES:
+            auto_judge.append(t)
+        else:
+            regular.append(t)
+
+    results = {}
+
+    # Load transcript once
+    with open(transcript_path) as f:
+        transcript_data = json.load(f)
+
+    existing_analysis = transcript_data.get("analysis", {})
+
+    # Handle auto-judge types
+    for analysis_type in auto_judge:
+        judge_type = AUTO_JUDGE_TYPES[analysis_type]
+
+        # Check skip_existing
+        if skip_existing and not force:
+            alias = existing_analysis.get(analysis_type)
+            if alias and isinstance(alias, dict) and alias.get("_model") == model:
+                # Already has a versioned result from same model
+                if alias.get("_round") is not None:
+                    console.print(f"[dim]Skipping {analysis_type} (already at round {alias['_round']} with {model})[/dim]")
+                    continue
+
+        console.print(Panel(
+            f"[bold]Auto-Judge: {analysis_type}[/bold]\n"
+            f"Judge: {judge_type}\n"
+            f"Rounds: {judge_rounds}\n"
+            f"Model: {model}",
+            border_style="cyan"
+        ))
+
+        try:
+            final_result, judge_result = run_with_judge_loop(
+                transcript_data=transcript_data,
+                analysis_type=analysis_type,
+                judge_type=judge_type,
+                model=model,
+                max_rounds=judge_rounds,
+                existing_analysis=existing_analysis,
+                save_path=transcript_path if save else None
+            )
+            results[analysis_type] = final_result
+            if judge_result:
+                results[judge_type] = judge_result
+        except Exception as e:
+            console.print(f"[red]Auto-judge failed for {analysis_type}: {e}[/red]")
+            results[analysis_type] = {"error": str(e)}
+
+    # Handle regular types
+    if regular:
+        regular_results = analyze_transcript_file(
+            transcript_path=transcript_path,
+            analysis_types=regular,
+            model=model,
+            save=save,
+            skip_existing=skip_existing,
+            force=force
+        )
+        results.update(regular_results)
+
+    return results
 
 
 def _save_analysis_to_file(path: str, transcript_data: dict, analysis: dict):
@@ -1516,44 +1792,88 @@ Examples:
         else:
             analysis_types = ["summary"]
 
-        # Judge loop mode
-        if args.judge:
-            # Default to linkedin_v2 if no type specified
+        # Check if any requested types have auto-judge
+        has_auto_judge = any(t in AUTO_JUDGE_TYPES for t in analysis_types)
+
+        # --judge flag: for auto-judge types it's a no-op (they always auto-judge).
+        # For non-auto-judge types, run explicit judge loop (backward compat).
+        if args.judge and not has_auto_judge:
             if not args.types:
                 analysis_types = ["linkedin_v2"]
+                has_auto_judge = True  # linkedin_v2 is auto-judge
+            else:
+                # Explicit --judge with non-auto-judge type: use old behavior
+                analysis_type = analysis_types[0]
+                judge_type = "linkedin_judge"
 
-            analysis_type = analysis_types[0]
-            judge_type = "linkedin_judge"
+                console.print(Panel(
+                    f"[bold]Transcript Analysis (Judge Loop)[/bold]\n"
+                    f"File: {args.transcript}\n"
+                    f"Analysis: {analysis_type}\n"
+                    f"Judge: {judge_type}\n"
+                    f"Rounds: {args.judge_rounds}\n"
+                    f"Model: {args.model}",
+                    border_style="cyan"
+                ))
 
+                try:
+                    with open(args.transcript) as f:
+                        transcript_data = json.load(f)
+
+                    final_result, judge_result = run_with_judge_loop(
+                        transcript_data=transcript_data,
+                        analysis_type=analysis_type,
+                        judge_type=judge_type,
+                        model=args.model,
+                        max_rounds=args.judge_rounds,
+                        save_path=args.transcript if not args.no_save else None
+                    )
+
+                    console.print("\n[bold]Final Post:[/bold]")
+                    console.print(Panel(final_result.get("post", ""), border_style="green"))
+
+                    if judge_result:
+                        overall = judge_result.get("overall_score", 0)
+                        console.print(f"\n[bold]Judge overall score: {overall:.1f}/5.0[/bold]")
+
+                except Exception as e:
+                    console.print(f"[red]Error: {e}[/red]")
+                    sys.exit(1)
+                return
+
+        if has_auto_judge:
+            # Use auto-judge pipeline (handles both auto-judge and regular types)
             console.print(Panel(
-                f"[bold]Transcript Analysis (Judge Loop)[/bold]\n"
+                f"[bold]Transcript Analysis (Auto-Judge)[/bold]\n"
                 f"File: {args.transcript}\n"
-                f"Analysis: {analysis_type}\n"
-                f"Judge: {judge_type}\n"
-                f"Rounds: {args.judge_rounds}\n"
+                f"Types: {', '.join(analysis_types)}\n"
+                f"Judge rounds: {args.judge_rounds}\n"
                 f"Model: {args.model}",
                 border_style="cyan"
             ))
 
             try:
-                with open(args.transcript) as f:
-                    transcript_data = json.load(f)
-
-                final_result, judge_result = run_with_judge_loop(
-                    transcript_data=transcript_data,
-                    analysis_type=analysis_type,
-                    judge_type=judge_type,
+                results = run_analysis_with_auto_judge(
+                    transcript_path=args.transcript,
+                    analysis_types=analysis_types,
                     model=args.model,
-                    max_rounds=args.judge_rounds,
-                    save_path=args.transcript if not args.no_save else None
+                    save=not args.no_save,
+                    skip_existing=True,
+                    force=args.force,
+                    judge_rounds=args.judge_rounds,
                 )
 
-                console.print("\n[bold]Final Post:[/bold]")
-                console.print(Panel(final_result.get("post", ""), border_style="green"))
-
-                if judge_result:
-                    overall = judge_result.get("overall_score", 0)
-                    console.print(f"\n[bold]Judge overall score: {overall:.1f}/5.0[/bold]")
+                console.print("\n[bold]Results:[/bold]")
+                for name, result in results.items():
+                    if "error" in result:
+                        console.print(f"  [red]x {name}[/red]: {result['error']}")
+                    else:
+                        if name in AUTO_JUDGE_TYPES:
+                            post = result.get("post", "")
+                            console.print(f"  [green]done {name}[/green]")
+                            console.print(Panel(post[:500] + ("..." if len(post) > 500 else ""), border_style="green"))
+                        else:
+                            console.print(f"  [green]done {name}[/green]")
 
             except Exception as e:
                 console.print(f"[red]Error: {e}[/red]")
@@ -1590,51 +1910,109 @@ Examples:
             sys.exit(1)
         return
 
-    # Judge mode with decimal filter (no direct file path)
-    if args.judge and args.decimal:
-        transcripts = get_all_transcripts(decimal_filter=args.decimal, limit=1)
-        if not transcripts:
-            console.print(f"[red]No transcripts found for decimal: {args.decimal}[/red]")
-            sys.exit(1)
+    # Decimal filter mode (no direct file path)
+    # Auto-judge types (e.g., linkedin_v2) route to auto-judge regardless of --judge flag.
+    # --judge flag only affects non-auto-judge types.
+    if args.decimal:
+        # Determine types
+        if args.types:
+            analysis_types = args.types
+        else:
+            # Default: if --judge passed use linkedin_v2, otherwise use default types
+            if args.judge:
+                analysis_types = ["linkedin_v2"]
+            else:
+                analysis_types = None  # Will be handled below
 
-        transcript_path = transcripts[0]["path"]
-        analysis_type = args.types[0] if args.types else "linkedin_v2"
-        judge_type = "linkedin_judge"
+        has_auto_judge = analysis_types and any(t in AUTO_JUDGE_TYPES for t in analysis_types)
 
-        console.print(Panel(
-            f"[bold]Transcript Analysis (Judge Loop)[/bold]\n"
-            f"File: {transcript_path}\n"
-            f"Analysis: {analysis_type}\n"
-            f"Judge: {judge_type}\n"
-            f"Rounds: {args.judge_rounds}\n"
-            f"Model: {args.model}",
-            border_style="cyan"
-        ))
+        if has_auto_judge:
+            transcripts = get_all_transcripts(decimal_filter=args.decimal, limit=1)
+            if not transcripts:
+                console.print(f"[red]No transcripts found for decimal: {args.decimal}[/red]")
+                sys.exit(1)
 
-        try:
-            with open(transcript_path) as f:
-                transcript_data = json.load(f)
+            transcript_path = transcripts[0]["path"]
 
-            final_result, judge_result = run_with_judge_loop(
-                transcript_data=transcript_data,
-                analysis_type=analysis_type,
-                judge_type=judge_type,
-                model=args.model,
-                max_rounds=args.judge_rounds,
-                save_path=transcript_path if not args.no_save else None
-            )
+            console.print(Panel(
+                f"[bold]Transcript Analysis (Auto-Judge)[/bold]\n"
+                f"File: {transcript_path}\n"
+                f"Types: {', '.join(analysis_types)}\n"
+                f"Judge rounds: {args.judge_rounds}\n"
+                f"Model: {args.model}",
+                border_style="cyan"
+            ))
 
-            console.print("\n[bold]Final Post:[/bold]")
-            console.print(Panel(final_result.get("post", ""), border_style="green"))
+            try:
+                results = run_analysis_with_auto_judge(
+                    transcript_path=transcript_path,
+                    analysis_types=analysis_types,
+                    model=args.model,
+                    save=not args.no_save,
+                    skip_existing=True,
+                    force=args.force,
+                    judge_rounds=args.judge_rounds,
+                )
 
-            if judge_result:
-                overall = judge_result.get("overall_score", 0)
-                console.print(f"\n[bold]Judge overall score: {overall:.1f}/5.0[/bold]")
+                console.print("\n[bold]Results:[/bold]")
+                for name, result in results.items():
+                    if "error" in result:
+                        console.print(f"  [red]x {name}[/red]: {result['error']}")
+                    else:
+                        console.print(f"  [green]done {name}[/green]")
 
-        except Exception as e:
-            console.print(f"[red]Error: {e}[/red]")
-            sys.exit(1)
-        return
+            except Exception as e:
+                console.print(f"[red]Error: {e}[/red]")
+                sys.exit(1)
+            return
+
+        # Fallback: explicit --judge with non-auto-judge types
+        if args.judge and analysis_types:
+            transcripts = get_all_transcripts(decimal_filter=args.decimal, limit=1)
+            if not transcripts:
+                console.print(f"[red]No transcripts found for decimal: {args.decimal}[/red]")
+                sys.exit(1)
+
+            transcript_path = transcripts[0]["path"]
+            analysis_type = analysis_types[0]
+            judge_type = "linkedin_judge"
+
+            console.print(Panel(
+                f"[bold]Transcript Analysis (Judge Loop)[/bold]\n"
+                f"File: {transcript_path}\n"
+                f"Analysis: {analysis_type}\n"
+                f"Judge: {judge_type}\n"
+                f"Rounds: {args.judge_rounds}\n"
+                f"Model: {args.model}",
+                border_style="cyan"
+            ))
+
+            try:
+                with open(transcript_path) as f:
+                    transcript_data = json.load(f)
+
+                final_result, judge_result = run_with_judge_loop(
+                    transcript_data=transcript_data,
+                    analysis_type=analysis_type,
+                    judge_type=judge_type,
+                    model=args.model,
+                    max_rounds=args.judge_rounds,
+                    save_path=transcript_path if not args.no_save else None
+                )
+
+                console.print("\n[bold]Final Post:[/bold]")
+                console.print(Panel(final_result.get("post", ""), border_style="green"))
+
+                if judge_result:
+                    overall = judge_result.get("overall_score", 0)
+                    console.print(f"\n[bold]Judge overall score: {overall:.1f}/5.0[/bold]")
+
+            except Exception as e:
+                console.print(f"[red]Error: {e}[/red]")
+                sys.exit(1)
+            return
+
+        # No auto-judge types and no --judge flag: fall through to interactive mode
 
     # Interactive mode (default)
     run_interactive_mode(

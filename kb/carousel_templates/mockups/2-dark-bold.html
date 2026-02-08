@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dark Bold — Carousel Mockup</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #333;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 40px;
+    padding: 40px 0;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  .slide {
+    width: 1080px;
+    height: 1350px;
+    position: relative;
+    overflow: hidden;
+    background: #0A0A0F;
+    color: #FFFFFF;
+    page-break-after: always;
+  }
+
+  /* Gradient accent strip at top */
+  .slide::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 5px;
+    background: linear-gradient(90deg, #FF6B35, #FF3CAC, #784BA0, #2B86C5);
+  }
+
+  /* Header */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 40px 60px 24px 60px;
+  }
+  .header-left {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    color: #FFFFFF;
+  }
+  .header-right {
+    font-size: 19px;
+    font-weight: 500;
+    color: rgba(255,255,255,0.5);
+  }
+
+  /* Progress bar style indicator */
+  .progress-bar {
+    display: flex;
+    align-items: center;
+    padding: 20px 60px;
+    gap: 6px;
+  }
+  .progress-segment {
+    flex: 1;
+    height: 4px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 2px;
+    position: relative;
+  }
+  .progress-segment.filled {
+    background: linear-gradient(90deg, #FF6B35, #FF3CAC);
+  }
+  .progress-segment.active {
+    background: linear-gradient(90deg, #FF3CAC, #784BA0);
+    box-shadow: 0 0 12px rgba(255,60,172,0.4);
+  }
+  .progress-labels {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 60px 0 60px;
+  }
+  .progress-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: rgba(255,255,255,0.25);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    flex: 1;
+    text-align: center;
+  }
+  .progress-label.active {
+    color: #FF3CAC;
+    font-weight: 600;
+  }
+  .progress-label.filled {
+    color: rgba(255,255,255,0.45);
+  }
+
+  /* Slide title */
+  .slide-title {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 48px;
+    font-weight: 700;
+    color: #FFFFFF;
+    padding: 44px 60px 0 60px;
+    line-height: 1.15;
+    letter-spacing: -1px;
+  }
+
+  /* Gradient underline */
+  .title-gradient {
+    width: 100px;
+    height: 4px;
+    background: linear-gradient(90deg, #FF6B35, #FF3CAC);
+    margin: 20px 0 0 60px;
+    border-radius: 2px;
+  }
+
+  /* Content */
+  .content {
+    padding: 36px 60px 60px 60px;
+  }
+  .content ul, .content ol {
+    list-style: none;
+    padding: 0;
+  }
+  .content li {
+    font-size: 28px;
+    line-height: 1.5;
+    color: rgba(255,255,255,0.85);
+    padding: 20px 0 20px 52px;
+    position: relative;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .content li:last-child {
+    border-bottom: none;
+  }
+  .content ul li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 28px;
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    background: linear-gradient(135deg, rgba(255,107,53,0.25), rgba(255,60,172,0.25));
+    border: 1.5px solid rgba(255,60,172,0.4);
+  }
+  .content ol {
+    counter-reset: bold-counter;
+  }
+  .content ol li {
+    counter-increment: bold-counter;
+  }
+  .content ol li::before {
+    content: counter(bold-counter);
+    position: absolute;
+    left: 0;
+    top: 18px;
+    width: 36px;
+    height: 36px;
+    background: linear-gradient(135deg, #FF6B35, #FF3CAC);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 18px;
+    font-weight: 700;
+    color: #FFFFFF;
+    text-align: center;
+    line-height: 36px;
+  }
+
+  /* Step number badge */
+  .step-badge {
+    display: inline-block;
+    padding: 6px 18px;
+    background: linear-gradient(135deg, rgba(255,107,53,0.2), rgba(255,60,172,0.2));
+    border: 1px solid rgba(255,60,172,0.3);
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #FF3CAC;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin: 32px 0 0 60px;
+  }
+
+  /* Footer */
+  .slide-footer {
+    position: absolute;
+    bottom: 36px;
+    right: 60px;
+    font-size: 16px;
+    color: rgba(255,255,255,0.2);
+    font-weight: 500;
+  }
+
+  /* === TITLE PAGE === */
+  .slide-title-page {
+    display: flex;
+    flex-direction: column;
+  }
+  .slide-title-page::after {
+    content: "";
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 500px;
+    height: 500px;
+    background: radial-gradient(circle at bottom right, rgba(120,75,160,0.15), transparent 70%);
+    pointer-events: none;
+  }
+  .title-hero {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 0 80px;
+  }
+  .title-page-photo {
+    width: 110px;
+    height: 110px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #FF6B35, #FF3CAC);
+    padding: 3px;
+    margin-bottom: 44px;
+  }
+  .title-page-photo-inner {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: #0A0A0F;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .title-page-photo-inner svg {
+    width: 56px;
+    height: 56px;
+    fill: rgba(255,255,255,0.4);
+  }
+  .title-hero-title {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 68px;
+    font-weight: 700;
+    color: #FFFFFF;
+    line-height: 1.08;
+    letter-spacing: -2px;
+    margin-bottom: 20px;
+  }
+  .title-hero-gradient {
+    width: 120px;
+    height: 5px;
+    background: linear-gradient(90deg, #FF6B35, #FF3CAC);
+    border-radius: 3px;
+    margin-bottom: 28px;
+  }
+  .title-hero-subtitle {
+    font-size: 28px;
+    font-weight: 400;
+    color: rgba(255,255,255,0.55);
+    line-height: 1.45;
+    max-width: 700px;
+  }
+
+  /* === CTA PAGE === */
+  .cta-center {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 0 80px;
+  }
+  .cta-icon {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #FF6B35, #FF3CAC);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 44px;
+  }
+  .cta-icon svg {
+    width: 36px;
+    height: 36px;
+    fill: white;
+  }
+  .cta-heading {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 52px;
+    font-weight: 700;
+    color: #FFFFFF;
+    line-height: 1.15;
+    letter-spacing: -1px;
+    margin-bottom: 24px;
+  }
+  .cta-subtext {
+    font-size: 24px;
+    color: rgba(255,255,255,0.5);
+    line-height: 1.5;
+    margin-bottom: 52px;
+    max-width: 660px;
+  }
+  .cta-button {
+    display: inline-block;
+    padding: 22px 64px;
+    background: linear-gradient(135deg, #FF6B35, #FF3CAC);
+    color: #FFFFFF;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 24px;
+    font-weight: 700;
+    border-radius: 50px;
+    letter-spacing: -0.3px;
+  }
+  .cta-handle {
+    margin-top: 28px;
+    font-size: 20px;
+    color: rgba(255,255,255,0.3);
+  }
+
+  /* === MERMAID === */
+  .mermaid-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px 60px 60px 60px;
+    flex: 1;
+  }
+</style>
+</head>
+<body>
+
+<!-- ====== SLIDE 1: TITLE PAGE ====== -->
+<div class="slide slide-title-page">
+  <div class="header">
+    <span class="header-left">Blake Sims</span>
+    <span class="header-right">Claude Code Architects</span>
+  </div>
+  <div class="title-hero">
+    <div class="title-page-photo">
+      <div class="title-page-photo-inner">
+        <svg viewBox="0 0 24 24"><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/></svg>
+      </div>
+    </div>
+    <div class="title-hero-title">5 Steps to Build an AI-Powered Content Pipeline</div>
+    <div class="title-hero-gradient"></div>
+    <div class="title-hero-subtitle">From raw transcription to polished LinkedIn carousels — fully automated</div>
+  </div>
+</div>
+
+<!-- ====== SLIDE 2: CONTENT 1 ====== -->
+<div class="slide">
+  <div class="header">
+    <span class="header-left">Blake Sims</span>
+    <span class="header-right">Claude Code Architects</span>
+  </div>
+  <div class="progress-bar">
+    <div class="progress-segment active"></div>
+    <div class="progress-segment"></div>
+    <div class="progress-segment"></div>
+    <div class="progress-segment"></div>
+    <div class="progress-segment"></div>
+  </div>
+  <div class="progress-labels">
+    <span class="progress-label active">Transcribe</span>
+    <span class="progress-label">Analyze</span>
+    <span class="progress-label">Classify</span>
+    <span class="progress-label">Generate</span>
+    <span class="progress-label">Publish</span>
+  </div>
+  <div class="step-badge">Step 01</div>
+  <div class="slide-title">Set Up Transcription</div>
+  <div class="title-gradient"></div>
+  <div class="content">
+    <ul>
+      <li>Use Whisper API to convert audio recordings to text</li>
+      <li>Process meeting recordings, voice memos, and podcasts</li>
+      <li>Store transcripts in structured format for downstream processing</li>
+      <li>Typical accuracy: 95%+ for clear English speech</li>
+    </ul>
+  </div>
+  <div class="slide-footer">1 / 5</div>
+</div>
+
+<!-- ====== SLIDE 3: CONTENT 2 ====== -->
+<div class="slide">
+  <div class="header">
+    <span class="header-left">Blake Sims</span>
+    <span class="header-right">Claude Code Architects</span>
+  </div>
+  <div class="progress-bar">
+    <div class="progress-segment filled"></div>
+    <div class="progress-segment active"></div>
+    <div class="progress-segment"></div>
+    <div class="progress-segment"></div>
+    <div class="progress-segment"></div>
+  </div>
+  <div class="progress-labels">
+    <span class="progress-label filled">Transcribe</span>
+    <span class="progress-label active">Analyze</span>
+    <span class="progress-label">Classify</span>
+    <span class="progress-label">Generate</span>
+    <span class="progress-label">Publish</span>
+  </div>
+  <div class="step-badge">Step 02</div>
+  <div class="slide-title">Run LLM Analysis</div>
+  <div class="title-gradient"></div>
+  <div class="content">
+    <ol>
+      <li>Feed transcript chunks to Claude or GPT for topic extraction</li>
+      <li>Generate structured summaries with key insights</li>
+      <li>Identify quotable moments and actionable takeaways</li>
+      <li>Tag content by theme: tutorial, opinion, case study</li>
+    </ol>
+  </div>
+  <div class="slide-footer">2 / 5</div>
+</div>
+
+<!-- ====== SLIDE 4: CONTENT 3 ====== -->
+<div class="slide">
+  <div class="header">
+    <span class="header-left">Blake Sims</span>
+    <span class="header-right">Claude Code Architects</span>
+  </div>
+  <div class="progress-bar">
+    <div class="progress-segment filled"></div>
+    <div class="progress-segment filled"></div>
+    <div class="progress-segment active"></div>
+    <div class="progress-segment"></div>
+    <div class="progress-segment"></div>
+  </div>
+  <div class="progress-labels">
+    <span class="progress-label filled">Transcribe</span>
+    <span class="progress-label filled">Analyze</span>
+    <span class="progress-label active">Classify</span>
+    <span class="progress-label">Generate</span>
+    <span class="progress-label">Publish</span>
+  </div>
+  <div class="step-badge">Step 03</div>
+  <div class="slide-title">Visual Classification</div>
+  <div class="title-gradient"></div>
+  <div class="content">
+    <ul>
+      <li>Score each content piece for visual potential (1-10)</li>
+      <li>Classify format: carousel, single image, text post, or thread</li>
+      <li>Carousels work best for step-by-step and list content</li>
+      <li>Auto-select the right template based on content type</li>
+    </ul>
+  </div>
+  <div class="slide-footer">3 / 5</div>
+</div>
+
+<!-- ====== SLIDE 5: MERMAID ====== -->
+<div class="slide" style="display:flex; flex-direction:column;">
+  <div class="header">
+    <span class="header-left">Blake Sims</span>
+    <span class="header-right">Claude Code Architects</span>
+  </div>
+  <div class="progress-bar">
+    <div class="progress-segment filled"></div>
+    <div class="progress-segment filled"></div>
+    <div class="progress-segment filled"></div>
+    <div class="progress-segment active"></div>
+    <div class="progress-segment"></div>
+  </div>
+  <div class="progress-labels">
+    <span class="progress-label filled">Transcribe</span>
+    <span class="progress-label filled">Analyze</span>
+    <span class="progress-label filled">Classify</span>
+    <span class="progress-label active">Generate</span>
+    <span class="progress-label">Publish</span>
+  </div>
+  <div class="step-badge">Step 04</div>
+  <div class="slide-title">The Full Pipeline</div>
+  <div class="title-gradient"></div>
+  <div class="mermaid-container">
+    <svg viewBox="0 0 760 400" xmlns="http://www.w3.org/2000/svg" style="width:860px;">
+      <defs>
+        <linearGradient id="grad-dark" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stop-color="#FF6B35"/>
+          <stop offset="100%" stop-color="#FF3CAC"/>
+        </linearGradient>
+        <marker id="arrow-dark" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#FF3CAC"/>
+        </marker>
+      </defs>
+      <!-- Nodes -->
+      <rect x="20" y="20" width="165" height="70" rx="8" fill="rgba(255,107,53,0.12)" stroke="url(#grad-dark)" stroke-width="2"/>
+      <text x="102" y="63" text-anchor="middle" font-family="Space Grotesk, sans-serif" font-size="18" font-weight="600" fill="#FFFFFF">Transcribe</text>
+
+      <rect x="20" y="120" width="165" height="70" rx="8" fill="rgba(255,60,172,0.1)" stroke="url(#grad-dark)" stroke-width="2"/>
+      <text x="102" y="163" text-anchor="middle" font-family="Space Grotesk, sans-serif" font-size="18" font-weight="600" fill="#FFFFFF">LLM Analysis</text>
+
+      <rect x="20" y="220" width="165" height="70" rx="8" fill="rgba(120,75,160,0.12)" stroke="url(#grad-dark)" stroke-width="2"/>
+      <text x="102" y="263" text-anchor="middle" font-family="Space Grotesk, sans-serif" font-size="18" font-weight="600" fill="#FFFFFF">Classify</text>
+
+      <rect x="20" y="320" width="165" height="70" rx="8" fill="rgba(43,134,197,0.12)" stroke="url(#grad-dark)" stroke-width="2"/>
+      <text x="102" y="363" text-anchor="middle" font-family="Space Grotesk, sans-serif" font-size="18" font-weight="600" fill="#FFFFFF">Generate</text>
+
+      <!-- Detail labels -->
+      <text x="220" y="50" font-family="Inter, sans-serif" font-size="15" fill="rgba(255,255,255,0.6)">Whisper API</text>
+      <text x="220" y="72" font-family="Inter, sans-serif" font-size="13" fill="rgba(255,255,255,0.3)">audio -> text transcript</text>
+
+      <text x="220" y="150" font-family="Inter, sans-serif" font-size="15" fill="rgba(255,255,255,0.6)">Claude / GPT</text>
+      <text x="220" y="172" font-family="Inter, sans-serif" font-size="13" fill="rgba(255,255,255,0.3)">extract topics + insights</text>
+
+      <text x="220" y="250" font-family="Inter, sans-serif" font-size="15" fill="rgba(255,255,255,0.6)">Content Scorer</text>
+      <text x="220" y="272" font-family="Inter, sans-serif" font-size="13" fill="rgba(255,255,255,0.3)">format + template selection</text>
+
+      <text x="220" y="350" font-family="Inter, sans-serif" font-size="15" fill="rgba(255,255,255,0.6)">Jinja2 + Playwright</text>
+      <text x="220" y="372" font-family="Inter, sans-serif" font-size="13" fill="rgba(255,255,255,0.3)">HTML -> PDF carousel</text>
+
+      <!-- Arrows -->
+      <line x1="102" y1="90" x2="102" y2="120" stroke="url(#grad-dark)" stroke-width="2" marker-end="url(#arrow-dark)"/>
+      <line x1="102" y1="190" x2="102" y2="220" stroke="url(#grad-dark)" stroke-width="2" marker-end="url(#arrow-dark)"/>
+      <line x1="102" y1="290" x2="102" y2="320" stroke="url(#grad-dark)" stroke-width="2" marker-end="url(#arrow-dark)"/>
+    </svg>
+  </div>
+  <div class="slide-footer">4 / 5</div>
+</div>
+
+<!-- ====== SLIDE 6: CTA ====== -->
+<div class="slide" style="display:flex; flex-direction:column;">
+  <div class="header">
+    <span class="header-left">Blake Sims</span>
+    <span class="header-right">Claude Code Architects</span>
+  </div>
+  <div class="cta-center">
+    <div class="cta-icon">
+      <svg viewBox="0 0 24 24"><path d="M13 7h-2v4H7v2h4v4h2v-4h4v-2h-4V7zm-1-5C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/></svg>
+    </div>
+    <div class="cta-heading">Build your own AI content pipeline</div>
+    <div class="cta-subtext">Follow along as I automate everything from transcription to publishing. New deep-dives every week.</div>
+    <div class="cta-button">Follow for More</div>
+    <div class="cta-handle">@blakesims</div>
+  </div>
+  <div class="slide-footer">5 / 5</div>
+</div>
+
+</body>
+</html>
