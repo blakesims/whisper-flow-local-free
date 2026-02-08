@@ -623,7 +623,7 @@ class TestRunVisualPipeline:
 
         with patch("kb.serve.ACTION_STATE_PATH", state_file), \
              patch("kb.serve.KB_ROOT", tmp_path), \
-             patch("kb.serve._update_visual_status", side_effect=track_status), \
+             patch("kb.serve_visual._update_visual_status", side_effect=track_status), \
              patch("kb.render.render_pipeline") as mock_render:
 
             mock_render.return_value = {
