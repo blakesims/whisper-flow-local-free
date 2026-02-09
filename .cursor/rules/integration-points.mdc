@@ -1,68 +1,60 @@
 ---
-description: outlines key integration points with external services, libraries, and system functionalities for the Whisper Transcription UI project.
+description: Key integration points with external services, libraries, and APIs.
 globs:
 alwaysApply: false
 ---
 
 # Integration Points and External Services
 
+## 1. Gemini API (google-genai SDK)
 
-## 1. Configuration Management
+-   **Library**: `google-genai` v1.17.0 (NOT the deprecated `google-generativeai`)
+-   **Usage**: `kb/analyze.py` — all LLM analysis (linkedin_v2, carousel_slides, judge, etc.)
+-   **Auth**: `GEMINI_API_KEY` environment variable
+-   **Model**: `gemini-3-pro-preview` (default, never use Flash for content generation)
+-   **Structured Output**:
+    -   Use `response_schema` (raw dict or Pydantic). `response_json_schema` does NOT exist in v1.17.0.
+    -   `minLength`/`maxLength`/`pattern` are silently ignored. Only `enum` and `format` are enforced.
+    -   For bullet-point content, use `type: array` + `items: {type: string}` — don't ask the model to format strings with `- ` prefixes.
+-   **Config**: Analysis type configs in `kb/config/analysis_types/*.json`. Runtime loads from `KB_ROOT/config/`, not repo.
 
--   **Service**: `app.utils.config_manager.ConfigManager` ([app/utils/config_manager.py](mdc:app/utils/config_manager.py))
--   **Configuration File**: `settings.json`
--   **Storage Location**: OS-specific application support directory (e.g., `~/Library/Application Support/WhisperTranscribeUI/` on macOS). The `ConfigManager` handles the exact path resolution.
--   **Format**: JSON.
--   **Defaults**: Default settings are defined within `ConfigManager` and are used if `settings.json` is missing or a key is not found.
--   **Access**: Use `ConfigManager.get('setting_key')` and `ConfigManager.set('setting_key', value)`.
+## 2. Carousel Rendering Pipeline
 
-## 2. Transcription Service (Faster-Whisper)
+-   **Jinja2**: HTML template rendering (`kb/render.py`)
+    -   Templates in `kb/carousel_templates/` (brand-purple, modern-editorial, tech-minimal)
+    -   Config: `kb/carousel_templates/config.json` (fonts, colors, dimensions, brand settings)
+-   **Playwright**: HTML → PDF conversion (`kb/render.py::render_html_to_pdf`)
+    -   Also generates per-slide PNG thumbnails
+-   **Mermaid (mmdc)**: Diagram rendering for mermaid-type slides (`kb/render.py::render_mermaid`)
+    -   Prompt instructs LLM to include `%%{init}` theming directive with brand colors
 
--   **Service**: `app.core.transcription_service.TranscriptionService` ([app/core/transcription_service.py](mdc:app/core/transcription_service.py))
--   **Library**: `faster-whisper`
--   **Model Loading**:
-    -   Models are loaded using `faster_whisper.WhisperModel(model_name, device, compute_type)`.
-    -   `faster-whisper` handles the download and caching of models to its default user cache directory.
--   **Configurable Parameters**:
-    -   `model_name` (e.g., "tiny", "base", "small", "medium", "large-v3") - Should be configurable via `ConfigManager`.
-    -   `device` ("cpu", "cuda") - Should be configurable via `ConfigManager`.
-    -   `compute_type` ("int8", "float16", "float32") - Should be configurable via `ConfigManager`.
--   **Core Interface**:
-    -   `TranscriptionService.transcribe(audio_path, language=None, task="transcribe", beam_size=5)`
-    -   `audio_path`: Path to the audio file.
-    -   `language`: Optional language code (e.g., "en", "es"). If `None`, auto-detects.
-    -   `task`: "transcribe" or "translate".
+## 3. Flask Web Dashboard (kb serve)
 
-## 3. Audio Recording (SoundDevice)
+-   **Library**: Flask
+-   **Port**: 8765 (default)
+-   **Routes**: Action queue (`/`), browse mode (`/browse`), API endpoints (`/api/...`)
+-   **State**: `~/.kb/action-state.json`, `~/.kb/video-inventory.json`
+-   **Deployment**: systemd service on server (zen), scripts in `deploy/`
 
--   **Library**: `sounddevice`
--   **Core Module (Planned)**: `app.core.audio_recorder.AudioRecorder` ([app/core/audio_recorder.py](mdc:app/core/audio_recorder.py))
--   **Functionality**: Will handle microphone input, audio data buffering, and saving to a temporary file.
--   **Configuration**: Sample rate (e.g., 16000 Hz) and channels (e.g., 1 for mono) will be important. These should be configurable if necessary, but good defaults will be set.
+## 4. Whisper Transcription
 
-## 4. Clipboard Interaction (Pyperclip)
+-   **whisper.cpp** (primary, daemon mode): via `pywhispercpp` — `app/core/transcription_service_cpp.py`
+-   **faster-whisper** (legacy, full UI): — `app/core/transcription_service.py`
+-   **Unified import**: `kb/transcription.py` provides `get_transcription_service`
 
--   **Library**: `pyperclip`
--   **Functionality**: Used to copy transcribed text (and potentially Fabric-processed text) to the system clipboard.
--   **Usage**: `pyperclip.copy("text_to_copy")`.
+## 5. Configuration Management
 
-## 5. Fabric Pattern Processing (CLI)
+-   **App config**: `app/utils/config_manager.ConfigManager` — `settings.json` in OS app support dir
+-   **KB config**: `kb/config.py` — `KB_ROOT` points to `~/Obsidian/zen-ai/knowledge-base/transcripts/`
+-   **Carousel config**: `kb/carousel_templates/config.json` — template settings, fonts, colors, brand
 
--   **Mechanism**: Interacts with the `fabric` CLI tool via `subprocess`.
--   **Workflow**:
-    1.  Transcribed text is piped to `fabric`.
-    2.  A specific pattern is supplied using the `--pattern` argument.
-    3.  Output from `fabric` is captured.
--   **Pattern Discovery**: The application will need a way to list available Fabric patterns (e.g., by running `fabric -l` or by reading from a known directory if patterns are local).
--   **Integration Point (Example from MVP)**:
-    ```python
-    # command = f'echo "{transcription_text}" | fabric --pattern "{prompt}"'
-    # output = subprocess.check_output(command, shell=True, universal_newlines=True)
-    ```
+## 6. Audio & Clipboard
 
-## 6. Raycast Integration (Planned)
+-   **sounddevice**: Microphone recording (`app/core/audio_recorder.py`)
+-   **ffmpeg**: Audio extraction from video files (network volumes, `transcribe_file.py`)
+-   **pyperclip**: Clipboard copy after transcription
 
--   **Mechanism**: The application will be launchable via a Raycast keyboard shortcut.
--   **Implementation**: This typically involves configuring Raycast to run a script or open the packaged `.app` bundle.
+## 7. Fabric Pattern Processing
 
-
+-   **Mechanism**: Pipes text to `fabric` CLI via subprocess
+-   **Usage**: Full UI mode only (secondary)

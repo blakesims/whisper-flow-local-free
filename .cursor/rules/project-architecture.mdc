@@ -8,28 +8,35 @@ alwaysApply: false
 
 NOTE: always verify with a 'tree' search of the project
 
-The project follows a standard structure to organize code and resources:
-
--   **`.venv/`**: Python virtual environment. Should be added to `.gitignore`.
--   **`app/`**: Core application source code.
-    -   **`__init__.py`**: Makes `app` a package.
-    -   **`main.py`**: Main application entry point. ([app/main.py](mdc:app/main.py))
-    -   **`core/`**: Business logic, services (e.g., `TranscriptionService`, `AudioRecorder`).
-        -   `__init__.py`
-        -   Example: [app/core/transcription_service.py](mdc:app/core/transcription_service.py)
-    -   **`ui/`**: PySide6 UI components (e.g., `MainWindow`, dialogs, custom widgets).
-        -   `__init__.py`
-        -   Example: [app/ui/main_window.py](mdc:app/ui/main_window.py)
-    -   **`utils/`**: Utility classes and functions (e.g., `ConfigManager`).
-        -   `__init__.py`
-        -   Example: [app/utils/config_manager.py](mdc:app/utils/config_manager.py)
-    -   **`assets/`**: Static assets like icons, images used by the application (if not in `resources/`).
--   **`resources/`**: Non-code resources, like the application icon ([resources/app_icon.icns](mdc:resources/app_icon.icns) - if it exists).
--   **`tasks/`**: Task management and documentation files.
-    -   `global-task-manager.md`: ([tasks/global-task-manager.md](mdc:tasks/global-task-manager.md))
-    -   `main-template.md`: ([tasks/main-template.md](mdc:tasks/main-template.md))
--   **`tests/`**: Unit and integration tests.
--   **`scripts/`**: Helper scripts (e.g., build scripts).
--   **`.gitignore`**: Specifies intentionally untracked files that Git should ignore.
--   **`README.md`**: Project overview and setup instructions.
--   **`requirements.txt`**: Python package dependencies. ([requirements.txt](mdc:requirements.txt))
+-   **`.venv/`**: Python virtual environment.
+-   **`app/`**: Desktop application (daemon + legacy UI).
+    -   **`daemon/`**: Primary mode — lightweight background service with floating indicator.
+        -   `whisper_daemon.py`, `recording_indicator.py`, `hotkey_listener.py`
+    -   **`core/`**: Shared services — audio recording, transcription (whisper.cpp + faster-whisper), post-processing, Fabric.
+    -   **`ui/`**: Legacy full-window UI (PySide6, secondary).
+    -   **`utils/`**: Config manager, helpers.
+-   **`kb/`**: Knowledge Base CLI — the most actively developed module.
+    -   **`__main__.py`**: CLI entry point (`python -m kb`).
+    -   **`core.py`**: Shared utils (transcribe_to_kb, registry, format_timestamp).
+    -   **`analyze.py`**: LLM analysis via Gemini API.
+    -   **`prompts.py`**: Prompt formatting + template substitution.
+    -   **`judge.py`**: LLM judge loop for iterative improvement.
+    -   **`render.py`**: Carousel HTML rendering (Jinja2) + PDF generation (Playwright).
+    -   **`publish.py`**: CLI for carousel rendering pipeline.
+    -   **`serve.py`**: Flask web dashboard (action queue, browse mode).
+    -   **`serve_state.py`**, **`serve_scanner.py`**, **`serve_visual.py`**: Serve module helpers.
+    -   **`config.py`**: KB_ROOT, config loading, defaults.
+    -   **`transcription.py`**: Transcription service imports.
+    -   **`sources/`**: Transcription source handlers (file, cap, volume, zoom, paste).
+    -   **`config/`**: Repo copy of analysis type configs. NOTE: runtime loads from `KB_ROOT/config/`, not here.
+    -   **`carousel_templates/`**: HTML templates, config.json, mockups for carousel rendering.
+    -   **`tests/`**: KB module test suite (~400 tests).
+-   **`deploy/`**: Server deployment scripts (`deploy-kb-serve.sh`, systemd service).
+-   **`scripts/`**: Helper scripts.
+    -   `whisper-daemon.sh`: Start/stop/status for daemon mode.
+    -   **`raycast/`**: Raycast quick-access scripts for KB dashboard.
+-   **`tasks/`**: Task management (GTM, active/completed/archived tasks).
+-   **`resources/`**: App icons and static assets.
+-   **`transcribe_file.py`**: Standalone Raycast file transcription with caching.
+-   **`requirements.txt`**: Python dependencies.
+-   **`CLAUDE.md`**: AI agent instructions (key rules, architecture, commands).
