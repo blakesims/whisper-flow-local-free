@@ -693,12 +693,12 @@ def analyze_transcript(
     # Initialize client
     client = genai.Client(api_key=api_key)
 
-    # Build generation config — use response_json_schema for structural enforcement
+    # Build generation config — use response_schema for structural enforcement
     gen_config_kwargs = {
         'response_mime_type': 'application/json',
     }
     if 'output_schema' in config:
-        gen_config_kwargs['response_json_schema'] = config['output_schema']
+        gen_config_kwargs['response_schema'] = config['output_schema']
 
     # Use system instruction if provided in config (separates formatting rules from content)
     if config.get('system_instruction'):
