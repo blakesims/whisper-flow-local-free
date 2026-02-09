@@ -384,8 +384,9 @@ async def _render_html_to_pdf_async(
         )
         await page.set_content(html_content, wait_until="networkidle")
 
-        # Wait for fonts to load
-        await page.wait_for_timeout(1000)
+        # Wait for web fonts to fully load
+        await page.wait_for_function("document.fonts.ready.then(() => true)")
+        await page.wait_for_timeout(500)
 
         await page.pdf(
             path=str(output_file),
@@ -431,8 +432,9 @@ def render_html_to_pdf(
         )
         page.set_content(html_content, wait_until="networkidle")
 
-        # Wait for fonts to load
-        page.wait_for_timeout(1000)
+        # Wait for web fonts to fully load
+        page.wait_for_function("document.fonts.ready.then(() => true)")
+        page.wait_for_timeout(500)
 
         page.pdf(
             path=str(output_file),
@@ -482,7 +484,8 @@ def render_slide_thumbnails(
             viewport={"width": width, "height": height}
         )
         page.set_content(html_content, wait_until="networkidle")
-        page.wait_for_timeout(1000)
+        page.wait_for_function("document.fonts.ready.then(() => true)")
+        page.wait_for_timeout(500)
 
         for i in range(1, slide_count + 1):
             slide_el = page.query_selector(f"#slide-{i}")

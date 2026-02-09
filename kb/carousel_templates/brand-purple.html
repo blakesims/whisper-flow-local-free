@@ -62,6 +62,7 @@
     width: 32px;
     height: 32px;
     border-radius: 50%;
+    -webkit-border-radius: 50%;
     border: 2.5px solid {{ colors.timeline_dot_border }};
     background: transparent;
     display: flex;
@@ -71,6 +72,7 @@
     font-weight: 700;
     color: rgba(255,255,255,0.3);
     z-index: 1;
+    overflow: hidden;
   }
   .tl-dot.filled {
     background: rgba(139,92,246,0.4);
@@ -81,7 +83,7 @@
     background: {{ colors.accent }};
     border-color: {{ colors.accent_light }};
     color: {{ colors.text_primary }};
-    box-shadow: 0 0 20px rgba(139,92,246,0.5);
+    filter: drop-shadow(0 0 10px rgba(139,92,246,0.5));
   }
   .tl-label {
     margin-top: 10px;
@@ -430,17 +432,14 @@
     {% if step_num < current_content_index|length %}
     <div class="tl-step filled">
       <div class="tl-dot filled">{{ step_num }}</div>
-      <span class="tl-label filled">{{ cs.title if cs.title else 'Step ' ~ step_num }}</span>
     </div>
     {% elif step_num == current_content_index|length %}
     <div class="tl-step active">
       <div class="tl-dot active">{{ step_num }}</div>
-      <span class="tl-label active">{{ cs.title if cs.title else 'Step ' ~ step_num }}</span>
     </div>
     {% else %}
     <div class="tl-step">
       <div class="tl-dot">{{ step_num }}</div>
-      <span class="tl-label">{{ cs.title if cs.title else 'Step ' ~ step_num }}</span>
     </div>
     {% endif %}
     {% endfor %}
