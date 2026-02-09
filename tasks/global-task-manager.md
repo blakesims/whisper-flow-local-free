@@ -6,7 +6,7 @@
 | :--- | :---- | :---- | :--- | :---- | :--- | :---- | :---- |
 | T012 | KB Transcription Architecture + Zoom | 2 | 2/3 | ACTIVE | - | task-documentation | [main.md](active/T012-kb-zoom-meetings/main.md) |
 | T014 | Cap AI Markers for Intra-Segment Editing | 3 | 0/4 | PLANNING | T013 | - | [main.md](planning/T014-cap-ai-markers/main.md) |
-| T026 | Carousel Output Quality — Close Gap to Mockups | 1 | 3/4 | ACTIVE | T024 | - | [main.md](active/T026-carousel-quality/main.md) |
+| T026 | Carousel Output Quality — Close Gap to Mockups | 1 | 4/4 | ACTIVE | T024 | - | [main.md](active/T026-carousel-quality/main.md) |
 
 ## Notes
 - Priority: 1=Highest, 5=Lowest

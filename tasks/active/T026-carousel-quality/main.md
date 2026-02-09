@@ -4,7 +4,7 @@
 
 Fix carousel output quality to match mockups in `kb/carousel_templates/mockups/`. Root cause was weak LLM prompt + schema design, not template/CSS issues.
 
-**Status:** ACTIVE — Phase 1-2 COMPLETE, Phase 3-4 remaining
+**Status:** ACTIVE — Phase 1-3 COMPLETE, Phase 4 remaining
 
 ## Priority: 1
 
@@ -38,8 +38,15 @@ Changes shipped:
 Remaining (deferred):
 - Font choice itself is fine (Plus Jakarta Sans matches mockup), but could explore alternatives later
 
-### Phase 3: Diagram Rendering — NOT STARTED
-Replace mmdc mermaid rendering with LLM-generated HTML/SVG diagrams matching brand style. The mockups use hand-crafted SVG, not mermaid. mmdc output looks rigid and doesn't match the brand.
+### Phase 3: Diagram Rendering — COMPLETE
+
+Changes shipped:
+- `render_mermaid_via_llm()` in `render.py`: sends mermaid code + brand colors to Gemini 2.5 Flash, returns branded SVG
+- SVG output: purple rounded-rect nodes, arrow connectors, annotation labels — matches mockup style
+- Falls back to mmdc CLI if LLM generation fails
+- SVG scales to fill slide with `preserveAspectRatio="xMinYMid meet"`, left-aligned
+- Node spacing: 120px vertical gap for breathing room
+- Container CSS: `width: 100%; height: 100%` to fill flex container
 
 ### Phase 4: End-to-End Validation — NOT STARTED
 Test across multiple transcripts, compare to mockups, update other templates.
@@ -52,3 +59,4 @@ Test across multiple transcripts, compare to mockups, update other templates.
 - SDK upgrade (v1.17→v1.62): good hygiene but does NOT fix carousel quality.
 - Runtime config gotcha: pipeline loads from `KB_ROOT/config/`, not `kb/config/` in repo. Must sync after edits.
 - 2026-02-09: Phase 2 complete. Key learning: Chromium's PDF renderer draws `box-shadow` as a rectangle, ignoring `border-radius`. Use `filter: drop-shadow()` instead — it respects element shape in PDF output. Discovered via isolated HTML test rendered to both PNG (circles) and PDF (squares).
+- 2026-02-09: Phase 3 complete. LLM-generated SVG replaces rigid mmdc output. Key: use `preserveAspectRatio="xMinYMid meet"` for left-aligned scaling, 120px node spacing for readability.
