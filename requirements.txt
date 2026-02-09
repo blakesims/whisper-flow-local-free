@@ -27,3 +27,6 @@ pynput>=1.7.6
 
 # KB Serve - Web Dashboard
 Flask>=3.0.0
+
+# KB Publish - Carousel rendering
+playwright>=1.40.0

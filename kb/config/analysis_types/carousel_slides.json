@@ -1,0 +1,58 @@
+{
+  "name": "carousel_slides",
+  "description": "Transform a LinkedIn post into visual carousel slide data",
+  "requires": ["linkedin_v2"],
+  "optional_inputs": [],
+  "skip_raw_transcript": true,
+  "system_instruction": "You produce carousel slide data for PDF rendering. STRICT RULES you must follow:\n1. Every content and mermaid slide MUST have a non-empty 'title' field of 2-5 words. Empty titles are FORBIDDEN. Examples: 'Set Up Recording', 'Run Analysis', 'The Results'.\n2. The 'content' field MUST use bullet-point format with each line starting with '- ' (dash space). NEVER use paragraphs or prose.\n3. Do NOT copy text verbatim from the source post. Restructure and condense into fresh, scannable bullet points.\n4. Each bullet point should be 8-15 words with one specific insight, tool name, number, or command.",
+  "prompt": "Transform this LinkedIn post into a visual carousel.\n\nSOURCE POST:\n{{linkedin_v2}}\n\n---\n\nCreate 6-10 slides following this structure:\n\nSlide 1 (hook): Short punchy title, 5-12 words. Add a subtitle with supporting context.\nSlides 2-N (content): Each needs a 2-5 word TITLE and 3-4 BULLET POINTS starting with '- '.\nOptional mermaid slide: If the post describes a workflow/pipeline. Max 10 nodes.\nLast slide (cta): Engaging question, 8-20 words.\n\nEXAMPLE content slide:\n{\n  \"slide_number\": 2,\n  \"type\": \"content\",\n  \"title\": \"Set Up Recording\",\n  \"content\": \"- Run npx playwright codegen to open a browser recorder\\n- Click through your app's key user flows manually\\n- Capture sign-up, login, dashboard, and core features\\n- Save the raw recording as your test seed script\",\n  \"words\": 30\n}",
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "slides": {
+        "type": "array",
+        "description": "Array of slide objects for the carousel",
+        "items": {
+          "type": "object",
+          "properties": {
+            "slide_number": {
+              "type": "integer",
+              "description": "Slide position, starting at 1"
+            },
+            "type": {
+              "type": "string",
+              "enum": ["hook", "content", "mermaid", "cta"],
+              "description": "Slide type"
+            },
+            "title": {
+              "type": "string",
+              "description": "2-5 word label for timeline and slide header. MUST NOT be empty for content and mermaid slides."
+            },
+            "content": {
+              "type": "string",
+              "description": "Bullet-point content using '- ' prefix per line. For mermaid slides, this is diagram code."
+            },
+            "words": {
+              "type": "integer",
+              "description": "Word count of the content"
+            },
+            "subtitle": {
+              "type": "string",
+              "description": "Supporting text for hook slides (below title) and CTA slides (above button)."
+            }
+          },
+          "required": ["slide_number", "type", "title", "content", "words"]
+        }
+      },
+      "total_slides": {
+        "type": "integer",
+        "description": "Total number of slides"
+      },
+      "has_mermaid": {
+        "type": "boolean",
+        "description": "Whether a mermaid diagram slide is included"
+      }
+    },
+    "required": ["slides", "total_slides", "has_mermaid"]
+  }
+}

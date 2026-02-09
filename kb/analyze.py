@@ -37,8 +37,14 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 import questionary
 from questionary import Style
 
-from kb.__main__ import load_config, get_paths, DEFAULTS
+from kb.config import load_config, get_paths, DEFAULTS
 from kb.core import load_registry
+from kb.prompts import (
+    format_prerequisite_output,
+    substitute_template_vars,
+    render_conditional_template,
+    resolve_optional_inputs,
+)
 
 console = Console()
 
@@ -566,7 +572,8 @@ def select_transcripts(
 def select_analysis_types_interactive(
     available: list[dict],
     existing_analysis: dict | None = None,
-    current_model: str = DEFAULT_MODEL
+    current_model: str = DEFAULT_MODEL,
+    force: bool = False
 ) -> list[str]:
     """Interactive multi-select for analysis types.
 
@@ -584,7 +591,11 @@ def select_analysis_types_interactive(
             analysis_data = existing_analysis[t["name"]]
             done_model = analysis_data.get("_model", "unknown")
 
-            if done_model == current_model:
+            if force:
+                # Force mode - allow re-running everything
+                label = f"{t['name']}: {t['description']} [done with {done_model}, force re-run]"
+                choices.append(questionary.Choice(title=label, value=t["name"], checked=False))
+            elif done_model == current_model:
                 # Same model - show as done, disabled
                 label = f"{t['name']}: {t['description']} [done with {done_model}]"
                 choices.append(questionary.Choice(title=label, value=t["name"], disabled="already done"))
@@ -609,64 +620,6 @@ def select_analysis_types_interactive(
     ).ask()
 
     return selected or []
-
-
-def format_prerequisite_output(analysis_result: dict) -> str:
-    """
-    Format an analysis result for injection into a compound prompt.
-
-    Handles various output structures by extracting the main content.
-    Returns a clean string representation.
-    """
-    if not analysis_result:
-        return ""
-
-    # Filter out metadata keys (those starting with _)
-    content = {k: v for k, v in analysis_result.items() if not k.startswith("_")}
-
-    # If there's a single key with a string value, return that directly
-    if len(content) == 1:
-        value = list(content.values())[0]
-        if isinstance(value, str):
-            return value
-        elif isinstance(value, list):
-            # Format list items nicely (e.g., key_points)
-            formatted_items = []
-            for item in value:
-                if isinstance(item, dict):
-                    # Format dict items (e.g., {"quote": "...", "insight": "..."})
-                    parts = [f"- {v}" if k in ("quote", "insight") else f"  {k}: {v}"
-                             for k, v in item.items()]
-                    formatted_items.append("\n".join(parts))
-                else:
-                    formatted_items.append(f"- {item}")
-            return "\n\n".join(formatted_items)
-
-    # Multiple keys - return JSON representation
-    return json.dumps(content, indent=2, ensure_ascii=False)
-
-
-def substitute_template_vars(prompt: str, context: dict) -> str:
-    """
-    Replace {{variable}} placeholders in a prompt with context values.
-
-    Args:
-        prompt: The prompt template with {{variable}} placeholders
-        context: Dict mapping variable names to their formatted values
-
-    Returns:
-        The prompt with placeholders substituted
-    """
-    import re
-
-    def replacer(match):
-        var_name = match.group(1)
-        if var_name in context:
-            return context[var_name]
-        # Leave unmatched placeholders as-is (for debugging)
-        return match.group(0)
-
-    return re.sub(r'\{\{(\w+)\}\}', replacer, prompt)
 
 
 def analyze_transcript(
@@ -711,29 +664,47 @@ def analyze_transcript(
     # Load analysis type config
     config = load_analysis_type(analysis_type)
 
-    # Get the prompt and substitute any prerequisite context
+    # Get the prompt and render conditionals + substitute variables
     prompt_template = config['prompt']
     if prerequisite_context:
-        prompt_template = substitute_template_vars(prompt_template, prerequisite_context)
+        prompt_template = render_conditional_template(prompt_template, prerequisite_context)
 
-    # Build the prompt with schema instruction
+    # Build the prompt
     title_context = f"Title: {title}\n\n" if title else ""
-    schema_json = json.dumps(config['output_schema'], indent=2)
+    has_api_schema = 'output_schema' in config
+    include_transcript = not config.get('skip_raw_transcript', False)
 
-    full_prompt = f"""{prompt_template}
+    # Build prompt parts
+    parts = [prompt_template]
 
-{title_context}TRANSCRIPT:
-{transcript_text}
+    if include_transcript:
+        parts.append(f"\n{title_context}TRANSCRIPT:\n{transcript_text}\n\n---")
 
----
+    # Only append schema as text if NOT using API-level schema enforcement
+    # (avoids duplicate/conflicting instructions)
+    if not has_api_schema:
+        schema_json = json.dumps(config['output_schema'], indent=2)
+        parts.append(f"\nRespond with valid JSON matching this schema:\n{schema_json}\n\nOutput ONLY the JSON, no markdown code blocks or explanation.")
+    else:
+        parts.append("\nOutput ONLY valid JSON. No markdown code blocks or explanation.")
 
-Respond with valid JSON matching this schema:
-{schema_json}
-
-Output ONLY the JSON, no markdown code blocks or explanation."""
+    full_prompt = "\n".join(parts)
 
     # Initialize client
     client = genai.Client(api_key=api_key)
+
+    # Build generation config — use response_json_schema for structural enforcement
+    gen_config_kwargs = {
+        'response_mime_type': 'application/json',
+    }
+    if 'output_schema' in config:
+        gen_config_kwargs['response_json_schema'] = config['output_schema']
+
+    # Use system instruction if provided in config (separates formatting rules from content)
+    if config.get('system_instruction'):
+        gen_config_kwargs['system_instruction'] = config['system_instruction']
+
+    gen_config = types.GenerateContentConfig(**gen_config_kwargs)
 
     # Retry loop with exponential backoff
     for attempt in range(max_retries):
@@ -741,10 +712,7 @@ Output ONLY the JSON, no markdown code blocks or explanation."""
             response = client.models.generate_content(
                 model=model,
                 contents=full_prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type='application/json',
-                    temperature=0.3,  # Lower for more consistent structured output
-                ),
+                config=gen_config,
             )
 
             # Parse and return the result
@@ -788,6 +756,9 @@ def run_analysis_with_deps(
     """
     Run an analysis type, automatically running any required prerequisites first.
 
+    Handles both required dependencies (auto-run if missing) and optional inputs
+    (included if available, skipped if not).
+
     Args:
         transcript_data: Full transcript data dict (with 'transcript', 'title', 'analysis')
         analysis_type: Name of the analysis type to run
@@ -805,7 +776,7 @@ def run_analysis_with_deps(
     required = analysis_def.get("requires", [])
     prerequisites_run = []
 
-    # Check and run any missing prerequisites
+    # Check and run any missing prerequisites (required deps)
     for req in required:
         if req not in existing_analysis:
             console.print(f"[dim]Running prerequisite: {req}[/dim]")
@@ -827,22 +798,43 @@ def run_analysis_with_deps(
                 # Prerequisite failed - can't continue
                 raise ValueError(f"Prerequisite '{req}' failed: {req_result.get('error')}")
 
-    # Build prerequisite context for compound prompts
-    prerequisite_context = {}
+    # Build context for the prompt, starting with optional inputs (includes transcript)
+    transcript_text = transcript_data.get("transcript", "")
+    prompt_context = resolve_optional_inputs(analysis_def, existing_analysis, transcript_text)
+
+    # Add required prerequisites to context (these are guaranteed to exist now)
     for req in required:
         if req in existing_analysis:
-            prerequisite_context[req] = format_prerequisite_output(existing_analysis[req])
+            prompt_context[req] = format_prerequisite_output(existing_analysis[req])
 
     # Run the actual analysis
     result = analyze_transcript(
-        transcript_text=transcript_data.get("transcript", ""),
+        transcript_text=transcript_text,
         analysis_type=analysis_type,
         title=transcript_data.get("title", ""),
         model=model,
-        prerequisite_context=prerequisite_context if prerequisite_context else None
+        prerequisite_context=prompt_context if prompt_context else None
     )
 
     return result, prerequisites_run
+
+
+from kb.judge import (
+    AUTO_JUDGE_TYPES,
+    _get_starting_round,
+    _build_history_from_existing,
+    _build_score_history,
+    _update_alias,
+    run_with_judge_loop,
+    run_analysis_with_auto_judge,
+)
+
+
+def _save_analysis_to_file(path: str, transcript_data: dict, analysis: dict):
+    """Save analysis results back to the transcript file."""
+    transcript_data["analysis"] = analysis
+    with open(path, 'w') as f:
+        json.dump(transcript_data, f, indent=2, ensure_ascii=False)
 
 
 def analyze_transcript_file(
@@ -1012,7 +1004,8 @@ def run_interactive_mode(
     selected_types = select_analysis_types_interactive(
         available_types,
         existing_analysis=existing_analysis,
-        current_model=model
+        current_model=model,
+        force=force
     )
 
     if not selected_types:
@@ -1034,14 +1027,25 @@ def run_interactive_mode(
         console.print(f"\n[bold cyan]({i}/{len(selected_transcripts)}) {transcript['title']}[/bold cyan]")
 
         try:
-            results = analyze_transcript_file(
-                transcript_path=transcript["path"],
-                analysis_types=selected_types,
-                model=model,
-                save=True,
-                skip_existing=True,
-                force=force
-            )
+            has_auto_judge = any(t in AUTO_JUDGE_TYPES for t in selected_types)
+            if has_auto_judge:
+                results = run_analysis_with_auto_judge(
+                    transcript_path=transcript["path"],
+                    analysis_types=selected_types,
+                    model=model,
+                    save=True,
+                    skip_existing=True,
+                    force=force,
+                )
+            else:
+                results = analyze_transcript_file(
+                    transcript_path=transcript["path"],
+                    analysis_types=selected_types,
+                    model=model,
+                    save=True,
+                    skip_existing=True,
+                    force=force
+                )
 
             # Count successes
             successes = sum(1 for r in results.values() if "error" not in r)
@@ -1184,6 +1188,10 @@ Examples:
                         help=f"Gemini model (default: {DEFAULT_MODEL})")
     parser.add_argument("--force", "-f", action="store_true",
                         help="Force re-run analyses even if already done with same model")
+    parser.add_argument("--judge", action="store_true",
+                        help="Run with LLM judge improvement loop (for linkedin_v2)")
+    parser.add_argument("--judge-rounds", type=int, default=0,
+                        help="Number of judge improvement rounds (default: 0, draft+judge only)")
     parser.add_argument("--no-save", action="store_true",
                         help="Don't save results to transcript file")
     parser.add_argument("--list-types", "-l", action="store_true",
@@ -1250,6 +1258,94 @@ Examples:
         else:
             analysis_types = ["summary"]
 
+        # Check if any requested types have auto-judge
+        has_auto_judge = any(t in AUTO_JUDGE_TYPES for t in analysis_types)
+
+        # --judge flag: for auto-judge types it's a no-op (they always auto-judge).
+        # For non-auto-judge types, run explicit judge loop (backward compat).
+        if args.judge and not has_auto_judge:
+            if not args.types:
+                analysis_types = ["linkedin_v2"]
+                has_auto_judge = True  # linkedin_v2 is auto-judge
+            else:
+                # Explicit --judge with non-auto-judge type: use old behavior
+                analysis_type = analysis_types[0]
+                judge_type = "linkedin_judge"
+
+                console.print(Panel(
+                    f"[bold]Transcript Analysis (Judge Loop)[/bold]\n"
+                    f"File: {args.transcript}\n"
+                    f"Analysis: {analysis_type}\n"
+                    f"Judge: {judge_type}\n"
+                    f"Rounds: {args.judge_rounds}\n"
+                    f"Model: {args.model}",
+                    border_style="cyan"
+                ))
+
+                try:
+                    with open(args.transcript) as f:
+                        transcript_data = json.load(f)
+
+                    final_result, judge_result = run_with_judge_loop(
+                        transcript_data=transcript_data,
+                        analysis_type=analysis_type,
+                        judge_type=judge_type,
+                        model=args.model,
+                        max_rounds=args.judge_rounds,
+                        save_path=args.transcript if not args.no_save else None
+                    )
+
+                    console.print("\n[bold]Final Post:[/bold]")
+                    console.print(Panel(final_result.get("post", ""), border_style="green"))
+
+                    if judge_result:
+                        overall = judge_result.get("overall_score", 0)
+                        console.print(f"\n[bold]Judge overall score: {overall:.1f}/5.0[/bold]")
+
+                except Exception as e:
+                    console.print(f"[red]Error: {e}[/red]")
+                    sys.exit(1)
+                return
+
+        if has_auto_judge:
+            # Use auto-judge pipeline (handles both auto-judge and regular types)
+            console.print(Panel(
+                f"[bold]Transcript Analysis (Auto-Judge)[/bold]\n"
+                f"File: {args.transcript}\n"
+                f"Types: {', '.join(analysis_types)}\n"
+                f"Judge rounds: {args.judge_rounds}\n"
+                f"Model: {args.model}",
+                border_style="cyan"
+            ))
+
+            try:
+                results = run_analysis_with_auto_judge(
+                    transcript_path=args.transcript,
+                    analysis_types=analysis_types,
+                    model=args.model,
+                    save=not args.no_save,
+                    skip_existing=True,
+                    force=args.force,
+                    judge_rounds=args.judge_rounds,
+                )
+
+                console.print("\n[bold]Results:[/bold]")
+                for name, result in results.items():
+                    if "error" in result:
+                        console.print(f"  [red]x {name}[/red]: {result['error']}")
+                    else:
+                        if name in AUTO_JUDGE_TYPES:
+                            post = result.get("post", "")
+                            console.print(f"  [green]done {name}[/green]")
+                            console.print(Panel(post[:500] + ("..." if len(post) > 500 else ""), border_style="green"))
+                        else:
+                            console.print(f"  [green]done {name}[/green]")
+
+            except Exception as e:
+                console.print(f"[red]Error: {e}[/red]")
+                sys.exit(1)
+            return
+
         console.print(Panel(
             f"[bold]Transcript Analysis[/bold]\n"
             f"File: {args.transcript}\n"
@@ -1279,6 +1375,110 @@ Examples:
             console.print(f"[red]Error: {e}[/red]")
             sys.exit(1)
         return
+
+    # Decimal filter mode (no direct file path)
+    # Auto-judge types (e.g., linkedin_v2) route to auto-judge regardless of --judge flag.
+    # --judge flag only affects non-auto-judge types.
+    if args.decimal:
+        # Determine types
+        if args.types:
+            analysis_types = args.types
+        else:
+            # Default: if --judge passed use linkedin_v2, otherwise use default types
+            if args.judge:
+                analysis_types = ["linkedin_v2"]
+            else:
+                analysis_types = None  # Will be handled below
+
+        has_auto_judge = analysis_types and any(t in AUTO_JUDGE_TYPES for t in analysis_types)
+
+        if has_auto_judge:
+            transcripts = get_all_transcripts(decimal_filter=args.decimal, limit=1)
+            if not transcripts:
+                console.print(f"[red]No transcripts found for decimal: {args.decimal}[/red]")
+                sys.exit(1)
+
+            transcript_path = transcripts[0]["path"]
+
+            console.print(Panel(
+                f"[bold]Transcript Analysis (Auto-Judge)[/bold]\n"
+                f"File: {transcript_path}\n"
+                f"Types: {', '.join(analysis_types)}\n"
+                f"Judge rounds: {args.judge_rounds}\n"
+                f"Model: {args.model}",
+                border_style="cyan"
+            ))
+
+            try:
+                results = run_analysis_with_auto_judge(
+                    transcript_path=transcript_path,
+                    analysis_types=analysis_types,
+                    model=args.model,
+                    save=not args.no_save,
+                    skip_existing=True,
+                    force=args.force,
+                    judge_rounds=args.judge_rounds,
+                )
+
+                console.print("\n[bold]Results:[/bold]")
+                for name, result in results.items():
+                    if "error" in result:
+                        console.print(f"  [red]x {name}[/red]: {result['error']}")
+                    else:
+                        console.print(f"  [green]done {name}[/green]")
+
+            except Exception as e:
+                console.print(f"[red]Error: {e}[/red]")
+                sys.exit(1)
+            return
+
+        # Fallback: explicit --judge with non-auto-judge types
+        if args.judge and analysis_types:
+            transcripts = get_all_transcripts(decimal_filter=args.decimal, limit=1)
+            if not transcripts:
+                console.print(f"[red]No transcripts found for decimal: {args.decimal}[/red]")
+                sys.exit(1)
+
+            transcript_path = transcripts[0]["path"]
+            analysis_type = analysis_types[0]
+            judge_type = "linkedin_judge"
+
+            console.print(Panel(
+                f"[bold]Transcript Analysis (Judge Loop)[/bold]\n"
+                f"File: {transcript_path}\n"
+                f"Analysis: {analysis_type}\n"
+                f"Judge: {judge_type}\n"
+                f"Rounds: {args.judge_rounds}\n"
+                f"Model: {args.model}",
+                border_style="cyan"
+            ))
+
+            try:
+                with open(transcript_path) as f:
+                    transcript_data = json.load(f)
+
+                final_result, judge_result = run_with_judge_loop(
+                    transcript_data=transcript_data,
+                    analysis_type=analysis_type,
+                    judge_type=judge_type,
+                    model=args.model,
+                    max_rounds=args.judge_rounds,
+                    save_path=transcript_path if not args.no_save else None
+                )
+
+                console.print("\n[bold]Final Post:[/bold]")
+                console.print(Panel(final_result.get("post", ""), border_style="green"))
+
+                if judge_result:
+                    overall = judge_result.get("overall_score", 0)
+                    console.print(f"\n[bold]Judge overall score: {overall:.1f}/5.0[/bold]")
+
+            except Exception as e:
+                console.print(f"[red]Error: {e}[/red]")
+                sys.exit(1)
+            return
+
+        # No auto-judge types and no --judge flag: fall through to interactive mode
 
     # Interactive mode (default)
     run_interactive_mode(

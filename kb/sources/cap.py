@@ -26,7 +26,7 @@ from questionary import Style
 from kb.core import (
     transcribe_to_kb, load_registry, print_status
 )
-from kb.__main__ import load_config, get_paths
+from kb.config import load_config, get_paths
 
 console = Console()
 

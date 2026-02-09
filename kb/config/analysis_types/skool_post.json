@@ -1,0 +1,25 @@
+{
+  "name": "skool_post",
+  "description": "Generate a Skool community post from transcript content",
+  "requires": [],
+  "optional_inputs": ["key_points"],
+  "prompt": "You are a community content strategist for Skool.\n\nINPUT CONTENT:\n\n{{#if key_points}}Key Moments (with timestamps):\n{{key_points}}\n\nFull Transcript:\n{{/if}}{{transcript}}\n\nWrite a Skool community post that teaches the main concept from this content.{{#if key_points}} Reference specific timestamps when mentioning key moments.{{/if}}\n\nRequirements:\n- Educational and conversational tone\n- Break down complex ideas into simple steps\n- Include a clear takeaway or action item\n- Encourage discussion with a question at the end\n- Can be longer than LinkedIn (2000+ chars is fine)",
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "post": {
+        "type": "string",
+        "description": "The Skool post content"
+      },
+      "title": {
+        "type": "string",
+        "description": "A catchy title for the post"
+      },
+      "discussion_question": {
+        "type": "string",
+        "description": "The closing question to encourage engagement"
+      }
+    },
+    "required": ["post", "title"]
+  }
+}

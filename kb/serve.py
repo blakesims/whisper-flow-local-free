@@ -14,31 +14,34 @@ Usage:
 import sys
 import os
 import json
+import logging
 import re
-import shutil
 import argparse
+import threading
 from pathlib import Path
 from datetime import datetime
-from typing import Optional
-
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, send_from_directory
 import pyperclip
 
 from kb.videos import (
     load_inventory, save_inventory, scan_videos, INVENTORY_PATH,
     queue_transcription, get_queue_status, start_worker, load_queue
 )
-from kb.analyze import list_analysis_types, load_analysis_type, ANALYSIS_TYPES_DIR
+from kb.analyze import list_analysis_types, load_analysis_type, ANALYSIS_TYPES_DIR, AUTO_JUDGE_TYPES, run_with_judge_loop
 
-# Action ID separator (using -- to avoid URL encoding issues with ::)
-ACTION_ID_SEP = "--"
-# Regex for validating action IDs: transcript_id--analysis_name
-ACTION_ID_PATTERN = re.compile(r'^[\w\.\-]+--[a-z_]+$')
+logger = logging.getLogger(__name__)
+
+from kb.serve_scanner import (
+    ACTION_ID_SEP, ACTION_ID_PATTERN, VERSIONED_KEY_PATTERN,
+    get_action_mapping, get_destination_for_action,
+    scan_actionable_items, get_action_status,
+    format_relative_time, validate_action_id,
+)
 
 # Add project root for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from kb.__main__ import load_config, get_paths
+from kb.config import load_config, get_paths
 
 # Load paths from config
 _config = load_config()
@@ -49,257 +52,50 @@ CONFIG_DIR = _paths["config_dir"]
 ACTION_STATE_PATH = Path.home() / ".kb" / "action-state.json"
 PROMPT_FEEDBACK_PATH = Path.home() / ".kb" / "prompt-feedback.json"
 
-def get_action_mapping() -> dict:
-    """Load action mapping from config with pattern support.
-
-    Supports three pattern types:
-    - Plain: "skool_post" matches any input type
-    - Typed: "meeting.student_guide" matches only meeting input type
-    - Wildcard: "*.summary" matches all input types
-
-    Returns dict mapping (input_type, analysis_type) tuples to destination labels.
-    """
-    serve_config = _config.get("serve", {})
-    raw_mapping = serve_config.get("action_mapping", {})
-
-    # Store as structured mapping for efficient lookup
-    # Keys are tuples: (input_type or None, analysis_type)
-    # Wildcard patterns stored with input_type="*"
-    structured = {}
-
-    for pattern, destination in raw_mapping.items():
-        if "." in pattern:
-            # Either typed (meeting.guide) or wildcard (*.summary)
-            parts = pattern.split(".", 1)
-            input_type, analysis_type = parts[0], parts[1]
-            structured[(input_type, analysis_type)] = destination
-        else:
-            # Plain pattern - matches any input type
-            structured[(None, pattern)] = destination
-
-    return structured
-
-
-def get_destination_for_action(input_type: str, analysis_type: str, mapping: dict) -> Optional[str]:
-    """Get destination label for an (input_type, analysis_type) pair.
-
-    Priority:
-    1. Exact match: (input_type, analysis_type)
-    2. Wildcard match: ("*", analysis_type)
-    3. Plain match: (None, analysis_type)
-    """
-    # Try exact match first
-    key = (input_type, analysis_type)
-    if key in mapping:
-        return mapping[key]
-
-    # Try wildcard
-    wildcard_key = ("*", analysis_type)
-    if wildcard_key in mapping:
-        return mapping[wildcard_key]
-
-    # Try plain (any input type)
-    plain_key = (None, analysis_type)
-    if plain_key in mapping:
-        return mapping[plain_key]
-
-    return None
-
 app = Flask(__name__, template_folder=str(Path(__file__).parent / "templates"))
 
 
 # --- Action State Management ---
 
-def load_action_state() -> dict:
-    """Load action state from ~/.kb/action-state.json.
+from kb.serve_state import (
+    load_action_state,
+    save_action_state,
+    load_prompt_feedback,
+    save_prompt_feedback,
+)
 
-    If the file is corrupted, backs it up and returns empty state.
+
+def migrate_approved_to_draft() -> int:
+    """Reset existing approved items to draft state.
+
+    One-time migration for T023: all previously approved items are reset
+    to 'draft' so they go through the new iteration workflow. The approval
+    timestamp is preserved in '_previously_approved_at'.
+
+    Returns:
+        Number of items migrated.
     """
-    if not ACTION_STATE_PATH.exists():
-        return {"actions": {}}
-
-    try:
-        with open(ACTION_STATE_PATH) as f:
-            state = json.load(f)
-
-        # Validate structure
-        if not isinstance(state, dict) or "actions" not in state:
-            raise ValueError("Invalid state structure")
-
-        return state
-    except (json.JSONDecodeError, IOError, ValueError) as e:
-        # Backup corrupted file before resetting
-        if ACTION_STATE_PATH.exists():
-            backup_path = ACTION_STATE_PATH.with_suffix('.backup')
-            shutil.copy(ACTION_STATE_PATH, backup_path)
-            print(f"[KB Serve] Warning: Corrupted action state file, backup saved to {backup_path}")
-
-        return {"actions": {}}
+    state = load_action_state()
+    count = 0
+    for action_id, action_data in state.get("actions", {}).items():
+        if action_data.get("status") == "approved":
+            action_data["_previously_approved_at"] = action_data.get("completed_at", "")
+            action_data["status"] = "draft"
+            action_data.pop("completed_at", None)
+            count += 1
+    if count > 0:
+        save_action_state(state)
+        logger.info("Migrated %d approved items to draft state", count)
+    return count
 
 
-def save_action_state(state: dict):
-    """Save action state to ~/.kb/action-state.json."""
-    ACTION_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(ACTION_STATE_PATH, 'w') as f:
-        json.dump(state, f, indent=2)
+# --- Visual Pipeline (Background Thread) ---
 
-
-# --- Prompt Feedback Storage ---
-
-def load_prompt_feedback() -> dict:
-    """Load prompt feedback from ~/.kb/prompt-feedback.json.
-
-    Returns dict with 'flags' list. Creates empty structure if file doesn't exist.
-    """
-    if not PROMPT_FEEDBACK_PATH.exists():
-        return {"flags": []}
-
-    try:
-        with open(PROMPT_FEEDBACK_PATH) as f:
-            feedback = json.load(f)
-
-        # Validate structure
-        if not isinstance(feedback, dict) or "flags" not in feedback:
-            return {"flags": []}
-
-        return feedback
-    except (json.JSONDecodeError, IOError):
-        return {"flags": []}
-
-
-def save_prompt_feedback(feedback: dict):
-    """Save prompt feedback to ~/.kb/prompt-feedback.json."""
-    PROMPT_FEEDBACK_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(PROMPT_FEEDBACK_PATH, 'w') as f:
-        json.dump(feedback, f, indent=2)
-
-
-# --- KB Scanning for Actionable Items ---
-
-def scan_actionable_items() -> list[dict]:
-    """
-    Scan all transcript JSON files in KB_ROOT for actionable analyses.
-
-    Returns list of action items with metadata.
-    """
-    action_mapping = get_action_mapping()
-    action_items = []
-
-    # Scan all decimal directories
-    for decimal_dir in KB_ROOT.iterdir():
-        if not decimal_dir.is_dir():
-            continue
-        if decimal_dir.name in ("config", "examples"):
-            continue
-
-        # Find all JSON files
-        for json_file in decimal_dir.glob("*.json"):
-            try:
-                with open(json_file) as f:
-                    data = json.load(f)
-
-                # Get input_type for pattern matching
-                input_type = data.get("source", {}).get("type", "unknown")
-
-                # Check for actionable analyses
-                analysis = data.get("analysis", {})
-                for analysis_name in analysis.keys():
-                    destination = get_destination_for_action(input_type, analysis_name, action_mapping)
-                    if destination is None:
-                        continue  # Not actionable
-
-                    analysis_data = analysis[analysis_name]
-
-                    # Generate action ID: transcript_id--analysis_name
-                    action_id = f"{data.get('id', json_file.stem)}{ACTION_ID_SEP}{analysis_name}"
-
-                    # Get content (handle various formats)
-                    analyzed_at = ""
-                    model = ""
-
-                    if isinstance(analysis_data, dict):
-                        # Try to get the inner content (e.g., guide.guide or summary.summary)
-                        inner = analysis_data.get(analysis_name)
-                        analyzed_at = analysis_data.get("_analyzed_at", "")
-                        model = analysis_data.get("_model", "")
-
-                        if inner is None:
-                            # Check for 'post' field (e.g., linkedin_post)
-                            if "post" in analysis_data:
-                                content = analysis_data["post"]
-                            else:
-                                # No nested key, use the whole dict as content
-                                content = json.dumps(analysis_data, indent=2, ensure_ascii=False)
-                        elif isinstance(inner, str):
-                            content = inner
-                        elif isinstance(inner, dict):
-                            # Structured output (like guide with title, steps, etc.)
-                            content = json.dumps(inner, indent=2, ensure_ascii=False)
-                        else:
-                            content = str(inner)
-                    else:
-                        content = str(analysis_data)
-
-                    # Calculate word count (handle both string and fallback)
-                    if isinstance(content, str):
-                        word_count = len(content.split()) if content else 0
-                    else:
-                        content = str(content)
-                        word_count = len(content.split())
-
-                    action_items.append({
-                        "id": action_id,
-                        "type": analysis_name,
-                        "destination": destination,
-                        "source_title": data.get("title", "Untitled"),
-                        "source_decimal": data.get("decimal", ""),
-                        "content": content,
-                        "word_count": word_count,
-                        "analyzed_at": analyzed_at,
-                        "model": model,
-                        "transcript_path": str(json_file),
-                    })
-
-            except (json.JSONDecodeError, KeyError, IOError) as e:
-                # Skip malformed files
-                continue
-
-    return action_items
-
-
-def get_action_status(action_id: str, state: dict) -> dict:
-    """Get status info for an action."""
-    action_state = state["actions"].get(action_id, {})
-    return {
-        "status": action_state.get("status", "pending"),
-        "copied_count": action_state.get("copied_count", 0),
-        "created_at": action_state.get("created_at", ""),
-        "completed_at": action_state.get("completed_at", ""),
-    }
-
-
-def format_relative_time(iso_timestamp: str) -> str:
-    """Format ISO timestamp as relative time (e.g., '2 hours ago')."""
-    if not iso_timestamp:
-        return "Unknown"
-
-    try:
-        dt = datetime.fromisoformat(iso_timestamp.replace("Z", "+00:00"))
-        now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
-        delta = now - dt
-
-        if delta.days > 0:
-            return f"{delta.days} day{'s' if delta.days > 1 else ''} ago"
-        elif delta.seconds >= 3600:
-            hours = delta.seconds // 3600
-            return f"{hours} hour{'s' if hours > 1 else ''} ago"
-        elif delta.seconds >= 60:
-            minutes = delta.seconds // 60
-            return f"{minutes} minute{'s' if minutes > 1 else ''} ago"
-        else:
-            return "Just now"
-    except (ValueError, AttributeError):
-        return "Unknown"
+from kb.serve_visual import (
+    _update_visual_status,
+    _find_transcript_file,
+    run_visual_pipeline,
+)
 
 
 # --- Flask Routes ---
@@ -308,6 +104,12 @@ def format_relative_time(iso_timestamp: str) -> str:
 def index():
     """Main dashboard HTML."""
     return render_template('action_queue.html')
+
+
+@app.route('/posting-queue')
+def posting_queue():
+    """Posting queue HTML - shows approved items ready to post."""
+    return render_template('posting_queue.html')
 
 
 @app.route('/api/queue')
@@ -328,8 +130,11 @@ def get_queue():
 
         if item_state["status"] == "pending":
             pending.append(item)
-        elif item_state["status"] in ("done", "skipped"):
-            item["completed_at"] = item_state["completed_at"]
+        elif item_state["status"] == "approved":
+            # Approved items go to posting queue, not main queue
+            pass
+        elif item_state["status"] in ("done", "skipped", "posted"):
+            item["completed_at"] = item_state.get("completed_at") or item_state.get("posted_at", "")
 
             # Only show items completed today
             if item["completed_at"]:
@@ -351,11 +156,6 @@ def get_queue():
     })
 
 
-def validate_action_id(action_id: str) -> bool:
-    """Validate action ID format to prevent injection."""
-    return bool(ACTION_ID_PATTERN.match(action_id))
-
-
 @app.route('/api/action/<action_id>/content')
 def get_action_content(action_id: str):
     """Get full content for an action."""
@@ -369,6 +169,7 @@ def get_action_content(action_id: str):
             return jsonify({
                 "id": item["id"],
                 "content": item["content"],
+                "raw_data": item.get("raw_data"),
                 "type": item["type"],
                 "destination": item["destination"],
                 "source_title": item["source_title"],
@@ -457,6 +258,1039 @@ def skip_action(action_id: str):
         state["actions"][action_id]["status"] = "skipped"
 
     state["actions"][action_id]["completed_at"] = datetime.now().isoformat()
+    save_action_state(state)
+
+    return jsonify({"success": True})
+
+
+@app.route('/api/posting-queue')
+def get_posting_queue():
+    """Get approved items for posting queue.
+
+    Returns only approved items filtered to actionable types (linkedin_post, skool_post).
+    Includes runway count by platform.
+    """
+    state = load_action_state()
+    items = scan_actionable_items()
+
+    # Filter to approved items only
+    approved_items = []
+    runway_counts = {}
+
+    for item in items:
+        item_state = state["actions"].get(item["id"], {})
+        status = item_state.get("status", "pending")
+
+        if status == "approved":
+            # Add state info to item
+            item["status"] = "approved"
+            item["approved_at"] = item_state.get("approved_at", "")
+            item["relative_time"] = format_relative_time(item["analyzed_at"])
+
+            # Add visual status info
+            item["visual_status"] = item_state.get("visual_status", "pending")
+            visual_data = item_state.get("visual_data", {})
+            item["visual_format"] = visual_data.get("format", "")
+
+            # Build thumbnail URL if available
+            thumbnail_paths = visual_data.get("thumbnail_paths", [])
+            if thumbnail_paths and len(thumbnail_paths) > 0:
+                # Convert absolute path to relative URL via /visuals/ route
+                first_thumb = thumbnail_paths[0]
+                try:
+                    rel_path = str(Path(first_thumb).relative_to(KB_ROOT))
+                    item["thumbnail_url"] = f"/visuals/{rel_path}"
+                except ValueError:
+                    item["thumbnail_url"] = None
+            else:
+                item["thumbnail_url"] = None
+
+            # Build PDF URL if available
+            pdf_path = visual_data.get("pdf_path", "")
+            if pdf_path:
+                try:
+                    rel_path = str(Path(pdf_path).relative_to(KB_ROOT))
+                    item["pdf_url"] = f"/visuals/{rel_path}"
+                except ValueError:
+                    item["pdf_url"] = None
+            else:
+                item["pdf_url"] = None
+
+            approved_items.append(item)
+
+            # Count by destination/platform
+            dest = item["destination"]
+            runway_counts[dest] = runway_counts.get(dest, 0) + 1
+
+    # Sort by approved_at (newest first)
+    approved_items.sort(key=lambda x: x.get("approved_at", ""), reverse=True)
+
+    return jsonify({
+        "items": approved_items,
+        "runway_counts": runway_counts,
+        "total": len(approved_items),
+    })
+
+
+@app.route('/visuals/<path:filepath>')
+def serve_visual(filepath: str):
+    """Serve generated visual files (PDFs, thumbnails) from KB_ROOT.
+
+    Validates the path stays within KB_ROOT to prevent directory traversal.
+    """
+    # Resolve to prevent directory traversal
+    full_path = (KB_ROOT / filepath).resolve()
+    if not str(full_path).startswith(str(KB_ROOT.resolve())):
+        return jsonify({"error": "Invalid path"}), 403
+
+    if not full_path.exists():
+        return jsonify({"error": "File not found"}), 404
+
+    return send_from_directory(
+        str(full_path.parent),
+        full_path.name,
+    )
+
+
+@app.route('/api/action/<action_id>/approve', methods=['POST'])
+def approve_action(action_id: str):
+    """Mark action as approved for posting queue.
+
+    Sets status to 'approved' and records approved_at timestamp.
+    Also copies content to clipboard (auto-copy on approve).
+    Requires item to be in 'pending' status (or no status yet).
+    """
+    if not validate_action_id(action_id):
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    # Get item content for clipboard copy
+    items = scan_actionable_items()
+    item_content = None
+    for item in items:
+        if item["id"] == action_id:
+            item_content = item["content"]
+            break
+
+    if item_content is None:
+        return jsonify({"error": "Action not found"}), 404
+
+    # Update state
+    state = load_action_state()
+
+    # Validate state transition: must be pending (or not set) before approving
+    current_status = state["actions"].get(action_id, {}).get("status", "pending")
+    if current_status != "pending":
+        return jsonify({"error": f"Cannot approve item with status '{current_status}'. Item must be pending."}), 400
+
+    if action_id not in state["actions"]:
+        state["actions"][action_id] = {
+            "status": "approved",
+            "copied_count": 0,
+            "created_at": datetime.now().isoformat(),
+        }
+    else:
+        state["actions"][action_id]["status"] = "approved"
+
+    state["actions"][action_id]["approved_at"] = datetime.now().isoformat()
+    save_action_state(state)
+
+    # Auto-copy to clipboard
+    try:
+        pyperclip.copy(item_content)
+        copied = True
+    except Exception:
+        copied = False
+
+    # Trigger visual pipeline in background thread — but NOT for auto-judge types
+    # (linkedin_v2 items go through the iteration workflow: iterate -> stage -> generate visuals)
+    parts = action_id.split(ACTION_ID_SEP)
+    analysis_type = parts[1] if len(parts) == 2 else ""
+
+    if analysis_type not in AUTO_JUDGE_TYPES:
+        transcript_path = None
+        for item in items:
+            if item["id"] == action_id:
+                transcript_path = item.get("transcript_path")
+                break
+
+        if transcript_path:
+            thread = threading.Thread(
+                target=run_visual_pipeline,
+                args=(action_id, transcript_path),
+                daemon=True,
+            )
+            thread.start()
+            logger.info("[KB Serve] Visual pipeline started for %s", action_id)
+
+    return jsonify({"success": True, "copied": copied})
+
+
+@app.route('/api/action/<action_id>/stage', methods=['POST'])
+def stage_action(action_id: str):
+    """Stage an iteration for the curation workflow.
+
+    Sets status to 'staged'. Does NOT trigger visual pipeline.
+    Used by 'a' shortcut in iteration view for linkedin_v2 items.
+    Requires item to be in 'pending' or 'draft' status.
+
+    Also creates the initial edit version (linkedin_v2_N_0) in the transcript JSON,
+    where N is the current round number of the staged iteration.
+    """
+    if not validate_action_id(action_id):
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    # Get item content for clipboard copy
+    items = scan_actionable_items()
+    item_content = None
+    transcript_path = None
+    for item in items:
+        if item["id"] == action_id:
+            item_content = item["content"]
+            transcript_path = item.get("transcript_path")
+            break
+
+    if item_content is None:
+        return jsonify({"error": "Action not found"}), 404
+
+    # Update state
+    state = load_action_state()
+
+    # Validate state transition: must be pending or draft
+    current_status = state["actions"].get(action_id, {}).get("status", "pending")
+    if current_status not in ("pending", "draft"):
+        return jsonify({"error": f"Cannot stage item with status '{current_status}'. Item must be pending or draft."}), 400
+
+    if action_id not in state["actions"]:
+        state["actions"][action_id] = {
+            "status": "staged",
+            "copied_count": 0,
+            "created_at": datetime.now().isoformat(),
+        }
+    else:
+        state["actions"][action_id]["status"] = "staged"
+
+    state["actions"][action_id]["staged_at"] = datetime.now().isoformat()
+
+    # Create initial edit version (_N_0) for auto-judge types
+    parts = action_id.split(ACTION_ID_SEP)
+    analysis_type = parts[1] if len(parts) == 2 else ""
+    edit_round = 0
+    edit_number = 0
+
+    if analysis_type in AUTO_JUDGE_TYPES and transcript_path:
+        try:
+            with open(transcript_path) as f:
+                transcript_data = json.load(f)
+
+            alias = transcript_data.get("analysis", {}).get(analysis_type, {})
+            current_round = alias.get("_round", 0)
+            edit_round = current_round
+
+            # Create _N_0 edit version (the raw LLM output snapshot)
+            edit_key = f"{analysis_type}_{current_round}_0"
+            if edit_key not in transcript_data.get("analysis", {}):
+                transcript_data["analysis"][edit_key] = {
+                    "post": alias.get("post", ""),
+                    "_edited_at": datetime.now().isoformat(),
+                    "_source": f"{analysis_type}_{current_round}",
+                }
+                # Update alias _edit metadata
+                alias["_edit"] = 0
+                with open(transcript_path, 'w') as f:
+                    json.dump(transcript_data, f, indent=2, ensure_ascii=False)
+
+        except (json.JSONDecodeError, IOError, KeyError) as e:
+            logger.warning("[KB Serve] Failed to create edit version on stage: %s", e)
+
+    state["actions"][action_id]["staged_round"] = edit_round
+    state["actions"][action_id]["edit_count"] = edit_number
+    save_action_state(state)
+
+    # Auto-copy to clipboard
+    try:
+        pyperclip.copy(item_content)
+        copied = True
+    except Exception:
+        copied = False
+
+    return jsonify({"success": True, "copied": copied, "staged_round": edit_round})
+
+
+@app.route('/api/action/<action_id>/save-edit', methods=['POST'])
+def save_edit(action_id: str):
+    """Save a text edit, creating a new edit version.
+
+    Creates linkedin_v2_N_M+1 where N is the staged round and M is the current
+    edit number. Updates the linkedin_v2 alias to point to the latest edit.
+
+    Request body: { "text": "edited post text" }
+    """
+    if not validate_action_id(action_id):
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    parts = action_id.split(ACTION_ID_SEP)
+    if len(parts) != 2:
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    analysis_type = parts[1]
+
+    # Must be staged to save edits
+    state = load_action_state()
+    current_status = state["actions"].get(action_id, {}).get("status", "pending")
+    if current_status not in ("staged", "ready"):
+        return jsonify({"error": f"Cannot edit item with status '{current_status}'. Item must be staged or ready."}), 400
+
+    # Get the edited text from request body
+    data = request.get_json()
+    if not data or "text" not in data:
+        return jsonify({"error": "Request body must contain 'text' field"}), 400
+
+    edited_text = data["text"]
+
+    # Find transcript file
+    transcript_path = _find_transcript_file(action_id)
+    if not transcript_path:
+        return jsonify({"error": "Transcript file not found"}), 404
+
+    try:
+        with open(str(transcript_path)) as f:
+            transcript_data = json.load(f)
+
+        alias = transcript_data.get("analysis", {}).get(analysis_type, {})
+        current_round = alias.get("_round", 0)
+        current_edit = alias.get("_edit", 0)
+
+        # Determine the staged round from action state
+        staged_round = state["actions"].get(action_id, {}).get("staged_round", current_round)
+
+        # Next edit number
+        next_edit = current_edit + 1
+        edit_key = f"{analysis_type}_{staged_round}_{next_edit}"
+        source_key = f"{analysis_type}_{staged_round}_{current_edit}"
+
+        # Save the new edit version
+        transcript_data["analysis"][edit_key] = {
+            "post": edited_text,
+            "_edited_at": datetime.now().isoformat(),
+            "_source": source_key,
+        }
+
+        # Update alias to point to latest edit
+        alias["post"] = edited_text
+        alias["_edit"] = next_edit
+        alias["_edited_at"] = datetime.now().isoformat()
+
+        with open(str(transcript_path), 'w') as f:
+            json.dump(transcript_data, f, indent=2, ensure_ascii=False)
+
+        # Update edit count in action state
+        state["actions"][action_id]["edit_count"] = next_edit
+
+        # Invalidate stale visuals: if item is "ready", reset to "staged"
+        # so user must re-render after editing (Phase 3 code review fix)
+        if current_status == "ready":
+            state["actions"][action_id]["status"] = "staged"
+            state["actions"][action_id]["visual_status"] = "stale"
+            logger.info("[KB Serve] Visual status invalidated for %s after edit", action_id)
+
+        save_action_state(state)
+
+        return jsonify({
+            "success": True,
+            "edit_key": edit_key,
+            "edit_number": next_edit,
+        })
+
+    except (json.JSONDecodeError, IOError) as e:
+        logger.error("[KB Serve] Failed to save edit: %s", e)
+        return jsonify({"error": "Failed to save edit"}), 500
+
+
+@app.route('/api/action/<action_id>/generate-visuals', methods=['POST'])
+def generate_visuals(action_id: str):
+    """Trigger visual pipeline from staging.
+
+    Runs run_visual_pipeline() in a background thread.
+    Only allowed when item is in 'staged' status.
+    Updates visual_status to 'generating' immediately.
+    """
+    if not validate_action_id(action_id):
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    # Must be staged to generate visuals
+    state = load_action_state()
+    current_status = state["actions"].get(action_id, {}).get("status", "pending")
+    if current_status != "staged":
+        return jsonify({"error": f"Cannot generate visuals for item with status '{current_status}'. Item must be staged."}), 400
+
+    # Check not already generating
+    visual_status = state["actions"].get(action_id, {}).get("visual_status", "")
+    if visual_status == "generating":
+        return jsonify({"error": "Visual generation already in progress"}), 400
+
+    # Find transcript file
+    transcript_path = _find_transcript_file(action_id)
+    if not transcript_path:
+        return jsonify({"error": "Transcript file not found"}), 404
+
+    # Start visual pipeline in background thread
+    def _run_and_update_status():
+        run_visual_pipeline(action_id, str(transcript_path))
+        # After visuals complete, update status to "ready" if visual_status is "ready"
+        st = load_action_state()
+        if action_id in st["actions"]:
+            vs = st["actions"][action_id].get("visual_status", "")
+            if vs in ("ready", "text_only"):
+                st["actions"][action_id]["status"] = "ready"
+                save_action_state(st)
+
+    thread = threading.Thread(target=_run_and_update_status, daemon=True)
+    thread.start()
+    logger.info("[KB Serve] Visual pipeline started from staging for %s", action_id)
+
+    return jsonify({"success": True, "message": "Visual generation started"})
+
+
+@app.route('/api/templates')
+def get_templates():
+    """List available carousel templates.
+
+    Reads template names and descriptions from carousel_templates/config.json.
+    Returns list of templates with the current default marked.
+    """
+    try:
+        from kb.render import load_carousel_config
+        config = load_carousel_config()
+    except (FileNotFoundError, ImportError) as e:
+        return jsonify({"error": f"Could not load carousel config: {e}"}), 500
+
+    templates_config = config.get("templates", {})
+    default_template = config.get("defaults", {}).get("template", "brand-purple")
+
+    templates = []
+    for name, tpl in templates_config.items():
+        templates.append({
+            "name": name,
+            "description": tpl.get("description", ""),
+            "file": tpl.get("file", ""),
+            "is_default": name == default_template,
+        })
+
+    return jsonify({
+        "templates": templates,
+        "default": default_template,
+    })
+
+
+@app.route('/api/action/<action_id>/slides')
+def get_slides(action_id: str):
+    """Return carousel slide data from transcript JSON.
+
+    Returns the carousel_slides analysis data for editing.
+    Each slide has type, content, slide_number, etc.
+    """
+    if not validate_action_id(action_id):
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    # Find transcript file
+    transcript_path = _find_transcript_file(action_id)
+    if not transcript_path:
+        return jsonify({"error": "Transcript file not found"}), 404
+
+    try:
+        with open(str(transcript_path)) as f:
+            transcript_data = json.load(f)
+
+        analysis = transcript_data.get("analysis", {})
+        carousel_slides = analysis.get("carousel_slides")
+
+        if not carousel_slides:
+            return jsonify({"error": "No carousel_slides data found"}), 404
+
+        # Extract slides data -- handle nested output format
+        slides_output = carousel_slides.get("output", carousel_slides)
+        if isinstance(slides_output, str):
+            try:
+                slides_output = json.loads(slides_output)
+            except (json.JSONDecodeError, TypeError):
+                return jsonify({"error": "carousel_slides output not parseable"}), 500
+
+        if not isinstance(slides_output, dict) or "slides" not in slides_output:
+            if "slides" in carousel_slides:
+                slides_output = {
+                    "slides": carousel_slides["slides"],
+                    "total_slides": carousel_slides.get("total_slides", len(carousel_slides["slides"])),
+                    "has_mermaid": carousel_slides.get("has_mermaid", False),
+                }
+            else:
+                return jsonify({"error": "No slides data in carousel_slides"}), 404
+
+        slides = slides_output.get("slides", [])
+
+        return jsonify({
+            "action_id": action_id,
+            "slides": slides,
+            "total_slides": len(slides),
+            "has_mermaid": slides_output.get("has_mermaid", False),
+        })
+
+    except (json.JSONDecodeError, IOError) as e:
+        logger.error("[KB Serve] Failed to load slides: %s", e)
+        return jsonify({"error": "Failed to load slides"}), 500
+
+
+@app.route('/api/action/<action_id>/save-slides', methods=['POST'])
+def save_slides(action_id: str):
+    """Save edited slide data back to transcript JSON.
+
+    Updates the carousel_slides analysis data with edited slide content.
+    Slide types are read-only; only title and content fields are updated.
+    Also invalidates visual_status to "stale" since slides changed.
+
+    Request body: { "slides": [ { slide_number, type, title, content, ... } ] }
+    """
+    if not validate_action_id(action_id):
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    # Must be staged or ready to save slide edits
+    state = load_action_state()
+    current_status = state["actions"].get(action_id, {}).get("status", "pending")
+    if current_status not in ("staged", "ready"):
+        return jsonify({"error": f"Cannot edit slides with status '{current_status}'. Item must be staged or ready."}), 400
+
+    data = request.get_json()
+    if not data or "slides" not in data:
+        return jsonify({"error": "Request body must contain 'slides' field"}), 400
+
+    edited_slides = data["slides"]
+    if not isinstance(edited_slides, list):
+        return jsonify({"error": "'slides' must be a list"}), 400
+
+    # Find transcript file
+    transcript_path = _find_transcript_file(action_id)
+    if not transcript_path:
+        return jsonify({"error": "Transcript file not found"}), 404
+
+    try:
+        with open(str(transcript_path)) as f:
+            transcript_data = json.load(f)
+
+        analysis = transcript_data.get("analysis", {})
+        carousel_slides = analysis.get("carousel_slides", {})
+
+        # Get existing slides data
+        slides_output = carousel_slides.get("output", carousel_slides)
+        if isinstance(slides_output, str):
+            try:
+                slides_output = json.loads(slides_output)
+            except (json.JSONDecodeError, TypeError):
+                return jsonify({"error": "carousel_slides output not parseable"}), 500
+
+        if not isinstance(slides_output, dict):
+            slides_output = {}
+
+        existing_slides = slides_output.get("slides", carousel_slides.get("slides", []))
+
+        # Update existing slides with edits (preserving type, only updating title/content)
+        for edited in edited_slides:
+            slide_num = edited.get("slide_number")
+            if slide_num is None:
+                continue
+
+            # Find matching existing slide
+            for existing in existing_slides:
+                if existing.get("slide_number") == slide_num:
+                    # Update content fields only; type is read-only
+                    if "title" in edited:
+                        existing["title"] = edited["title"]
+                    if "content" in edited:
+                        existing["content"] = edited["content"]
+                    break
+
+        # Save back to transcript
+        if "output" in carousel_slides and isinstance(carousel_slides["output"], dict):
+            carousel_slides["output"]["slides"] = existing_slides
+        elif "output" in carousel_slides and isinstance(carousel_slides["output"], str):
+            # Was a string, now make it a dict
+            carousel_slides["output"] = {
+                "slides": existing_slides,
+                "total_slides": len(existing_slides),
+                "has_mermaid": slides_output.get("has_mermaid", False),
+            }
+        else:
+            carousel_slides["slides"] = existing_slides
+
+        carousel_slides["_slides_edited_at"] = datetime.now().isoformat()
+        analysis["carousel_slides"] = carousel_slides
+
+        with open(str(transcript_path), 'w') as f:
+            json.dump(transcript_data, f, indent=2, ensure_ascii=False)
+
+        # Invalidate visuals since slides changed
+        if current_status == "ready":
+            state["actions"][action_id]["status"] = "staged"
+        state["actions"][action_id]["visual_status"] = "stale"
+        save_action_state(state)
+        logger.info("[KB Serve] Slides saved and visual status invalidated for %s", action_id)
+
+        return jsonify({
+            "success": True,
+            "slides_count": len(existing_slides),
+        })
+
+    except (json.JSONDecodeError, IOError) as e:
+        logger.error("[KB Serve] Failed to save slides: %s", e)
+        return jsonify({"error": "Failed to save slides"}), 500
+
+
+@app.route('/api/action/<action_id>/render', methods=['POST'])
+def render_action(action_id: str):
+    """Re-render carousel with specified template.
+
+    Triggers a re-render of the carousel using the current slide data
+    and the specified template name. Runs in background thread.
+
+    Request body: { "template": "brand-purple" } (optional, defaults to config default)
+    """
+    if not validate_action_id(action_id):
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    # Must be staged or ready
+    state = load_action_state()
+    current_status = state["actions"].get(action_id, {}).get("status", "pending")
+    if current_status not in ("staged", "ready"):
+        return jsonify({"error": f"Cannot render for item with status '{current_status}'. Item must be staged or ready."}), 400
+
+    # Check not already generating
+    visual_status = state["actions"].get(action_id, {}).get("visual_status", "")
+    if visual_status == "generating":
+        return jsonify({"error": "Render already in progress"}), 400
+
+    # Get template name from request
+    data = request.get_json() or {}
+    template_name = data.get("template")
+
+    # Find transcript file
+    transcript_path = _find_transcript_file(action_id)
+    if not transcript_path:
+        return jsonify({"error": "Transcript file not found"}), 404
+
+    # Start render in background thread
+    def _run_render():
+        try:
+            _update_visual_status(action_id, "generating")
+
+            with open(str(transcript_path)) as f:
+                transcript_data = json.load(f)
+
+            analysis = transcript_data.get("analysis", {})
+            carousel_slides = analysis.get("carousel_slides", {})
+
+            # Extract slides data
+            slides_output = carousel_slides.get("output", carousel_slides)
+            if isinstance(slides_output, str):
+                try:
+                    slides_output = json.loads(slides_output)
+                except (json.JSONDecodeError, TypeError):
+                    _update_visual_status(action_id, "failed", {"error": "carousel_slides output not parseable"})
+                    return
+
+            if not isinstance(slides_output, dict) or "slides" not in slides_output:
+                if "slides" in carousel_slides:
+                    slides_output = {
+                        "slides": carousel_slides["slides"],
+                        "total_slides": carousel_slides.get("total_slides", len(carousel_slides["slides"])),
+                        "has_mermaid": carousel_slides.get("has_mermaid", False),
+                    }
+                else:
+                    _update_visual_status(action_id, "failed", {"error": "No slides data"})
+                    return
+
+            # Build output dir
+            decimal_dir = Path(str(transcript_path)).parent
+            visuals_dir = decimal_dir / "visuals"
+
+            from kb.render import render_pipeline
+            result = render_pipeline(slides_output, str(visuals_dir), template_name=template_name)
+
+            if result.get("pdf_path"):
+                visual_data = {
+                    "format": "CAROUSEL",
+                    "pdf_path": result["pdf_path"],
+                    "thumbnail_paths": result.get("thumbnail_paths", []),
+                    "errors": result.get("errors", []),
+                    "template": template_name or "default",
+                }
+                _update_visual_status(action_id, "ready", visual_data)
+
+                # Update action status to ready
+                st = load_action_state()
+                if action_id in st["actions"]:
+                    st["actions"][action_id]["status"] = "ready"
+                    save_action_state(st)
+
+                logger.info("[KB Serve] Re-render complete for %s", action_id)
+            else:
+                _update_visual_status(action_id, "failed", {
+                    "error": "Render produced no PDF",
+                    "errors": result.get("errors", []),
+                })
+
+        except Exception as e:
+            logger.error("[KB Serve] Render failed for %s: %s", action_id, e)
+            _update_visual_status(action_id, "failed", {"error": str(e)})
+
+    thread = threading.Thread(target=_run_render, daemon=True)
+    thread.start()
+    logger.info("[KB Serve] Re-render started for %s (template=%s)", action_id, template_name or "default")
+
+    return jsonify({"success": True, "message": "Render started", "template": template_name or "default"})
+
+
+@app.route('/api/action/<action_id>/edit-history')
+def get_edit_history(action_id: str):
+    """Return edit versions for a staged item.
+
+    Returns all edit sub-versions (linkedin_v2_N_0, _N_1, etc.)
+    for the staged round.
+    """
+    if not validate_action_id(action_id):
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    parts = action_id.split(ACTION_ID_SEP)
+    if len(parts) != 2:
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    analysis_type = parts[1]
+
+    # Find transcript file
+    transcript_path = _find_transcript_file(action_id)
+    if not transcript_path:
+        return jsonify({"error": "Transcript file not found"}), 404
+
+    try:
+        with open(str(transcript_path)) as f:
+            transcript_data = json.load(f)
+
+        analysis = transcript_data.get("analysis", {})
+        alias = analysis.get(analysis_type, {})
+
+        # Determine the staged round from action state
+        state = load_action_state()
+        staged_round = state["actions"].get(action_id, {}).get("staged_round", alias.get("_round", 0))
+
+        # Collect edit versions for this round
+        edits = []
+        edit_num = 0
+        while True:
+            edit_key = f"{analysis_type}_{staged_round}_{edit_num}"
+            if edit_key not in analysis:
+                break
+            edit_data = analysis[edit_key]
+            edits.append({
+                "edit_number": edit_num,
+                "key": edit_key,
+                "post": edit_data.get("post", ""),
+                "edited_at": edit_data.get("_edited_at", ""),
+                "source": edit_data.get("_source", ""),
+            })
+            edit_num += 1
+
+        current_edit = alias.get("_edit", 0)
+
+        return jsonify({
+            "action_id": action_id,
+            "staged_round": staged_round,
+            "current_edit": current_edit,
+            "edits": edits,
+            "total_edits": len(edits),
+        })
+
+    except (json.JSONDecodeError, IOError) as e:
+        logger.error("[KB Serve] Failed to load edit history: %s", e)
+        return jsonify({"error": "Failed to load edit history"}), 500
+
+
+@app.route('/api/action/<action_id>/iterate', methods=['POST'])
+def iterate_action(action_id: str):
+    """Trigger next improvement round in background thread.
+
+    Calls run_with_judge_loop() for the next iteration.
+    Returns immediately; client polls /iterations for updates.
+    """
+    if not validate_action_id(action_id):
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    parts = action_id.split(ACTION_ID_SEP)
+    if len(parts) != 2:
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    analysis_type = parts[1]
+    if analysis_type not in AUTO_JUDGE_TYPES:
+        return jsonify({"error": f"Analysis type '{analysis_type}' does not support iteration"}), 400
+
+    judge_type = AUTO_JUDGE_TYPES[analysis_type]
+
+    # Find transcript file
+    transcript_path = _find_transcript_file(action_id)
+    if not transcript_path:
+        return jsonify({"error": "Transcript file not found"}), 404
+
+    # Update state to show iterating
+    state = load_action_state()
+    if action_id not in state["actions"]:
+        state["actions"][action_id] = {
+            "status": "pending",
+            "copied_count": 0,
+            "created_at": datetime.now().isoformat(),
+        }
+    state["actions"][action_id]["iterating"] = True
+    save_action_state(state)
+
+    def _run_iteration():
+        try:
+            with open(str(transcript_path)) as f:
+                transcript_data = json.load(f)
+
+            existing_analysis = transcript_data.get("analysis", {})
+
+            run_with_judge_loop(
+                transcript_data=transcript_data,
+                analysis_type=analysis_type,
+                judge_type=judge_type,
+                max_rounds=1,
+                existing_analysis=existing_analysis,
+                save_path=str(transcript_path),
+            )
+        except Exception as e:
+            logger.error("[KB Serve] Iteration failed for %s: %s", action_id, e)
+        finally:
+            # Clear iterating flag
+            st = load_action_state()
+            if action_id in st["actions"]:
+                st["actions"][action_id]["iterating"] = False
+                save_action_state(st)
+
+    thread = threading.Thread(target=_run_iteration, daemon=True)
+    thread.start()
+    logger.info("[KB Serve] Iteration started for %s", action_id)
+
+    return jsonify({"success": True, "message": "Iteration started"})
+
+
+@app.route('/api/action/<action_id>/iterations')
+def get_iterations(action_id: str):
+    """Return all iterations with scores for an entity.
+
+    Returns versioned drafts and judge scores for display in iteration view.
+    Uses alias-based action_id (e.g., transcript_id--linkedin_v2).
+    """
+    if not validate_action_id(action_id):
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    parts = action_id.split(ACTION_ID_SEP)
+    if len(parts) != 2:
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    transcript_id = parts[0]
+    analysis_type = parts[1]
+
+    if analysis_type not in AUTO_JUDGE_TYPES:
+        return jsonify({"error": f"Analysis type '{analysis_type}' does not support iterations"}), 400
+
+    judge_type = AUTO_JUDGE_TYPES[analysis_type]
+
+    # Find transcript file
+    transcript_path = _find_transcript_file(action_id)
+    if not transcript_path:
+        return jsonify({"error": "Transcript file not found"}), 404
+
+    with open(str(transcript_path)) as f:
+        transcript_data = json.load(f)
+
+    analysis = transcript_data.get("analysis", {})
+    alias = analysis.get(analysis_type, {})
+
+    # Build iterations list
+    iterations = []
+    round_num = 0
+    while True:
+        draft_key = f"{analysis_type}_{round_num}"
+        judge_key = f"{judge_type}_{round_num}"
+
+        if draft_key not in analysis:
+            break
+
+        draft_data = analysis[draft_key]
+        judge_data = analysis.get(judge_key)
+
+        iteration = {
+            "round": round_num,
+            "post": draft_data.get("post", ""),
+            "model": draft_data.get("_model", ""),
+            "analyzed_at": draft_data.get("_analyzed_at", ""),
+            "scores": None,
+        }
+
+        if judge_data and isinstance(judge_data, dict):
+            iteration["scores"] = {
+                "overall": judge_data.get("overall_score", 0),
+                "criteria": judge_data.get("scores", {}),
+                "improvements": judge_data.get("improvements", []),
+                "rewritten_hook": judge_data.get("rewritten_hook"),
+            }
+
+        iterations.append(iteration)
+        round_num += 1
+
+    # If no versioned keys but alias exists (pre-T023 content), show alias as round 0
+    if not iterations and alias:
+        iteration = {
+            "round": 0,
+            "post": alias.get("post", ""),
+            "model": alias.get("_model", ""),
+            "analyzed_at": alias.get("_analyzed_at", ""),
+            "scores": None,
+        }
+        # Check for unversioned judge
+        judge_data = analysis.get(judge_type)
+        if judge_data and isinstance(judge_data, dict):
+            iteration["scores"] = {
+                "overall": judge_data.get("overall_score", 0),
+                "criteria": judge_data.get("scores", {}),
+                "improvements": judge_data.get("improvements", []),
+                "rewritten_hook": judge_data.get("rewritten_hook"),
+            }
+        iterations.append(iteration)
+
+    # Get iterating status from action state
+    state = load_action_state()
+    iterating = state.get("actions", {}).get(action_id, {}).get("iterating", False)
+
+    # Current round from alias
+    current_round = alias.get("_round", 0) if alias else 0
+    score_history = alias.get("_history", {}).get("scores", []) if alias else []
+
+    return jsonify({
+        "action_id": action_id,
+        "iterations": iterations,
+        "current_round": current_round,
+        "score_history": score_history,
+        "iterating": iterating,
+        "total_rounds": len(iterations),
+    })
+
+
+@app.route('/api/posting-queue-v2')
+def get_posting_queue_v2():
+    """Get items for the iteration view posting queue.
+
+    Returns items grouped as entities (not individual iterations).
+    Includes iteration counts and latest scores for each entity.
+    Draft, pending, staged, and ready items for linkedin_v2 types.
+    """
+    state = load_action_state()
+    items = scan_actionable_items()
+
+    entities = []
+
+    for item in items:
+        item_state = state["actions"].get(item["id"], {})
+        status = item_state.get("status", "pending")
+
+        # Include pending, draft, staged, and ready items
+        if status in ("pending", "draft", "staged", "ready"):
+            # Load iteration data for auto-judge types
+            parts = item["id"].split(ACTION_ID_SEP)
+            analysis_type = parts[1] if len(parts) == 2 else ""
+
+            iteration_count = 0
+            latest_score = None
+            score_history = []
+            iterating = item_state.get("iterating", False)
+
+            if analysis_type in AUTO_JUDGE_TYPES:
+                # Parse iteration info from raw_data (alias metadata)
+                raw = item.get("raw_data", {}) or {}
+                current_round = 0
+
+                # Try to get _round and _history from the transcript file
+                transcript_path = item.get("transcript_path")
+                if transcript_path:
+                    try:
+                        with open(transcript_path) as f:
+                            tdata = json.load(f)
+                        alias = tdata.get("analysis", {}).get(analysis_type, {})
+                        current_round = alias.get("_round", 0)
+                        score_history = alias.get("_history", {}).get("scores", [])
+                        iteration_count = current_round + 1  # 0-indexed rounds
+
+                        if score_history:
+                            latest = score_history[-1]
+                            latest_score = latest.get("overall", 0)
+                    except (json.JSONDecodeError, IOError, KeyError):
+                        pass
+
+            item["status"] = status
+            item["iteration_count"] = iteration_count
+            item["latest_score"] = latest_score
+            item["score_history"] = score_history
+            item["iterating"] = iterating
+            item["relative_time"] = format_relative_time(item["analyzed_at"])
+
+            # Staging metadata
+            item["visual_status"] = item_state.get("visual_status", "")
+            item["staged_round"] = item_state.get("staged_round", 0)
+            item["edit_count"] = item_state.get("edit_count", 0)
+
+            # Visual data for thumbnails
+            visual_data = item_state.get("visual_data", {})
+            thumbnail_paths = visual_data.get("thumbnail_paths", [])
+            if thumbnail_paths:
+                try:
+                    rel_path = str(Path(thumbnail_paths[0]).relative_to(KB_ROOT))
+                    item["thumbnail_url"] = f"/visuals/{rel_path}"
+                except (ValueError, IndexError):
+                    item["thumbnail_url"] = None
+            else:
+                item["thumbnail_url"] = None
+
+            entities.append(item)
+
+    # Sort: iterating first, then staged/ready before draft, then by latest_score descending
+    status_priority = {"ready": 0, "staged": 1, "pending": 2, "draft": 3}
+    entities.sort(key=lambda x: (
+        not x.get("iterating", False),
+        status_priority.get(x.get("status", "pending"), 9),
+        -(x.get("latest_score") or 0),
+        x.get("analyzed_at", ""),
+    ), reverse=False)
+
+    return jsonify({
+        "items": entities,
+        "total": len(entities),
+    })
+
+
+@app.route('/api/action/<action_id>/posted', methods=['POST'])
+def mark_posted(action_id: str):
+    """Mark action as posted.
+
+    Sets status to 'posted' and records posted_at timestamp.
+    Requires item to be in 'approved' or 'ready' status first.
+    """
+    if not validate_action_id(action_id):
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    state = load_action_state()
+
+    # Validate state transition: must be approved or ready before posting
+    current_status = state["actions"].get(action_id, {}).get("status", "")
+    if current_status not in ("approved", "ready"):
+        return jsonify({"error": "Item must be approved or ready before marking as posted"}), 400
+
+    state["actions"][action_id]["status"] = "posted"
+    state["actions"][action_id]["posted_at"] = datetime.now().isoformat()
     save_action_state(state)
 
     return jsonify({"success": True})

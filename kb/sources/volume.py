@@ -28,7 +28,7 @@ from kb.core import (
     transcribe_to_kb, load_registry, save_registry, print_status,
     VIDEO_FORMATS
 )
-from kb.__main__ import load_config, get_paths, DEFAULTS
+from kb.config import load_config, get_paths, DEFAULTS
 
 console = Console()
 

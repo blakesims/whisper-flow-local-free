@@ -220,7 +220,7 @@ def save_to_cache(file_path: str, transcript: str) -> Path:
     return cache_path
 
 
-def transcribe_file(file_path: str, force: bool = False) -> str:
+def transcribe_file(file_path: str, force: bool = False, language: str = None) -> str:
     """Transcribe an audio/video file and return the text."""
 
     # Validate file exists
@@ -268,11 +268,14 @@ def transcribe_file(file_path: str, force: bool = False) -> str:
             print_progress(f"Transcribing: {percent}%")
 
     # Transcribe (copy to local if on network volume)
+    lang = language or config.get("transcription_language", None)
+    if lang:
+        print_progress(f"Language: {lang}")
     print_progress("Transcribing...")
     with LocalFileCopy(file_path) as local_path:
         result = service.transcribe(
             local_path,
-            language=config.get("transcription_language", None),
+            language=lang,
             beam_size=1,
             progress_callback=progress_callback
         )
@@ -293,22 +296,31 @@ def transcribe_file(file_path: str, force: bool = False) -> str:
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python transcribe_file.py [--force] <audio_file_path>", file=sys.stderr)
+        print("Usage: python transcribe_file.py [options] <audio_file_path>", file=sys.stderr)
         print("\nOptions:", file=sys.stderr)
-        print("  --force    Bypass cache and re-transcribe", file=sys.stderr)
+        print("  --force           Bypass cache and re-transcribe", file=sys.stderr)
+        print("  --language, -l    Language code (e.g., th, ja, zh, en)", file=sys.stderr)
         print("\nSupported formats:", ", ".join(SUPPORTED_FORMATS), file=sys.stderr)
         print(f"\nCache location: {CACHE_DIR}", file=sys.stderr)
         sys.exit(1)
 
     # Parse arguments
     force = False
+    language = None
     file_path = None
 
-    for arg in sys.argv[1:]:
-        if arg == '--force':
+    args = sys.argv[1:]
+    i = 0
+    while i < len(args):
+        if args[i] == '--force':
             force = True
+        elif args[i] in ('--language', '-l'):
+            i += 1
+            if i < len(args):
+                language = args[i]
         else:
-            file_path = arg
+            file_path = args[i]
+        i += 1
 
     if not file_path:
         print("Error: No file path provided", file=sys.stderr)
@@ -321,7 +333,7 @@ def main():
     file_path = os.path.expanduser(file_path)
 
     # Transcribe
-    text = transcribe_file(file_path, force=force)
+    text = transcribe_file(file_path, force=force, language=language)
 
     if text:
         # Copy to clipboard

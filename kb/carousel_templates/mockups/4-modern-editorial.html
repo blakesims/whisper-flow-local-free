@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Modern Editorial — Carousel Mockup</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800;900&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #C8C0B0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 40px;
+    padding: 40px 0;
+    font-family: 'Source Sans 3', 'Source Sans Pro', system-ui, sans-serif;
+  }
+
+  .slide {
+    width: 1080px;
+    height: 1350px;
+    position: relative;
+    overflow: hidden;
+    background: #FAF8F5;
+    color: #1C1C1C;
+    page-break-after: always;
+  }
+
+  /* Header */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 32px 60px 24px 60px;
+  }
+  .header-left {
+    font-family: 'Source Sans 3', sans-serif;
+    font-size: 18px;
+    font-weight: 600;
+    color: #1C1C1C;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+  }
+  .header-right {
+    font-size: 17px;
+    font-weight: 500;
+    color: #8A8478;
+    letter-spacing: 0.5px;
+  }
+  .header-divider {
+    height: 1px;
+    background: #1C1C1C;
+    margin: 0 60px;
+  }
+
+  /* Editorial step indicator: large number + thin progress line */
+  .editorial-indicator {
+    display: flex;
+    align-items: flex-start;
+    padding: 40px 60px 0 60px;
+    gap: 32px;
+  }
+  .editorial-big-number {
+    font-family: 'Playfair Display', serif;
+    font-size: 120px;
+    font-weight: 900;
+    color: #E8E2D8;
+    line-height: 0.85;
+    min-width: 120px;
+  }
+  .editorial-big-number.active-num {
+    color: #1C1C1C;
+  }
+  .editorial-step-info {
+    display: flex;
+    flex-direction: column;
+    padding-top: 12px;
+    flex: 1;
+  }
+  .editorial-step-label {
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 2.5px;
+    color: #B8A080;
+    margin-bottom: 8px;
+  }
+  .editorial-step-progress {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 0;
+  }
+  .editorial-pip {
+    width: 40px;
+    height: 3px;
+    background: #E8E2D8;
+    border-radius: 2px;
+  }
+  .editorial-pip.filled {
+    background: #B8A080;
+  }
+  .editorial-pip.active {
+    background: #1C1C1C;
+  }
+
+  /* Slide title — editorial serif */
+  .slide-title {
+    font-family: 'Playfair Display', serif;
+    font-size: 50px;
+    font-weight: 800;
+    color: #1C1C1C;
+    padding: 24px 60px 0 60px;
+    line-height: 1.15;
+    letter-spacing: -0.5px;
+  }
+
+  /* Pull-quote style accent */
+  .pull-accent {
+    display: flex;
+    align-items: center;
+    padding: 28px 60px 0 60px;
+    gap: 16px;
+  }
+  .pull-accent-line {
+    width: 40px;
+    height: 2px;
+    background: #B8A080;
+  }
+  .pull-accent-text {
+    font-size: 16px;
+    font-weight: 600;
+    color: #B8A080;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+  }
+
+  /* Content */
+  .content {
+    padding: 28px 60px 60px 60px;
+  }
+  .content ul, .content ol {
+    list-style: none;
+    padding: 0;
+  }
+  .content li {
+    font-size: 27px;
+    line-height: 1.55;
+    color: #4A4A42;
+    padding: 18px 0;
+    border-bottom: 1px solid #EDE8E0;
+    font-weight: 400;
+  }
+  .content li:last-child {
+    border-bottom: none;
+  }
+  .content ul li {
+    padding-left: 28px;
+    position: relative;
+  }
+  .content ul li::before {
+    content: "\2014";
+    position: absolute;
+    left: 0;
+    color: #B8A080;
+    font-weight: 700;
+  }
+  .content ol {
+    counter-reset: editorial-counter;
+  }
+  .content ol li {
+    counter-increment: editorial-counter;
+    padding-left: 56px;
+    position: relative;
+  }
+  .content ol li::before {
+    content: counter(editorial-counter, upper-roman) ".";
+    position: absolute;
+    left: 0;
+    font-family: 'Playfair Display', serif;
+    font-size: 20px;
+    font-weight: 700;
+    color: #B8A080;
+  }
+
+  /* Footer */
+  .slide-footer {
+    position: absolute;
+    bottom: 36px;
+    right: 60px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #C8C0B0;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+  }
+  .slide-footer-left {
+    position: absolute;
+    bottom: 36px;
+    left: 60px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #C8C0B0;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+  }
+
+  /* === TITLE PAGE === */
+  .title-page-layout {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+  .title-page-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 0 72px;
+  }
+  .title-page-kicker {
+    font-size: 14px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    color: #B8A080;
+    margin-bottom: 28px;
+  }
+  .title-page-photo-row {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    margin-bottom: 44px;
+  }
+  .title-page-photo {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    background: #E8E2D8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .title-page-photo svg {
+    width: 40px;
+    height: 40px;
+    fill: #B8A080;
+  }
+  .title-page-photo-label {
+    font-size: 18px;
+    font-weight: 600;
+    color: #4A4A42;
+  }
+  .title-page-main-title {
+    font-family: 'Playfair Display', serif;
+    font-size: 72px;
+    font-weight: 900;
+    color: #1C1C1C;
+    line-height: 1.05;
+    letter-spacing: -1.5px;
+    margin-bottom: 28px;
+  }
+  .title-page-rule {
+    width: 100%;
+    height: 2px;
+    background: #1C1C1C;
+    margin-bottom: 24px;
+  }
+  .title-page-subtitle {
+    font-size: 26px;
+    font-weight: 400;
+    color: #6A6A60;
+    line-height: 1.5;
+    max-width: 700px;
+  }
+  .title-page-bottom {
+    padding: 0 72px 48px 72px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+  .title-page-issue {
+    font-family: 'Playfair Display', serif;
+    font-size: 72px;
+    font-weight: 900;
+    color: #E8E2D8;
+    line-height: 1;
+  }
+  .title-page-date {
+    font-size: 14px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: #B8A080;
+  }
+
+  /* === CTA PAGE === */
+  .cta-editorial {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 0 80px;
+  }
+  .cta-editorial-rule {
+    width: 80px;
+    height: 2px;
+    background: #1C1C1C;
+    margin-bottom: 40px;
+  }
+  .cta-heading {
+    font-family: 'Playfair Display', serif;
+    font-size: 52px;
+    font-weight: 800;
+    color: #1C1C1C;
+    line-height: 1.15;
+    letter-spacing: -0.5px;
+    margin-bottom: 20px;
+  }
+  .cta-subtext {
+    font-size: 24px;
+    color: #6A6A60;
+    line-height: 1.5;
+    margin-bottom: 48px;
+    max-width: 640px;
+  }
+  .cta-button {
+    display: inline-block;
+    padding: 20px 56px;
+    background: #1C1C1C;
+    color: #FAF8F5;
+    font-size: 18px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    border-radius: 0;
+  }
+  .cta-handle {
+    margin-top: 32px;
+    font-size: 18px;
+    color: #B8A080;
+    letter-spacing: 1px;
+  }
+
+  /* === MERMAID === */
+  .mermaid-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px 60px 60px 60px;
+    flex: 1;
+  }
+</style>
+</head>
+<body>
+
+<!-- ====== SLIDE 1: TITLE PAGE ====== -->
+<div class="slide">
+  <div class="title-page-layout">
+    <div class="header">
+      <span class="header-left">Blake Sims</span>
+      <span class="header-right">Claude Code Architects</span>
+    </div>
+    <div class="header-divider"></div>
+    <div class="title-page-body">
+      <div class="title-page-kicker">A Step-by-Step Guide</div>
+      <div class="title-page-photo-row">
+        <div class="title-page-photo">
+          <svg viewBox="0 0 24 24"><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/></svg>
+        </div>
+        <span class="title-page-photo-label">Blake Sims</span>
+      </div>
+      <div class="title-page-main-title">5 Steps to Build an AI-Powered Content Pipeline</div>
+      <div class="title-page-rule"></div>
+      <div class="title-page-subtitle">From raw transcription to polished LinkedIn carousels — fully automated</div>
+    </div>
+    <div class="title-page-bottom">
+      <span class="title-page-issue">No. 01</span>
+      <span class="title-page-date">February 2026</span>
+    </div>
+  </div>
+</div>
+
+<!-- ====== SLIDE 2: CONTENT 1 ====== -->
+<div class="slide" style="display:flex; flex-direction:column;">
+  <div class="header">
+    <span class="header-left">Blake Sims</span>
+    <span class="header-right">Claude Code Architects</span>
+  </div>
+  <div class="header-divider"></div>
+  <div class="editorial-indicator">
+    <div class="editorial-big-number active-num">01</div>
+    <div class="editorial-step-info">
+      <span class="editorial-step-label">Step One of Five</span>
+      <div class="editorial-step-progress">
+        <div class="editorial-pip active"></div>
+        <div class="editorial-pip"></div>
+        <div class="editorial-pip"></div>
+        <div class="editorial-pip"></div>
+        <div class="editorial-pip"></div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-title">Set Up Transcription</div>
+  <div class="pull-accent">
+    <div class="pull-accent-line"></div>
+    <span class="pull-accent-text">Key Points</span>
+  </div>
+  <div class="content">
+    <ul>
+      <li>Use Whisper API to convert audio recordings to text</li>
+      <li>Process meeting recordings, voice memos, and podcasts</li>
+      <li>Store transcripts in structured format for downstream processing</li>
+      <li>Typical accuracy: 95%+ for clear English speech</li>
+    </ul>
+  </div>
+  <div class="slide-footer">01 / 05</div>
+</div>
+
+<!-- ====== SLIDE 3: CONTENT 2 ====== -->
+<div class="slide" style="display:flex; flex-direction:column;">
+  <div class="header">
+    <span class="header-left">Blake Sims</span>
+    <span class="header-right">Claude Code Architects</span>
+  </div>
+  <div class="header-divider"></div>
+  <div class="editorial-indicator">
+    <div class="editorial-big-number active-num">02</div>
+    <div class="editorial-step-info">
+      <span class="editorial-step-label">Step Two of Five</span>
+      <div class="editorial-step-progress">
+        <div class="editorial-pip filled"></div>
+        <div class="editorial-pip active"></div>
+        <div class="editorial-pip"></div>
+        <div class="editorial-pip"></div>
+        <div class="editorial-pip"></div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-title">Run LLM Analysis</div>
+  <div class="pull-accent">
+    <div class="pull-accent-line"></div>
+    <span class="pull-accent-text">The Process</span>
+  </div>
+  <div class="content">
+    <ol>
+      <li>Feed transcript chunks to Claude or GPT for topic extraction</li>
+      <li>Generate structured summaries with key insights</li>
+      <li>Identify quotable moments and actionable takeaways</li>
+      <li>Tag content by theme: tutorial, opinion, case study</li>
+    </ol>
+  </div>
+  <div class="slide-footer">02 / 05</div>
+</div>
+
+<!-- ====== SLIDE 4: CONTENT 3 ====== -->
+<div class="slide" style="display:flex; flex-direction:column;">
+  <div class="header">
+    <span class="header-left">Blake Sims</span>
+    <span class="header-right">Claude Code Architects</span>
+  </div>
+  <div class="header-divider"></div>
+  <div class="editorial-indicator">
+    <div class="editorial-big-number active-num">03</div>
+    <div class="editorial-step-info">
+      <span class="editorial-step-label">Step Three of Five</span>
+      <div class="editorial-step-progress">
+        <div class="editorial-pip filled"></div>
+        <div class="editorial-pip filled"></div>
+        <div class="editorial-pip active"></div>
+        <div class="editorial-pip"></div>
+        <div class="editorial-pip"></div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-title">Visual Classification</div>
+  <div class="pull-accent">
+    <div class="pull-accent-line"></div>
+    <span class="pull-accent-text">Key Points</span>
+  </div>
+  <div class="content">
+    <ul>
+      <li>Score each content piece for visual potential (1-10)</li>
+      <li>Classify format: carousel, single image, text post, or thread</li>
+      <li>Carousels work best for step-by-step and list content</li>
+      <li>Auto-select the right template based on content type</li>
+    </ul>
+  </div>
+  <div class="slide-footer">03 / 05</div>
+</div>
+
+<!-- ====== SLIDE 5: MERMAID ====== -->
+<div class="slide" style="display:flex; flex-direction:column;">
+  <div class="header">
+    <span class="header-left">Blake Sims</span>
+    <span class="header-right">Claude Code Architects</span>
+  </div>
+  <div class="header-divider"></div>
+  <div class="editorial-indicator">
+    <div class="editorial-big-number active-num">04</div>
+    <div class="editorial-step-info">
+      <span class="editorial-step-label">Step Four of Five</span>
+      <div class="editorial-step-progress">
+        <div class="editorial-pip filled"></div>
+        <div class="editorial-pip filled"></div>
+        <div class="editorial-pip filled"></div>
+        <div class="editorial-pip active"></div>
+        <div class="editorial-pip"></div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-title">The Full Pipeline</div>
+  <div class="pull-accent">
+    <div class="pull-accent-line"></div>
+    <span class="pull-accent-text">Architecture</span>
+  </div>
+  <div class="mermaid-container">
+    <svg viewBox="0 0 800 380" xmlns="http://www.w3.org/2000/svg" style="width:880px;">
+      <defs>
+        <marker id="arrow-ed" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#1C1C1C"/>
+        </marker>
+      </defs>
+
+      <!-- Nodes - editorial style with serif labels -->
+      <rect x="20" y="10" width="180" height="60" rx="0" fill="transparent" stroke="#1C1C1C" stroke-width="1.5"/>
+      <text x="110" y="48" text-anchor="middle" font-family="Playfair Display, serif" font-size="20" font-weight="700" fill="#1C1C1C">Transcribe</text>
+
+      <rect x="20" y="105" width="180" height="60" rx="0" fill="transparent" stroke="#1C1C1C" stroke-width="1.5"/>
+      <text x="110" y="143" text-anchor="middle" font-family="Playfair Display, serif" font-size="20" font-weight="700" fill="#1C1C1C">LLM Analysis</text>
+
+      <rect x="20" y="200" width="180" height="60" rx="0" fill="transparent" stroke="#1C1C1C" stroke-width="1.5"/>
+      <text x="110" y="238" text-anchor="middle" font-family="Playfair Display, serif" font-size="20" font-weight="700" fill="#1C1C1C">Classify</text>
+
+      <rect x="20" y="295" width="180" height="60" rx="0" fill="transparent" stroke="#1C1C1C" stroke-width="1.5"/>
+      <text x="110" y="333" text-anchor="middle" font-family="Playfair Display, serif" font-size="20" font-weight="700" fill="#1C1C1C">Generate</text>
+
+      <!-- Side annotations -->
+      <text x="230" y="36" font-family="Source Sans 3, sans-serif" font-size="14" fill="#B8A080" font-style="italic">Whisper API</text>
+      <text x="230" y="56" font-family="Source Sans 3, sans-serif" font-size="12" fill="#C8C0B0">audio -> text transcript</text>
+
+      <text x="230" y="131" font-family="Source Sans 3, sans-serif" font-size="14" fill="#B8A080" font-style="italic">Claude / GPT</text>
+      <text x="230" y="151" font-family="Source Sans 3, sans-serif" font-size="12" fill="#C8C0B0">extract topics + insights</text>
+
+      <text x="230" y="226" font-family="Source Sans 3, sans-serif" font-size="14" fill="#B8A080" font-style="italic">Content Scorer</text>
+      <text x="230" y="246" font-family="Source Sans 3, sans-serif" font-size="12" fill="#C8C0B0">format + template selection</text>
+
+      <text x="230" y="321" font-family="Source Sans 3, sans-serif" font-size="14" fill="#B8A080" font-style="italic">Jinja2 + Playwright</text>
+      <text x="230" y="341" font-family="Source Sans 3, sans-serif" font-size="12" fill="#C8C0B0">HTML -> PDF carousel</text>
+
+      <!-- Arrows -->
+      <line x1="110" y1="70" x2="110" y2="105" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arrow-ed)"/>
+      <line x1="110" y1="165" x2="110" y2="200" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arrow-ed)"/>
+      <line x1="110" y1="260" x2="110" y2="295" stroke="#1C1C1C" stroke-width="1.5" marker-end="url(#arrow-ed)"/>
+    </svg>
+  </div>
+  <div class="slide-footer">04 / 05</div>
+</div>
+
+<!-- ====== SLIDE 6: CTA ====== -->
+<div class="slide" style="display:flex; flex-direction:column;">
+  <div class="header">
+    <span class="header-left">Blake Sims</span>
+    <span class="header-right">Claude Code Architects</span>
+  </div>
+  <div class="header-divider"></div>
+  <div class="cta-editorial">
+    <div class="cta-editorial-rule"></div>
+    <div class="cta-heading">Want to build your own AI content pipeline?</div>
+    <div class="cta-subtext">Follow along as I automate everything from transcription to publishing. New deep-dives every week.</div>
+    <div class="cta-button">Follow for More</div>
+    <div class="cta-handle">@blakesims</div>
+  </div>
+  <div class="slide-footer-left">No. 01</div>
+  <div class="slide-footer">February 2026</div>
+</div>
+
+</body>
+</html>

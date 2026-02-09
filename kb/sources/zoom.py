@@ -49,7 +49,7 @@ from kb.core import (
     transcribe_to_kb, load_registry, save_registry, print_status,
     slugify, format_timestamp, KB_ROOT, DEFAULT_WHISPER_MODEL
 )
-from kb.__main__ import load_config
+from kb.config import load_config
 
 console = Console()
 
@@ -258,8 +258,7 @@ def transcribe_meeting(meeting: dict, model_name: str = "medium") -> tuple[str, 
     Raises:
         RuntimeError: If no segments could be transcribed
     """
-    from app.core.transcription_service_cpp import get_transcription_service
-    from app.utils.config_manager import ConfigManager
+    from kb.transcription import get_transcription_service, ConfigManager
 
     config = ConfigManager()
     service = get_transcription_service(config)

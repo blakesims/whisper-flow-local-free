@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width={{ width }}, initial-scale=1.0">
+<link href="{{ fonts.google_fonts_url }}" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: {{ width }}px;
+    overflow: hidden;
+  }
+
+  .slide {
+    width: {{ width }}px;
+    height: {{ height }}px;
+    position: relative;
+    overflow: hidden;
+    background: {{ colors.background }};
+    color: {{ colors.text_primary }};
+    font-family: {{ fonts.body }};
+  }
+
+  /* Header */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 32px 60px 24px 60px;
+  }
+  .header-left {
+    font-family: {{ fonts.body }};
+    font-size: 18px;
+    font-weight: 600;
+    color: {{ colors.text_primary }};
+    text-transform: uppercase;
+    letter-spacing: 2px;
+  }
+  .header-right {
+    font-size: 17px;
+    font-weight: 500;
+    color: {{ colors.accent }};
+    letter-spacing: 0.5px;
+  }
+  .header-divider {
+    height: 1px;
+    background: {{ colors.header_border }};
+    margin: 0 60px;
+  }
+
+  /* Editorial step indicator */
+  .editorial-indicator {
+    display: flex;
+    align-items: flex-start;
+    padding: 40px 60px 0 60px;
+    gap: 32px;
+  }
+  .editorial-big-number {
+    font-family: {{ fonts.heading }};
+    font-size: 120px;
+    font-weight: 900;
+    color: {{ colors.editorial_big_number_inactive }};
+    line-height: 0.85;
+    min-width: 120px;
+  }
+  .editorial-big-number.active-num {
+    color: {{ colors.text_primary }};
+  }
+  .editorial-step-info {
+    display: flex;
+    flex-direction: column;
+    padding-top: 12px;
+    flex: 1;
+  }
+  .editorial-step-label {
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 2.5px;
+    color: {{ colors.accent }};
+    margin-bottom: 8px;
+  }
+  .editorial-step-progress {
+    display: flex;
+    gap: 4px;
+  }
+  .editorial-pip {
+    width: 40px;
+    height: 3px;
+    background: {{ colors.accent_light }};
+    border-radius: 2px;
+  }
+  .editorial-pip.filled {
+    background: {{ colors.accent }};
+  }
+  .editorial-pip.active {
+    background: {{ colors.text_primary }};
+  }
+
+  /* Slide title */
+  .slide-title {
+    font-family: {{ fonts.heading }};
+    font-size: 50px;
+    font-weight: 800;
+    color: {{ colors.text_primary }};
+    padding: 24px 60px 0 60px;
+    line-height: 1.15;
+    letter-spacing: -0.5px;
+  }
+
+  /* Pull-quote accent */
+  .pull-accent {
+    display: flex;
+    align-items: center;
+    padding: 28px 60px 0 60px;
+    gap: 16px;
+  }
+  .pull-accent-line {
+    width: 40px;
+    height: 2px;
+    background: {{ colors.accent }};
+  }
+  .pull-accent-text {
+    font-size: 16px;
+    font-weight: 600;
+    color: {{ colors.accent }};
+    text-transform: uppercase;
+    letter-spacing: 2px;
+  }
+
+  /* Content */
+  .content {
+    padding: 28px 60px 60px 60px;
+  }
+  .content ul, .content ol {
+    list-style: none;
+    padding: 0;
+  }
+  .content li {
+    font-size: 27px;
+    line-height: 1.55;
+    color: {{ colors.text_secondary }};
+    padding: 18px 0;
+    border-bottom: 1px solid {{ colors.divider }};
+    font-weight: 400;
+  }
+  .content li:last-child {
+    border-bottom: none;
+  }
+  .content ul li {
+    padding-left: 28px;
+    position: relative;
+  }
+  .content ul li::before {
+    content: "\2014";
+    position: absolute;
+    left: 0;
+    color: {{ colors.accent }};
+    font-weight: 700;
+  }
+  .content ol {
+    counter-reset: editorial-counter;
+  }
+  .content ol li {
+    counter-increment: editorial-counter;
+    padding-left: 56px;
+    position: relative;
+  }
+  .content ol li::before {
+    content: counter(editorial-counter, upper-roman) ".";
+    position: absolute;
+    left: 0;
+    font-family: {{ fonts.heading }};
+    font-size: 20px;
+    font-weight: 700;
+    color: {{ colors.accent }};
+  }
+
+  .content p {
+    font-size: 27px;
+    line-height: 1.55;
+    color: {{ colors.text_secondary }};
+    padding: 14px 0;
+    font-weight: 400;
+  }
+
+  /* Footer */
+  .slide-footer {
+    position: absolute;
+    bottom: 36px;
+    right: 60px;
+    font-size: 14px;
+    font-weight: 600;
+    color: {{ colors.slide_number }};
+    text-transform: uppercase;
+    letter-spacing: 2px;
+  }
+  .slide-footer-left {
+    position: absolute;
+    bottom: 36px;
+    left: 60px;
+    font-size: 14px;
+    font-weight: 600;
+    color: {{ colors.slide_number }};
+    text-transform: uppercase;
+    letter-spacing: 2px;
+  }
+
+  /* === TITLE PAGE === */
+  .title-page-layout {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+  .title-page-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 0 72px;
+  }
+  .title-page-kicker {
+    font-size: 14px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    color: {{ colors.editorial_kicker }};
+    margin-bottom: 28px;
+  }
+  .title-page-photo-row {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    margin-bottom: 44px;
+  }
+  .title-page-photo {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    background: {{ colors.accent_light }};
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .title-page-photo img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+  }
+  .title-page-photo svg {
+    width: 40px;
+    height: 40px;
+    fill: {{ colors.accent }};
+  }
+  .title-page-photo .initials {
+    font-size: 24px;
+    font-weight: 700;
+    color: {{ colors.accent }};
+  }
+  .title-page-photo-label {
+    font-size: 18px;
+    font-weight: 600;
+    color: {{ colors.text_secondary }};
+  }
+  .title-page-main-title {
+    font-family: {{ fonts.heading }};
+    font-weight: 900;
+    color: {{ colors.text_primary }};
+    line-height: 1.05;
+    letter-spacing: -1.5px;
+    margin-bottom: 28px;
+  }
+  .title-page-main-title.title-short {
+    font-size: 78px;
+  }
+  .title-page-main-title.title-medium {
+    font-size: 72px;
+  }
+  .title-page-main-title.title-long {
+    font-size: 58px;
+  }
+  .title-page-rule {
+    width: 100%;
+    height: 2px;
+    background: {{ colors.text_primary }};
+    margin-bottom: 24px;
+  }
+  .title-page-subtitle {
+    font-size: 26px;
+    font-weight: 400;
+    color: {{ colors.editorial_muted }};
+    line-height: 1.5;
+    max-width: 700px;
+  }
+  .title-page-bottom {
+    padding: 0 72px 48px 72px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+
+  /* === CTA PAGE === */
+  .cta-editorial {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 0 80px;
+  }
+  .cta-editorial-rule {
+    width: 80px;
+    height: 2px;
+    background: {{ colors.text_primary }};
+    margin-bottom: 40px;
+  }
+  .cta-heading {
+    font-family: {{ fonts.heading }};
+    font-size: 52px;
+    font-weight: 800;
+    color: {{ colors.text_primary }};
+    line-height: 1.15;
+    letter-spacing: -0.5px;
+    margin-bottom: 20px;
+  }
+  .cta-subtext {
+    font-size: 24px;
+    color: {{ colors.editorial_muted }};
+    line-height: 1.5;
+    margin-bottom: 48px;
+    max-width: 640px;
+  }
+  .cta-button {
+    display: inline-block;
+    padding: 20px 56px;
+    background: {{ colors.text_primary }};
+    color: {{ colors.background }};
+    font-size: 18px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    border-radius: 0;
+  }
+  .cta-handle {
+    margin-top: 32px;
+    font-size: 18px;
+    color: {{ colors.accent }};
+    letter-spacing: 1px;
+  }
+
+  /* === MERMAID === */
+  .mermaid-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px 60px 60px 60px;
+    flex: 1;
+    overflow: hidden;
+  }
+  .mermaid-container svg {
+    max-width: 880px;
+    max-height: 800px;
+    width: auto;
+    height: auto;
+  }
+  .mermaid-code {
+    font-family: {{ fonts.mono }};
+    font-size: 18px;
+    color: {{ colors.text_secondary }};
+    white-space: pre-wrap;
+    padding: 32px;
+    border: 1px solid {{ colors.divider }};
+    max-width: 900px;
+  }
+</style>
+</head>
+<body>
+
+{% set num_words = ['One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten'] %}
+
+{% for slide in slides %}
+{% if slide.type == 'hook' %}
+{# ====== TITLE PAGE ====== #}
+<div class="slide" id="slide-{{ slide.slide_number }}">
+  <div class="title-page-layout">
+    <div class="header">
+      {% if header.author_position == 'left' %}
+      <span class="header-left">{{ brand.author_name }}</span>
+      <span class="header-right">{{ brand.community_name }}</span>
+      {% else %}
+      <span class="header-left">{{ brand.community_name }}</span>
+      <span class="header-right">{{ brand.author_name }}</span>
+      {% endif %}
+    </div>
+    <div class="header-divider"></div>
+    <div class="title-page-body">
+      <div class="title-page-kicker">{{ brand.tagline|default('A Step-by-Step Guide') }}</div>
+      <div class="title-page-photo-row">
+        <div class="title-page-photo">
+          {% if profile_photo_data %}
+          <img src="{{ profile_photo_data }}" alt="{{ brand.author_name }}">
+          {% else %}
+          <span class="initials">{{ brand.author_name.split()[0][0] }}{{ brand.author_name.split()[-1][0] }}</span>
+          {% endif %}
+        </div>
+        <span class="title-page-photo-label">{{ brand.author_name }}</span>
+      </div>
+      <div class="title-page-main-title {% if slide.content|length < 40 %}title-short{% elif slide.content|length < 65 %}title-medium{% else %}title-long{% endif %}">{{ slide.content }}</div>
+      <div class="title-page-rule"></div>
+      {% if slide.subtitle %}
+      <div class="title-page-subtitle">{{ slide.subtitle }}</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% elif slide.type == 'content' %}
+{# ====== CONTENT SLIDE ====== #}
+{% set content_slides = [] %}
+{% for s in slides if s.type == 'content' %}
+  {% if content_slides.append(s) %}{% endif %}
+{% endfor %}
+{% set current_content_index = [] %}
+{% for s in slides[:slide.slide_number] if s.type == 'content' %}
+  {% if current_content_index.append(1) %}{% endif %}
+{% endfor %}
+{% set ci = current_content_index|length %}
+<div class="slide" style="display:flex; flex-direction:column;" id="slide-{{ slide.slide_number }}">
+  {% if header.show_on_all_slides %}
+  <div class="header">
+    {% if header.author_position == 'left' %}
+    <span class="header-left">{{ brand.author_name }}</span>
+    <span class="header-right">{{ brand.community_name }}</span>
+    {% else %}
+    <span class="header-left">{{ brand.community_name }}</span>
+    <span class="header-right">{{ brand.author_name }}</span>
+    {% endif %}
+  </div>
+  <div class="header-divider"></div>
+  {% endif %}
+  <div class="editorial-indicator">
+    <div class="editorial-big-number active-num">{{ '%02d' % ci }}</div>
+    <div class="editorial-step-info">
+      <span class="editorial-step-label">Step {{ num_words[ci - 1] if ci <= num_words|length else ci }} of {{ num_words[content_slides|length - 1] if content_slides|length <= num_words|length else content_slides|length }}</span>
+      <div class="editorial-step-progress">
+        {% for cs in content_slides %}
+        {% set step_num = loop.index %}
+        {% if step_num < ci %}
+        <div class="editorial-pip filled"></div>
+        {% elif step_num == ci %}
+        <div class="editorial-pip active"></div>
+        {% else %}
+        <div class="editorial-pip"></div>
+        {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% if slide.title %}
+  <div class="slide-title">{{ slide.title }}</div>
+  <div class="pull-accent">
+    <div class="pull-accent-line"></div>
+    <span class="pull-accent-text">{{ slide.title|default('Key Points') }}</span>
+  </div>
+  {% endif %}
+  <div class="content">
+    {{ slide.content|markdown_to_html }}
+  </div>
+  <div class="slide-footer">{{ '%02d' % ci }} / {{ '%02d' % content_slides|length }}</div>
+</div>
+
+{% elif slide.type == 'mermaid' %}
+{# ====== MERMAID SLIDE ====== #}
+<div class="slide" style="display:flex; flex-direction:column;" id="slide-{{ slide.slide_number }}">
+  {% if header.show_on_all_slides %}
+  <div class="header">
+    {% if header.author_position == 'left' %}
+    <span class="header-left">{{ brand.author_name }}</span>
+    <span class="header-right">{{ brand.community_name }}</span>
+    {% else %}
+    <span class="header-left">{{ brand.community_name }}</span>
+    <span class="header-right">{{ brand.author_name }}</span>
+    {% endif %}
+  </div>
+  <div class="header-divider"></div>
+  {% endif %}
+  {% if slide.title %}
+  <div class="slide-title">{{ slide.title }}</div>
+  <div class="pull-accent">
+    <div class="pull-accent-line"></div>
+    <span class="pull-accent-text">{{ slide.title|default('Architecture') }}</span>
+  </div>
+  {% endif %}
+  <div class="mermaid-container">
+    {% if slide.mermaid_svg %}
+      {{ slide.mermaid_svg }}
+    {% else %}
+      <div class="mermaid-code">{{ slide.content }}</div>
+    {% endif %}
+  </div>
+</div>
+
+{% elif slide.type == 'cta' %}
+{# ====== CTA SLIDE ====== #}
+<div class="slide" style="display:flex; flex-direction:column;" id="slide-{{ slide.slide_number }}">
+  {% if header.show_on_all_slides %}
+  <div class="header">
+    {% if header.author_position == 'left' %}
+    <span class="header-left">{{ brand.author_name }}</span>
+    <span class="header-right">{{ brand.community_name }}</span>
+    {% else %}
+    <span class="header-left">{{ brand.community_name }}</span>
+    <span class="header-right">{{ brand.author_name }}</span>
+    {% endif %}
+  </div>
+  <div class="header-divider"></div>
+  {% endif %}
+  <div class="cta-editorial">
+    <div class="cta-editorial-rule"></div>
+    <div class="cta-heading">{{ slide.content }}</div>
+    {% if slide.subtitle %}
+    <div class="cta-subtext">{{ slide.subtitle }}</div>
+    {% endif %}
+    <div class="cta-button">{{ brand.cta_text|default('Follow for More') }}</div>
+    {% if brand.handle %}
+    <div class="cta-handle">{{ brand.handle }}</div>
+    {% endif %}
+  </div>
+</div>
+
+{% endif %}
+
+{% if not loop.last %}
+<div style="page-break-after: always;"></div>
+{% endif %}
+{% endfor %}
+
+</body>
+</html>

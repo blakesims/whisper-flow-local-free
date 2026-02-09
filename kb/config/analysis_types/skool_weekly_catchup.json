@@ -1,0 +1,21 @@
+{
+  "name": "skool_weekly_catchup",
+  "description": "Generate a Skool weekly catchup post with Key Moments & Timestamps format",
+  "requires": ["key_points"],
+  "optional_inputs": [],
+  "prompt": "You are creating a Skool community post summarizing a weekly group call or video session.\n\nINPUT:\nKey Moments (with timestamps):\n{{key_points}}\n\nTranscript:\n{{transcript}}\n\nWrite a post in this EXACT format:\n\n1. OPENING PARAGRAPH (2-3 sentences)\n   - Summarize the main theme/topic of the session\n   - Set context for what was discussed\n\n2. SECTION HEADER\n   Write: \"Key Moments & Timestamps\"\n\n3. KEY MOMENTS (4-8 items)\n   Each moment MUST follow this exact format:\n   - [EMOJI] [TIMESTAMP] Title of the Moment\n   Description of what was discussed (1-2 sentences).\n   \"Direct quote from the transcript that captures the insight.\"\n\n   Example:\n   - \ud83d\udee1\ufe0f [01:54] The Critical Security Risk\n   Why connecting an LLM directly to your command line is dangerous without extreme caution.\n   \"When you start integrating things, you've literally got a connection from your email inbox to writing commands on your computer... that's just not okay.\"\n\nRules:\n- Use varied emojis that match the topic (\ud83d\udee1\ufe0f security, \ud83e\udd16 AI, \ud83d\udc1b debugging, \u2705 validation, \ud83c\udfa8 design, \ud83d\udcbe saving, \ud83d\udca1 insights, \ud83d\ude80 workflows, etc.)\n- Timestamps in [MM:SS] format\n- Quotes must be ACTUAL quotes from the transcript, not paraphrased\n- Pick the most actionable/interesting moments, not everything\n- Keep descriptions concise and practical\n- End with a simple question to encourage discussion",
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "post": {
+        "type": "string",
+        "description": "The full Skool post in Key Moments & Timestamps format"
+      },
+      "title": {
+        "type": "string",
+        "description": "A descriptive title for the post (e.g., 'Weekly Catchup: AI Security & Debugging Loops')"
+      }
+    },
+    "required": ["post", "title"]
+  }
+}

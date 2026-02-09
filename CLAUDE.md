@@ -35,7 +35,10 @@ Modular CLI for transcribing content to structured JSON knowledge base.
 
 ## Key Rules
 
-- **Gemini API**: Use `google-genai` package (NOT `google-generativeai`, deprecated Nov 2025)
+- **Gemini SDK**: Use `google-genai` (NOT deprecated `google-generativeai`). Default model: `gemini-3-pro-preview`. Never use Flash/lightweight for content generation.
+- **Gemini structured output**: Use `response_json_schema` (raw dict) or `response_schema` (Pydantic). `minLength`/`maxLength`/`pattern` are silently ignored — only `enum` and `format` are enforced.
+- **Config resolution**: Runtime loads analysis types from `KB_ROOT/config/`, NOT `kb/config/` in this repo. After editing configs, copy to runtime path or verify with `load_analysis_type()`.
+- **LLM debugging**: When LLM output is wrong, FIRST verify the loaded config, the substituted prompt, and the API params. Never iterate on prompt text without confirming it reaches the model.
 - **Network volumes**: Extract audio via ffmpeg, never copy whole video files
 - **Transcription quality**: Default to "medium" Whisper model for quality
 - **Venv**: `source .venv/bin/activate && pip install -r requirements.txt`
@@ -70,11 +73,6 @@ python -m app.main                          # Full UI mode
 ```bash
 python transcribe_file.py /path/to/audio.mp3          # With 24h cache
 python transcribe_file.py --force /path/to/audio.mp3  # Bypass cache
-```
-
-### Build macOS App
-```bash
-./scripts/build_app.sh  # Output: dist/Whisper Transcription UI.app
 ```
 
 ## Architecture Overview

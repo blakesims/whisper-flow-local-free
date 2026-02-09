@@ -26,7 +26,7 @@ from rich.table import Table
 # Add project root for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from kb.__main__ import load_config, get_paths, DEFAULTS
+from kb.config import load_config, get_paths, DEFAULTS
 from kb.core import (
     SUPPORTED_FORMATS,
     load_registry,

@@ -108,10 +108,7 @@ def transcribe_segments(cap_path: Path, model_name: str = "medium") -> list[dict
             "error": "..." (only if status == "failed"),
         }, ...]
     """
-    import sys
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-    from app.core.transcription_service_cpp import get_transcription_service
-    from app.utils.config_manager import ConfigManager
+    from kb.transcription import get_transcription_service, ConfigManager
 
     # Load recording metadata
     meta = load_recording_meta(cap_path)
