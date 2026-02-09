@@ -36,7 +36,7 @@ Modular CLI for transcribing content to structured JSON knowledge base.
 ## Key Rules
 
 - **Gemini SDK**: Use `google-genai` (NOT deprecated `google-generativeai`). Default model: `gemini-3-pro-preview`. Never use Flash/lightweight for content generation.
-- **Gemini structured output**: Use `response_json_schema` (raw dict) or `response_schema` (Pydantic). `minLength`/`maxLength`/`pattern` are silently ignored — only `enum` and `format` are enforced.
+- **Gemini structured output**: Use `response_schema` (accepts raw dict or Pydantic). On SDK v1.17.0, `response_json_schema` does NOT exist. `minLength`/`maxLength`/`pattern` are silently ignored — only `enum` and `format` are enforced. For bullet-point content, use `type: array` with `items: {type: string}` instead of asking the model to format strings with `- ` prefixes.
 - **Config resolution**: Runtime loads analysis types from `KB_ROOT/config/`, NOT `kb/config/` in this repo. After editing configs, copy to runtime path or verify with `load_analysis_type()`.
 - **LLM debugging**: When LLM output is wrong, FIRST verify the loaded config, the substituted prompt, and the API params. Never iterate on prompt text without confirming it reaches the model.
 - **Network volumes**: Extract audio via ffmpeg, never copy whole video files
