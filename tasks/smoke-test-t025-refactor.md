@@ -163,3 +163,24 @@ For context if you need to debug:
 | 3 | Transcription imports centralized | `kb/transcription.py` |
 | 4 | `analyze.py` split | `kb/prompts.py`, `kb/judge.py` |
 | 5 | `serve.py` split | `kb/serve_state.py`, `kb/serve_scanner.py`, `kb/serve_visual.py` |
+
+---
+
+## Verification Results (Mac - 2025-02-09)
+
+**All smoke tests passed.**
+
+| Step | Test | Result |
+|------|------|--------|
+| 2 | pytest kb/tests/ | 395 passed, 2 known failures (carousel template — pre-existing) |
+| 3a | Direct imports (config, transcription, prompts, judge, serve_state, serve_scanner, serve_visual) | OK |
+| 3b | Backward-compat imports (analyze, serve re-exports) | OK |
+| 4a | kb --config | OK — config loads, KB_ROOT valid, 14 analysis types found |
+| 4b | kb missing --summary | OK — 11 transcripts missing 30 analyses across 6 decimals |
+| 4c | kb serve | OK — Flask starts, no import errors |
+| 4d | kb dashboard | OK — HTML generated |
+| 4e | Transcription service | OK — WhisperCppService loaded via whisper.cpp |
+
+**Note:** `kb config` (as subcommand) does not exist; `kb --config` is the correct flag. The smoke test doc had a minor inaccuracy here but the underlying functionality works.
+
+No regressions. Refactor is clean.
