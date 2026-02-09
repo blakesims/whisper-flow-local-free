@@ -32,6 +32,26 @@
         "mono": "'JetBrains Mono', 'Fira Code', monospace",
         "google_fonts_url": "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
       },
+      "font_sizes": {
+        "header_left": 29,
+        "header_right": 27,
+        "timeline_dot": 17,
+        "timeline_label": 16,
+        "slide_title": 62,
+        "bullet": 37,
+        "paragraph": 37,
+        "ol_counter": 18,
+        "footer": 21,
+        "hook_title_short": 96,
+        "hook_title_medium": 88,
+        "hook_title_long": 74,
+        "hook_subtitle": 37,
+        "cta_heading": 66,
+        "cta_subtext": 32,
+        "cta_button": 32,
+        "cta_handle": 28,
+        "mermaid_code": 28
+      },
       "mermaid_theme": "dark"
     },
     "modern-editorial": {

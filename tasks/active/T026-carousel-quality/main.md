@@ -4,7 +4,7 @@
 
 Fix carousel output quality to match mockups in `kb/carousel_templates/mockups/`. Root cause was weak LLM prompt + schema design, not template/CSS issues.
 
-**Status:** ACTIVE — Phase 1-3 COMPLETE, Phase 4 remaining
+**Status:** ACTIVE — Phase 1-3+5 COMPLETE, Phase 4+6+7+8 remaining
 
 ## Priority: 1
 
@@ -48,6 +48,71 @@ Changes shipped:
 - Node spacing: 120px vertical gap for breathing room
 - Container CSS: `width: 100%; height: 100%` to fill flex container
 
+### Phase 5: Title Page Redesign — COMPLETE
+
+Changes shipped:
+- Hero profile photo: removed 64px badge, added full-height hero photo anchored at bottom-center (55% height)
+- Profile photo resized from 2048px source to 600px for reasonable data URI size
+- Emphasis word highlighting: `highlight_words` Jinja2 filter converts `**word**` → accent-colored `<span>`
+- LLM prompt updated with rule 7 (wrap 1-2 key words in `**double asterisks**` on hook slide)
+- Font sizes extracted from hardcoded CSS to configurable `font_sizes` object in `config.json`
+- All text sizes bumped ~30% from original (two rounds of increases)
+
+### Phase 6: Emphasis + Content Variety Polish — NOT STARTED
+
+**A. Extend `highlight_words` to all slide types:**
+- Apply `|highlight_words` filter to content slide bullets (`{{ item }}`), paragraph content, and CTA heading
+- Update LLM prompt: make emphasis a global rule, not hook-only (e.g. "wrap 1-2 key terms per slide in `**double asterisks**`")
+
+**B. Content slide format variety:**
+- Template already supports `<ul>`, `<ol>`, and `<p>` via `markdown_to_html` on `slide.content` — but LLM prompt only ever requests `bullets` array
+- Consider allowing LLM to choose between bullets, numbered lists, or paragraph text per slide
+- Schema/prompt changes needed: maybe a `format` field (`"bullets"`, `"numbered"`, `"paragraph"`) or just let `content` field hold markdown and remove `bullets`-only constraint
+- Needs careful design — affects both rendering pipeline and frontend editing
+
+### Phase 7: KB Serve Frontend Fixes — NOT STARTED
+**Needs planning.** Multiple issues with the carousel editor UI in `kb serve`:
+
+**A. Save Slides not persisting changes:**
+- Editing title/content in the frontend and clicking "Save Slides" doesn't appear to save back to the JSON
+- Investigate the save endpoint and frontend fetch call
+
+**B. Content field empty for bullet slides:**
+- Slides with `bullets` array show title correctly but content textarea is empty
+- Frontend likely reads `slide.content` only, doesn't handle `slide.bullets` array
+- Need to serialize bullets → display text for editing, then parse back on save
+
+**C. Template switching + re-render:**
+- Changing template dropdown and re-rendering doesn't work
+- Investigate the re-render endpoint and whether it passes selected template
+
+**D. Frontend content editing for all formats:**
+- Need to handle bullets, numbered lists, free-form text, and mermaid code in the editor UI
+- Each format needs appropriate input controls (textarea vs structured list editor)
+- Must round-trip cleanly: display → edit → save → re-render
+
+### Phase 8: KB Serve — Iteration View + Processing UX — NOT STARTED (Investigation Complete)
+
+**Investigation findings (2026-02-09):**
+
+**A. Iteration details not rendered — data exists, frontend ignores it:**
+- API endpoint `GET /api/action/<id>/iterations` already returns per-round: `improvements` (criterion, current_issue, suggestion), `strengths`, `rewritten_hook`, `score_history`
+- Frontend `renderIterationView()` in `posting_queue.html` only renders the scores grid + overall score
+- **Zero code** to display judge feedback (`improvements`), strengths, rewritten hooks, or score progression charts
+- Fix: add HTML sections below scores grid to render improvements and strengths per round
+
+**B. Mixed content from all decimals — no filtering:**
+- `scan_actionable_items()` in `serve_scanner.py` scans ALL decimal dirs under KB_ROOT
+- Summaries, guides, skool posts from 50.01.01 appear alongside linkedin_v2 from 50.03.01
+- No per-decimal filter exists on action queue or iteration view
+- Consider: decimal filter dropdown, or at minimum better visual grouping/sorting
+
+**C. No way to kick off analysis from the UI:**
+- Only `iterate` (existing linkedin_v2), `generate-visuals`, and video transcription available
+- No endpoint for initial `kb analyze -t <type>` from frontend
+- TODO comment at `serve.py:155` indicates this was planned: `"processing": [] # Phase 2`
+- Needs: new `/api/transcript/<decimal>/analyze` endpoint + UI trigger (button per transcript, or batch processing)
+
 ### Phase 4: End-to-End Validation — NOT STARTED
 Test across multiple transcripts, compare to mockups, update other templates.
 
@@ -60,3 +125,5 @@ Test across multiple transcripts, compare to mockups, update other templates.
 - Runtime config gotcha: pipeline loads from `KB_ROOT/config/`, not `kb/config/` in repo. Must sync after edits.
 - 2026-02-09: Phase 2 complete. Key learning: Chromium's PDF renderer draws `box-shadow` as a rectangle, ignoring `border-radius`. Use `filter: drop-shadow()` instead — it respects element shape in PDF output. Discovered via isolated HTML test rendered to both PNG (circles) and PDF (squares).
 - 2026-02-09: Phase 3 complete. LLM-generated SVG replaces rigid mmdc output. Key: use `preserveAspectRatio="xMinYMid meet"` for left-aligned scaling, 120px node spacing for readability.
+- 2026-02-09: Phase 5 complete. Hero photo + emphasis words + configurable font sizes. Key learning: MarkupSafe's `escape()` returns a `Markup` object — `re.sub` on it auto-escapes replacement strings. Fix: cast to `str()` before regex.
+- 2026-02-09: Phase 6+7 scoped. Emphasis filter only covers hook slide — needs extending to bullets/CTA. KB serve frontend has multiple broken flows (save, content display, template switching) that need investigation.

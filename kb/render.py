@@ -517,7 +517,13 @@ def render_html_from_slides(
         loader=FileSystemLoader(str(CAROUSEL_TEMPLATES_DIR)),
         autoescape=select_autoescape(["html"]),
     )
+    def highlight_words(text):
+        """Convert **word** to <span class="accent-word">word</span>."""
+        safe = str(escape(text))
+        return Markup(re.sub(r'\*\*(.+?)\*\*', r'<span class="accent-word">\1</span>', safe))
+
     env.filters["markdown_to_html"] = markdown_to_html
+    env.filters["highlight_words"] = highlight_words
     template = env.get_template(template_file)
 
     html = template.render(
@@ -526,6 +532,7 @@ def render_html_from_slides(
         height=dimensions["height"],
         colors=template_config["colors"],
         fonts=template_config["fonts"],
+        font_sizes=template_config.get("font_sizes", {}),
         brand=brand,
         header=header,
         profile_photo_data=profile_photo_data,
