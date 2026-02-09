@@ -450,7 +450,14 @@
   <div class="slide-subtitle-line"></div>
   {% endif %}
   <div class="content">
+    {% if slide.bullets %}
+    <ul>
+      {% for item in slide.bullets %}<li>{{ item }}</li>
+      {% endfor %}
+    </ul>
+    {% elif slide.content %}
     {{ slide.content|markdown_to_html }}
+    {% endif %}
   </div>
   <div class="corner-accent"></div>
   <div class="slide-footer">{{ current_content_index|length }} / {{ content_slides|length }}</div>

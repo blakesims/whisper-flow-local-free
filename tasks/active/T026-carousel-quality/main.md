@@ -2,9 +2,9 @@
 
 ## Summary
 
-The carousel rendering pipeline (T022-T024) is functional end-to-end, but the actual output quality is far below the mockup designs. This task is dedicated to systematically identifying every gap between mockups and generated output, understanding root causes at each layer (LLM output, template rendering, PDF conversion), and fixing them.
+Fix carousel output quality to match mockups in `kb/carousel_templates/mockups/`. Root cause was weak LLM prompt + schema design, not template/CSS issues.
 
-**Status:** ACTIVE — Phase 0 (Data Capture) complete
+**Status:** ACTIVE — Phase 1 COMPLETE, Phase 2-4 remaining
 
 ## Priority: 1
 
@@ -12,72 +12,43 @@ The carousel rendering pipeline (T022-T024) is functional end-to-end, but the ac
 - T024 (Carousel Template Redesign) — COMPLETED
 - T023 (Content Curation Workflow) — Phases 1-4 COMPLETED
 
-## Problem Statement
+---
 
-The mockups in `kb/carousel_templates/mockups/` look professional and polished. The actual generated carousels look like first drafts: empty titles, prose instead of bullets, raw backticks, mermaid diagrams with wrong styling, massive empty space. The gap is not subtle — it's immediately obvious.
+## Phases
+
+### Phase 0: Data Capture & Root Cause Analysis — COMPLETE
+**Output:** `phase-0-research-report.md`
+
+### Phase 1: Schema + Prompt Redesign — COMPLETE
+**Output:** `phase-1-research.md`
+
+Changes shipped:
+- `carousel_slides.json`: `bullets: array<string>` for content slides, 3 few-shot examples, mermaid theming directive
+- `brand-purple.html`: iterates `slide.bullets` array instead of `slide.content|markdown_to_html`
+- Runtime config synced to KB_ROOT
+- Verified: 5-level bisection test ALL PASS, end-to-end PDF generated and visually confirmed
+
+### Phase 2: Template Polish — NOT STARTED
+Known issues from visual QA:
+- Timeline dot highlight renders as square on steps 2-5 (step 1 correct) — CSS bug
+- Font needs updating (currently generic, looks boring vs mockups)
+- Timeline labels may be too cluttered with full titles — consider number-only or shorter labels
+
+Config vs code:
+- Fonts: configurable in `kb/carousel_templates/config.json` → `templates.brand-purple.fonts`
+- Colors: configurable in config.json → `templates.brand-purple.colors`
+- Timeline layout/highlight: hardcoded in `brand-purple.html` CSS — needs code fix
+
+### Phase 3: Diagram Rendering — NOT STARTED
+Replace mmdc mermaid rendering with LLM-generated HTML/SVG diagrams matching brand style. The mockups use hand-crafted SVG, not mermaid. mmdc output looks rigid and doesn't match the brand.
+
+### Phase 4: End-to-End Validation — NOT STARTED
+Test across multiple transcripts, compare to mockups, update other templates.
 
 ---
 
-## Phases Breakdown
-
-### Phase 0: Data Capture & Root Cause Analysis
-**Status:** COMPLETE
-**Output:** `phase-0-research-report.md` (in this directory)
-
-Objectives:
-- Capture the exact prompt, schema, and settings sent to Gemini
-- Capture the raw JSON model output
-- Compare generated HTML to mockup HTML line-by-line
-- List every visual difference
-- Identify root causes at each layer
-- Produce a research report with findings and open questions
-
-### Phase 1: LLM Output Quality
-**Status:** Not Started
-
-Objectives:
-- Fix empty titles (Gemini ignores `required` in structured output)
-- Fix content format (prose → bullet points with `- ` prefix)
-- Fix timeline labels (generic "Step N" → descriptive from titles)
-- Consider: post-processing validation + retry on malformed output
-- Consider: stronger prompt engineering vs. code-level enforcement
-
-Research needed:
-- Gemini structured output enforcement limitations (what actually works?)
-- Alternative approaches: few-shot examples in prompt, validation + retry loop
-- Whether `response_schema` vs `response_json_schema` matters for enforcement
-
-### Phase 2: Template Rendering Fixes
-**Status:** Not Started
-
-Objectives:
-- Handle inline code (backticks → styled `<code>` elements)
-- Handle `•` bullet character as well as `- ` prefix
-- Handle `*italic*` markdown in content
-- Ensure `.slide-title` and `.slide-subtitle-line` render when title exists
-- Timeline labels should use slide titles, not just "Step N"
-
-### Phase 3: Mermaid → Custom SVG
-**Status:** Not Started
-
-Objectives:
-- Replace mmdc-generated mermaid SVGs with brand-matched custom SVGs
-- The mockup uses hand-crafted SVG with brand colors (#8B5CF6, #A78BFA)
-- mmdc output uses dark theme with wrong colors and tiny 70px height
-- Options: custom mermaid theme, post-process SVG, or generate SVG directly
-
-### Phase 4: Polish & Validation
-**Status:** Not Started
-
-Objectives:
-- End-to-end validation: generate → render → open → visual QA
-- Post-processing pipeline: validate JSON, retry on empty titles, enforce bullet format
-- Test across multiple transcripts
-- Compare final output against mockups
-
----
-
-## Notes & Updates
-- 2026-02-09: Task created after smoke testing revealed carousel quality issues
-- 2026-02-09: Phase 0 complete — research report written with full data capture
-- Bug found during testing: `response_json_schema` → `response_schema` (wrong parameter name in analyze.py, fixed)
+## Notes
+- 2026-02-09: Phase 0+1 complete. See `phase-1-research.md` for detailed findings.
+- Key learning: Gemini `minLength`/`pattern` silently ignored in ALL SDK versions. Use `array<string>` schema + few-shot examples instead.
+- SDK upgrade (v1.17→v1.62): good hygiene but does NOT fix carousel quality.
+- Runtime config gotcha: pipeline loads from `KB_ROOT/config/`, not `kb/config/` in repo. Must sync after edits.
