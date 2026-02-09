@@ -27,6 +27,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -153,6 +154,185 @@ def render_mermaid(
             os.unlink(tmp_path)
         except (OSError, UnboundLocalError):
             pass
+
+
+def render_mermaid_via_llm(
+    mermaid_code: str,
+    template_name: str = "brand-purple",
+    config: Optional[dict] = None,
+    model: str = "gemini-2.5-flash",
+    max_retries: int = 2,
+) -> Optional[str]:
+    """
+    Convert mermaid diagram code to branded SVG using Gemini LLM.
+
+    Instead of calling the mmdc CLI (which produces rigid/generic output),
+    this sends the mermaid code to Gemini with brand styling instructions
+    and a few-shot example, returning hand-crafted-style SVG.
+
+    Args:
+        mermaid_code: Mermaid diagram code (e.g. "graph TD\\n  A-->B")
+        template_name: Template name from config.json for brand colors
+        config: Carousel config dict (loaded from config.json if None)
+        model: Gemini model to use (flash is fine for conversion tasks)
+        max_retries: Number of retries on transient failures
+
+    Returns:
+        SVG content string (ready for inline embedding), or None if generation failed.
+    """
+    try:
+        from google import genai
+        from google.genai import types, errors
+    except ImportError:
+        logger.warning("google-genai not installed. Cannot render mermaid via LLM.")
+        return None
+
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
+        logger.warning("No Gemini API key found. Cannot render mermaid via LLM.")
+        return None
+
+    if config is None:
+        config = load_carousel_config()
+
+    template_config = config.get("templates", {}).get(template_name, {})
+    colors = template_config.get("colors", {})
+    fonts = template_config.get("fonts", {})
+
+    # Build the prompt with brand colors and a few-shot SVG example
+    prompt = f"""Convert this Mermaid diagram code into a branded SVG diagram.
+
+MERMAID CODE:
+```
+{mermaid_code}
+```
+
+BRAND STYLE REQUIREMENTS:
+- viewBox: use "0 0 760 H" where H = (number_of_nodes * 120) + 40. For 5 nodes that's "0 0 760 640".
+- Add preserveAspectRatio="xMinYMid meet" on the <svg> element (no fixed width/height attributes)
+- IMPORTANT: Space nodes generously. Each node rect is 65px tall. Place them ~120px apart (y-step). Leave 20px top margin.
+- Node rectangles: rounded corners rx="10", fill="rgba(139,92,246,0.12)", stroke="{colors.get('accent', '#8B5CF6')}", stroke-width="2"
+- Node text: font-family="{fonts.get('heading', 'Plus Jakarta Sans, sans-serif')}", font-size="17", font-weight="700", fill="{colors.get('text_primary', '#FFFFFF')}", text-anchor="middle"
+- Annotation labels beside each node: font-size="15", fill="{colors.get('accent_light', '#A78BFA')}" for the title, font-size="13", fill="rgba(196,181,227,0.6)" for the description
+- Arrow connectors between nodes: stroke="{colors.get('accent', '#8B5CF6')}", stroke-width="2", with a triangular arrowhead marker
+- Define arrow marker in <defs>: <marker id="arrow-purple" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="{colors.get('accent', '#8B5CF6')}"/></marker>
+- Background: transparent (no background rect)
+- For graph TD/TB (top-down): stack nodes vertically with ~30px gap, arrows pointing down, annotations to the right
+- For graph LR (left-right): arrange nodes horizontally, arrows pointing right, annotations below
+- Each annotation should describe what that step does — infer from the node labels and any edge labels
+
+EXAMPLE OUTPUT (for a 4-node top-down flow — note 120px y-step between nodes):
+<svg viewBox="0 0 760 520" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMinYMid meet">
+  <defs>
+    <marker id="arrow-purple" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8B5CF6"/>
+    </marker>
+  </defs>
+
+  <rect x="20" y="20" width="170" height="65" rx="10" fill="rgba(139,92,246,0.12)" stroke="#8B5CF6" stroke-width="2"/>
+  <text x="105" y="60" text-anchor="middle" font-family="Plus Jakarta Sans, sans-serif" font-size="17" font-weight="700" fill="#FFFFFF">Transcribe</text>
+
+  <rect x="20" y="140" width="170" height="65" rx="10" fill="rgba(139,92,246,0.12)" stroke="#8B5CF6" stroke-width="2"/>
+  <text x="105" y="180" text-anchor="middle" font-family="Plus Jakarta Sans, sans-serif" font-size="17" font-weight="700" fill="#FFFFFF">LLM Analysis</text>
+
+  <rect x="20" y="260" width="170" height="65" rx="10" fill="rgba(139,92,246,0.12)" stroke="#8B5CF6" stroke-width="2"/>
+  <text x="105" y="300" text-anchor="middle" font-family="Plus Jakarta Sans, sans-serif" font-size="17" font-weight="700" fill="#FFFFFF">Classify</text>
+
+  <rect x="20" y="380" width="170" height="65" rx="10" fill="rgba(139,92,246,0.12)" stroke="#8B5CF6" stroke-width="2"/>
+  <text x="105" y="420" text-anchor="middle" font-family="Plus Jakarta Sans, sans-serif" font-size="17" font-weight="700" fill="#FFFFFF">Generate</text>
+
+  <text x="225" y="48" font-family="Plus Jakarta Sans, sans-serif" font-size="15" fill="#A78BFA">Whisper API</text>
+  <text x="225" y="68" font-family="Plus Jakarta Sans, sans-serif" font-size="13" fill="rgba(196,181,227,0.6)">audio -> text transcript</text>
+
+  <text x="225" y="168" font-family="Plus Jakarta Sans, sans-serif" font-size="15" fill="#A78BFA">Claude / GPT</text>
+  <text x="225" y="188" font-family="Plus Jakarta Sans, sans-serif" font-size="13" fill="rgba(196,181,227,0.6)">extract topics + insights</text>
+
+  <text x="225" y="288" font-family="Plus Jakarta Sans, sans-serif" font-size="15" fill="#A78BFA">Content Scorer</text>
+  <text x="225" y="308" font-family="Plus Jakarta Sans, sans-serif" font-size="13" fill="rgba(196,181,227,0.6)">format + template selection</text>
+
+  <text x="225" y="408" font-family="Plus Jakarta Sans, sans-serif" font-size="15" fill="#A78BFA">Jinja2 + Playwright</text>
+  <text x="225" y="428" font-family="Plus Jakarta Sans, sans-serif" font-size="13" fill="rgba(196,181,227,0.6)">HTML -> PDF carousel</text>
+
+  <line x1="105" y1="85" x2="105" y2="140" stroke="#8B5CF6" stroke-width="2" marker-end="url(#arrow-purple)"/>
+  <line x1="105" y1="205" x2="105" y2="260" stroke="#8B5CF6" stroke-width="2" marker-end="url(#arrow-purple)"/>
+  <line x1="105" y1="325" x2="105" y2="380" stroke="#8B5CF6" stroke-width="2" marker-end="url(#arrow-purple)"/>
+</svg>
+
+RULES:
+- Output ONLY the raw SVG. No markdown fences, no explanation, no surrounding text.
+- The SVG must be valid and self-contained.
+- Use the exact brand colors specified above.
+- Infer meaningful annotation text for each node based on the mermaid diagram context.
+- Auto-size node widths to fit the text (min 150px, max 220px).
+- Keep the layout clean and well-spaced.
+"""
+
+    client = genai.Client(api_key=api_key)
+    gen_config = types.GenerateContentConfig(
+        temperature=0.2,
+    )
+
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=gen_config,
+            )
+
+            svg_text = response.text.strip()
+
+            # Strip markdown fences if the model wrapped it anyway
+            if svg_text.startswith("```"):
+                # Remove opening fence (```svg or ```)
+                svg_text = re.sub(r"^```\w*\n?", "", svg_text)
+                # Remove closing fence
+                svg_text = re.sub(r"\n?```$", "", svg_text)
+                svg_text = svg_text.strip()
+
+            # Validate it looks like SVG
+            if not svg_text.startswith("<svg") and "<svg" in svg_text:
+                # Extract just the SVG element
+                match = re.search(r"(<svg[\s\S]*?</svg>)", svg_text)
+                if match:
+                    svg_text = match.group(1)
+
+            if not svg_text.startswith("<svg"):
+                logger.warning(
+                    "LLM mermaid response does not look like SVG (attempt %d): %.100s...",
+                    attempt + 1,
+                    svg_text,
+                )
+                if attempt < max_retries - 1:
+                    continue
+                return None
+
+            logger.info(
+                "Mermaid SVG generated via LLM (%d bytes, model=%s)",
+                len(svg_text),
+                model,
+            )
+            return svg_text
+
+        except errors.ClientError as e:
+            if e.code == 429:  # Rate limited
+                wait_time = 2 ** attempt
+                logger.warning("Rate limited, waiting %ds...", wait_time)
+                time.sleep(wait_time)
+                continue
+            logger.warning("Gemini client error rendering mermaid: %s", e)
+            return None
+        except errors.ServerError as e:
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+                continue
+            logger.warning("Gemini server error rendering mermaid: %s", e)
+            return None
+        except Exception as e:
+            logger.warning("Unexpected error rendering mermaid via LLM: %s", e)
+            return None
+
+    return None
 
 
 def load_profile_photo_base64(config: Optional[dict] = None) -> Optional[str]:
@@ -594,6 +774,7 @@ def render_pipeline(
     errors = []
 
     # Step 1: Render mermaid diagrams if needed
+    # Prefer LLM-generated branded SVG; fall back to mmdc CLI
     mermaid_svg = None
     if has_mermaid:
         # Select mmdc theme from template config (fallback to dark)
@@ -602,25 +783,45 @@ def render_pipeline(
 
         for slide in slides:
             if slide.get("type") == "mermaid" and slide.get("content"):
-                mermaid_out_dir = os.path.join(output_dir, "mermaid")
-                svg_content = render_mermaid(
+                slide_num = slide.get("slide_number")
+
+                # Try LLM-generated branded SVG first
+                svg_content = render_mermaid_via_llm(
                     slide["content"],
-                    mermaid_out_dir,
-                    theme=mermaid_theme,
-                    slide_number=slide.get("slide_number"),
+                    template_name=template_name,
+                    config=config,
                 )
+
                 if svg_content:
-                    # Embed SVG inline via Markup() — trusted source (mmdc output)
+                    logger.info(
+                        "Mermaid slide %s rendered via LLM", slide_num
+                    )
+                else:
+                    # Fallback to mmdc CLI
+                    logger.info(
+                        "LLM mermaid failed for slide %s, falling back to mmdc",
+                        slide_num,
+                    )
+                    mermaid_out_dir = os.path.join(output_dir, "mermaid")
+                    svg_content = render_mermaid(
+                        slide["content"],
+                        mermaid_out_dir,
+                        theme=mermaid_theme,
+                        slide_number=slide_num,
+                    )
+
+                if svg_content:
+                    # Embed SVG inline via Markup() — trusted source (LLM or mmdc output)
                     slide["mermaid_svg"] = Markup(svg_content)
                     mermaid_svg = svg_content
                 else:
                     errors.append(
-                        f"Mermaid render failed for slide {slide.get('slide_number')}. "
+                        f"Mermaid render failed for slide {slide_num}. "
                         "Slide will show raw code instead."
                     )
                     logger.warning(
-                        "Mermaid render failed for slide %s",
-                        slide.get("slide_number"),
+                        "Mermaid render failed for slide %s (both LLM and mmdc)",
+                        slide_num,
                     )
 
     # Step 2: Render carousel
