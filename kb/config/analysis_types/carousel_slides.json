@@ -1,11 +1,13 @@
 {
   "name": "carousel_slides",
   "description": "Transform a LinkedIn post into visual carousel slide data",
-  "requires": ["linkedin_v2"],
+  "requires": [
+    "linkedin_v2"
+  ],
   "optional_inputs": [],
   "skip_raw_transcript": true,
-  "system_instruction": "You produce carousel slide data for PDF rendering. Rules:\n1. Every slide MUST have a non-empty 'title' field (2-5 words). Empty titles are FORBIDDEN.\n2. Content slides: return 3-4 bullet points in the 'bullets' array. Each bullet is a plain string (no dash prefix). 8-15 words per bullet with one specific insight, tool, number, or command.\n3. Do NOT copy text verbatim from the source post. Restructure into fresh, scannable insights.\n4. Mermaid slides: use graph TD (vertical). Start code with %%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#8B5CF6', 'primaryTextColor': '#FFFFFF', 'primaryBorderColor': '#A78BFA', 'lineColor': '#A78BFA', 'secondaryColor': '#2D1B69', 'tertiaryColor': '#1A0F3C'}}}%%\n5. Hook slide: 'content' is the main title (5-12 words), 'subtitle' is supporting context.\n6. CTA slide: 'content' is the question (8-20 words).\n7. Hook slide: wrap 1-2 key words in **double asterisks** for accent color highlighting (e.g. \"Stop Writing **Tests** Manually\").",
-  "prompt": "Transform this LinkedIn post into a visual carousel.\n\nSOURCE POST:\n{{linkedin_v2}}\n\n---\n\nCreate 6-8 slides following this structure:\n\nSlide 1 (hook): title=short label, content=punchy headline (5-12 words), subtitle=supporting context.\nSlides 2-N (content): title=2-5 word label, bullets=[3-4 plain text strings].\nOptional mermaid slide: title=label, content=mermaid code (graph TD, with brand theme init block).\nLast slide (cta): title=short label, content=engaging question (8-20 words), subtitle=supporting text.\n\nEXAMPLE content slide:\n{\n  \"slide_number\": 2,\n  \"type\": \"content\",\n  \"title\": \"Set Up Recording\",\n  \"bullets\": [\n    \"Run npx playwright codegen to open a browser recorder\",\n    \"Click through your app's key user flows manually\",\n    \"Capture sign-up, login, dashboard, and core features\",\n    \"Save the raw recording as your test seed script\"\n  ]\n}\n\nEXAMPLE hook slide:\n{\n  \"slide_number\": 1,\n  \"type\": \"hook\",\n  \"title\": \"Testing Automation\",\n  \"content\": \"Stop Writing **Tests** Manually\",\n  \"subtitle\": \"How we automated legacy test coverage in one session\"\n}\n\nEXAMPLE mermaid slide:\n{\n  \"slide_number\": 5,\n  \"type\": \"mermaid\",\n  \"title\": \"The Workflow\",\n  \"content\": \"%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#8B5CF6', 'primaryTextColor': '#FFFFFF', 'primaryBorderColor': '#A78BFA', 'lineColor': '#A78BFA', 'secondaryColor': '#2D1B69'}}}%%\\ngraph TD\\n    A[Record User Flows] --> B[Generate Raw Script]\\n    B --> C[AI Agent Processing]\\n    C --> D[Resilient Test Suite]\"\n}",
+  "system_instruction": "You produce carousel slide data for PDF rendering. Rules:\n1. Every slide MUST have a non-empty 'title' field (2-5 words). Empty titles are FORBIDDEN.\n2. Content slides: return 3-4 bullet points in the 'bullets' array. Each bullet is a plain string (no dash prefix). 8-15 words per bullet with one specific insight, tool, number, or command.\n3. Do NOT copy text verbatim from the source post. Restructure into fresh, scannable insights.\n4. Mermaid slides: use graph TD (vertical). Start code with %%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#8B5CF6', 'primaryTextColor': '#FFFFFF', 'primaryBorderColor': '#A78BFA', 'lineColor': '#A78BFA', 'secondaryColor': '#2D1B69', 'tertiaryColor': '#1A0F3C'}}}%%\n5. Hook slide: 'content' is the main title (5-12 words), 'subtitle' is supporting context.\n6. CTA slide: 'content' is the question (8-20 words).\n7. Emphasis: on EVERY slide (hook, content bullets, and CTA), wrap 1-2 key terms per slide in **double asterisks** for accent color highlighting (e.g. hook: \"Stop Writing **Tests** Manually\", bullet: \"Use **Playwright** codegen to record browser flows\", CTA: \"Ready to **automate** your workflow?\").",
+  "prompt": "Transform this LinkedIn post into a visual carousel.\n\nSOURCE POST:\n{{linkedin_v2}}\n\n---\n\nCreate 6-8 slides following this structure:\n\nSlide 1 (hook): title=short label, content=punchy headline (5-12 words), subtitle=supporting context.\nSlides 2-N (content): title=2-5 word label, bullets=[3-4 plain text strings].\nOptional mermaid slide: title=label, content=mermaid code (graph TD, with brand theme init block).\nLast slide (cta): title=short label, content=engaging question (8-20 words) with 1-2 **emphasized** terms, subtitle=supporting text.\n\nEXAMPLE content slide:\n{\n  \"slide_number\": 2,\n  \"type\": \"content\",\n  \"title\": \"Set Up Recording\",\n  \"bullets\": [\n    \"Run npx **playwright** codegen to open a browser recorder\",\n    \"Click through your app's key **user flows** manually\",\n    \"Capture sign-up, login, dashboard, and core features\",\n    \"Save the raw recording as your **test seed** script\"\n  ]\n}\n\nEXAMPLE hook slide:\n{\n  \"slide_number\": 1,\n  \"type\": \"hook\",\n  \"title\": \"Testing Automation\",\n  \"content\": \"Stop Writing **Tests** Manually\",\n  \"subtitle\": \"How we automated legacy test coverage in one session\"\n}\n\nEXAMPLE mermaid slide:\n{\n  \"slide_number\": 5,\n  \"type\": \"mermaid\",\n  \"title\": \"The Workflow\",\n  \"content\": \"%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#8B5CF6', 'primaryTextColor': '#FFFFFF', 'primaryBorderColor': '#A78BFA', 'lineColor': '#A78BFA', 'secondaryColor': '#2D1B69'}}}%%\\ngraph TD\\n    A[Record User Flows] --> B[Generate Raw Script]\\n    B --> C[AI Agent Processing]\\n    C --> D[Resilient Test Suite]\"\n}",
   "output_schema": {
     "type": "object",
     "properties": {
@@ -21,7 +23,12 @@
             },
             "type": {
               "type": "string",
-              "enum": ["hook", "content", "mermaid", "cta"],
+              "enum": [
+                "hook",
+                "content",
+                "mermaid",
+                "cta"
+              ],
               "description": "Slide type"
             },
             "title": {
@@ -34,7 +41,9 @@
             },
             "bullets": {
               "type": "array",
-              "items": {"type": "string"},
+              "items": {
+                "type": "string"
+              },
               "description": "3-4 bullet point strings for content slides. Plain text, no dash prefix."
             },
             "subtitle": {
@@ -42,7 +51,11 @@
               "description": "Supporting text for hook and CTA slides"
             }
           },
-          "required": ["slide_number", "type", "title"]
+          "required": [
+            "slide_number",
+            "type",
+            "title"
+          ]
         }
       },
       "total_slides": {
@@ -54,6 +67,10 @@
         "description": "Whether a mermaid diagram slide is included"
       }
     },
-    "required": ["slides", "total_slides", "has_mermaid"]
+    "required": [
+      "slides",
+      "total_slides",
+      "has_mermaid"
+    ]
   }
 }

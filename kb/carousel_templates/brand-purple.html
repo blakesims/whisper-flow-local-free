@@ -405,7 +405,7 @@
   <div class="content">
     {% if slide.bullets %}
     <ul>
-      {% for item in slide.bullets %}<li>{{ item }}</li>
+      {% for item in slide.bullets %}<li>{{ item|highlight_words }}</li>
       {% endfor %}
     </ul>
     {% elif slide.content %}
@@ -459,7 +459,7 @@
   </div>
   {% endif %}
   <div class="cta-body">
-    <div class="cta-heading">{{ slide.content }}</div>
+    <div class="cta-heading">{{ slide.content|highlight_words }}</div>
     {% if slide.subtitle %}
     <div class="cta-subtext">{{ slide.subtitle }}</div>
     {% endif %}

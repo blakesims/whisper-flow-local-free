@@ -24,7 +24,8 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
-from kb.render import markdown_to_html
+from markupsafe import Markup, escape
+from kb.render import markdown_to_html, _apply_emphasis
 
 # Paths
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -39,6 +40,13 @@ def _make_env():
         autoescape=select_autoescape(["html"]),
     )
     env.filters["markdown_to_html"] = markdown_to_html
+
+    def highlight_words(text):
+        """Convert **word** to <span class="accent-word">word</span>."""
+        safe = str(escape(text))
+        return Markup(_apply_emphasis(safe))
+
+    env.filters["highlight_words"] = highlight_words
     return env
 
 

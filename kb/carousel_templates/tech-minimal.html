@@ -179,6 +179,10 @@
     font-weight: 400;
   }
 
+  .accent-word {
+    color: {{ colors.accent }};
+  }
+
   /* Footer */
   .slide-footer {
     position: absolute;
@@ -424,7 +428,7 @@
       </div>
     </div>
     <div class="title-page-command"><span class="prompt-sym">$</span> <span class="cmd">cat carousel.md</span></div>
-    <div class="title-page-main-title {% if slide.content|length < 40 %}title-short{% elif slide.content|length < 65 %}title-medium{% else %}title-long{% endif %}">{{ slide.content }}</div>
+    <div class="title-page-main-title {% if slide.content|length < 40 %}title-short{% elif slide.content|length < 65 %}title-medium{% else %}title-long{% endif %}">{{ slide.content|highlight_words }}</div>
     <div class="title-page-divider"></div>
     {% if slide.subtitle %}
     <div class="title-page-subtitle">{{ slide.subtitle }}</div>
@@ -562,7 +566,7 @@
     {% if brand.handle %}
     <div class="cta-prompt">$ follow --user {{ brand.handle.lstrip('@') }}</div>
     {% endif %}
-    <div class="cta-heading">{{ slide.content }}</div>
+    <div class="cta-heading">{{ slide.content|highlight_words }}</div>
     {% if slide.subtitle %}
     <div class="cta-subtext">{{ slide.subtitle }}</div>
     {% endif %}

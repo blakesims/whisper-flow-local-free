@@ -185,6 +185,10 @@
     font-weight: 400;
   }
 
+  .accent-word {
+    color: {{ colors.accent }};
+  }
+
   /* Footer */
   .slide-footer {
     position: absolute;
@@ -409,7 +413,7 @@
         </div>
         <span class="title-page-photo-label">{{ brand.author_name }}</span>
       </div>
-      <div class="title-page-main-title {% if slide.content|length < 40 %}title-short{% elif slide.content|length < 65 %}title-medium{% else %}title-long{% endif %}">{{ slide.content }}</div>
+      <div class="title-page-main-title {% if slide.content|length < 40 %}title-short{% elif slide.content|length < 65 %}title-medium{% else %}title-long{% endif %}">{{ slide.content|highlight_words }}</div>
       <div class="title-page-rule"></div>
       {% if slide.subtitle %}
       <div class="title-page-subtitle">{{ slide.subtitle }}</div>
@@ -521,7 +525,7 @@
   {% endif %}
   <div class="cta-editorial">
     <div class="cta-editorial-rule"></div>
-    <div class="cta-heading">{{ slide.content }}</div>
+    <div class="cta-heading">{{ slide.content|highlight_words }}</div>
     {% if slide.subtitle %}
     <div class="cta-subtext">{{ slide.subtitle }}</div>
     {% endif %}

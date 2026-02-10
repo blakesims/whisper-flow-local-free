@@ -386,6 +386,15 @@ def load_profile_photo_base64(config: Optional[dict] = None) -> Optional[str]:
         return None
 
 
+def _apply_emphasis(text: str) -> str:
+    """Convert **word** markers to accent-colored spans in escaped text.
+
+    Expects text that has already been HTML-escaped (so no raw < or >).
+    Returns a string with <span class="accent-word"> replacements.
+    """
+    return re.sub(r'\*\*(.+?)\*\*', r'<span class="accent-word">\1</span>', text)
+
+
 def markdown_to_html(text: str) -> Markup:
     """
     Convert markdown-style content string to HTML.
@@ -394,6 +403,7 @@ def markdown_to_html(text: str) -> Markup:
     - Lines starting with '- ' or '* ' become <ul><li> bullet points
     - Lines starting with 'N. ' (e.g. '1. ', '2. ') become <ol><li> numbered lists
     - Plain text lines become <p> paragraphs with <br> for line breaks within a block
+    - **word** patterns are converted to accent-colored <span> elements
 
     Adjacent lines of the same type are grouped into the same list element.
     Returns Markup (safe HTML) for direct injection into Jinja2 templates.
@@ -435,14 +445,14 @@ def markdown_to_html(text: str) -> Markup:
 
         # Check for unordered list: '- ' or '* '
         if stripped.startswith("- ") or stripped.startswith("* "):
-            item_text = escape(stripped[2:])
+            item_text = _apply_emphasis(str(escape(stripped[2:])))
             if current_type != "ul":
                 flush()
                 current_type = "ul"
             current_items.append(item_text)
         # Check for ordered list: 'N. '
         elif re.match(r"^\d+\.\s", stripped):
-            item_text = escape(re.sub(r"^\d+\.\s", "", stripped))
+            item_text = _apply_emphasis(str(escape(re.sub(r"^\d+\.\s", "", stripped))))
             if current_type != "ol":
                 flush()
                 current_type = "ol"
@@ -452,7 +462,7 @@ def markdown_to_html(text: str) -> Markup:
             if current_type != "p":
                 flush()
                 current_type = "p"
-            current_items.append(escape(stripped))
+            current_items.append(_apply_emphasis(str(escape(stripped))))
 
     flush()
     return Markup("".join(html_parts))
@@ -520,7 +530,7 @@ def render_html_from_slides(
     def highlight_words(text):
         """Convert **word** to <span class="accent-word">word</span>."""
         safe = str(escape(text))
-        return Markup(re.sub(r'\*\*(.+?)\*\*', r'<span class="accent-word">\1</span>', safe))
+        return Markup(_apply_emphasis(safe))
 
     env.filters["markdown_to_html"] = markdown_to_html
     env.filters["highlight_words"] = highlight_words
