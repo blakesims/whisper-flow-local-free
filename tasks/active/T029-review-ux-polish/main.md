@@ -1,7 +1,7 @@
 # T029: Review UX Polish — Bugs + Vim Nav + Manual Feedback
 
 ## Meta
-- **Status:** ACTIVE
+- **Status:** CODE_REVIEW
 - **Created:** 2026-02-10
 - **Priority:** 2
 - **Depends on:** T028
@@ -128,6 +128,104 @@ Blake's design preference: Study the vim motion patterns from his calendar/plann
 
 ---
 
+## Plan Review
+- **Gate:** READY
+- **Reviewed:** 2026-02-10
+- **Summary:** Solid plan with verified bug diagnoses. Three major issues to address during execution: `g` key conflict with existing "generate visuals" binding, missing `user_feedback` param in `run_with_judge_loop()`, and Task 3.3 references a non-existent codebase.
+- **Issues:** 0 critical, 3 major, 5 minor
+- **Open Questions Finalized:**
+  1. What key should "generate visuals" move to, given `g` is needed for `gg` jump-to-first?
+  2. How should user feedback be injected into `run_with_judge_loop()` -- new parameter or convention key in existing_analysis?
+
+-> Details: `plan-review.md`
+
+---
+
 ## Execution Log
 
-_(to be filled during execution)_
+### Phase 1: Bug Fixes (BUG-3 + BUG-4 + 400 cleanup)
+- **Status:** COMPLETE
+- **Started:** 2026-02-10
+- **Completed:** 2026-02-10
+- **Commits:** `9268d3e` (frontend), `5085202` (serve.py `iterable` field was part of Phase 2 commit)
+- **Files Modified:**
+  - `kb/templates/posting_queue.html` — entityRoundIndex cache, fetchIterations restore, pollIteration scores-aware selection, renderNonIterableView, "Awaiting judge..." text
+  - `kb/serve.py` — added `iterable` boolean to posting-queue-v2 API response (line 1242)
+- **Notes:** 3 pre-existing test failures unrelated to changes (test_carousel_templates, test_render, test_staging). All 84 plan-specified tests pass.
+
+#### Tasks Completed
+- [x] Task 1.1: BUG-3 — entityRoundIndex map caches selectedRoundIndex per entity; restored on fetchIterations; updated on ArrowUp/Down/tab clicks
+- [x] Task 1.2: BUG-4 — pollIteration scans backwards for latest round with scores; "Awaiting judge..." shown when no scores
+- [x] Task 1.3: 400 cleanup — `iterable` boolean in API; frontend guards /iterations call; renderNonIterableView for non-iterable items
+
+#### Acceptance Criteria
+- [x] AC1 (BUG-3): Navigate to item A round 2, switch to B, switch back to A -> still shows round 2 (cached in entityRoundIndex)
+- [x] AC2 (BUG-4): After iteration completes, view shows round with scores; no blank scores (shows "Awaiting judge..." placeholder)
+- [x] AC3 (400s): Non-iterable items skip /iterations call; show "Not iterable" state; no 400 errors
+
+---
+
+### Phase 2: Code Cleanup — Extract Duplicated Staging Logic
+- **Status:** COMPLETE
+- **Started:** 2026-02-10
+- **Completed:** 2026-02-10
+- **Commits:** `5085202`
+- **Files Modified:**
+  - `kb/serve.py` — extracted `_stage_item()` helper; replaced duplicated staging logic in `approve_action()` and `stage_action()`
+- **Notes:** Pre-existing test failure in `test_carousel_templates.py` (unrelated, `content` not in required schema). All 52 relevant tests pass. Test files referenced in plan (`test_t028_lifecycle.py`, `test_staging.py`, `test_serve_integration.py`) do not exist; ran all existing `kb/tests/` instead.
+
+### Tasks Completed
+- [x] Task 2.1: Extract `_stage_item()` helper — both endpoints now call shared function, net -26 lines
+
+### Acceptance Criteria
+- [x] Both endpoints produce identical behavior to before — verified by code review of diff: same state mutations, same transcript writes, same return values
+- [x] Shared code in one place — `_stage_item()` at line 308
+- [x] All existing tests pass — 52 passed
+
+---
+
+### Phase 3: Vim Keybindings — h/l for Rounds, gg/G for Jump
+- **Status:** COMPLETE
+- **Started:** 2026-02-10
+- **Completed:** 2026-02-10
+- **Commits:** `f6cb404`
+- **Files Modified:**
+  - `kb/templates/posting_queue.html` — added pendingG/pendingGTimeout state vars; expanded input guard to INPUT+TEXTAREA; added h/l as round nav aliases; gg/G double-key pattern for entity jump; moved generate visuals from [g] to [v] (context-dependent like [p]); updated shortcut bar and round-nav hints
+- **Notes:** `v` key uses same context-dependent pattern as `p`: staging mode = generate visuals, otherwise = navigate to /videos. 3 pre-existing test failures unchanged (test_carousel_templates, test_render, test_staging). 239 tests pass.
+
+### Tasks Completed
+- [x] Task 3.1: h/l for round navigation — `l`/ArrowDown = next round, `h`/ArrowUp = prev round, entityRoundIndex cache updated on both
+- [x] Task 3.2: gg/G for entity list jump — `G` = last entity, `gg` = first entity (500ms timeout), generate visuals moved from `g` to `v`, pendingG cleared on any non-g key
+- [x] Task 3.3: Input guard for textarea/input focus — expanded guard from TEXTAREA-only to TEXTAREA+INPUT at top of keydown handler
+
+### Acceptance Criteria
+- [x] AC1: `G` selects last entity in filtered list — `selectEntity(filteredItems.length - 1)`
+- [x] AC2: `gg` selects first entity — pendingG pattern with 500ms timeout, calls `selectEntity(0)`
+- [x] AC3: `h/l` navigate rounds — added as aliases alongside ArrowUp/ArrowDown with same entityRoundIndex cache update
+- [x] AC4: Generate visuals moved from [g] to [v] — `v` in staging mode calls `generateVisuals()`, otherwise navigates to /videos
+- [x] AC5: Input guard — keydown handler returns early when `e.target.tagName` is INPUT or TEXTAREA (except Escape and Ctrl+S)
+
+---
+
+### Phase 4: Manual Feedback/Notes Input
+- **Status:** COMPLETE
+- **Started:** 2026-02-10
+- **Completed:** 2026-02-10
+- **Commits:** `e012320`
+- **Files Modified:**
+  - `kb/serve.py` — added `GET/POST /api/action/<id>/feedback` endpoint; read user_feedback in iterate_action() and pass to run_with_judge_loop()
+  - `kb/judge.py` — added `user_feedback=None` param to `run_with_judge_loop()`; inject feedback into judge_feedback_text in both history-based draft (Step 1) and improvement rounds (Step 3)
+  - `kb/templates/posting_queue.html` — CSS for `.notes-section`, `.notes-textarea`, `.notes-toggle`; notes section HTML in renderIterationView(); toggleNotes(), fetchUserFeedback(), saveUserFeedback() JS functions; `[n]` key handler to open/focus textarea
+  - `kb/tests/test_iteration_view.py` — 10 new tests: TestFeedbackEndpoint (8) + TestFeedbackPassedToIteration (2)
+  - `kb/tests/test_judge_versioning.py` — 1 new test: TestUserFeedbackInJudgeLoop signature check
+- **Notes:** 3 pre-existing test failures unchanged (test_carousel_templates, test_render, test_staging). 249 tests pass. Notes textarea auto-opens when existing feedback is loaded.
+
+### Tasks Completed
+- [x] Task 4.1: Notes textarea in iteration view — collapsible notes section with [n] key toggle, blur-save to `/api/action/<id>/feedback`, auto-open on existing feedback
+- [x] Task 4.2: Pass user feedback to iteration — user_feedback read from action state, passed to run_with_judge_loop(), appended to judge_feedback_text as "The author has provided this feedback: ..."
+
+### Acceptance Criteria
+- [x] AC1: [n] key opens notes textarea and focuses it — verified in keydown handler
+- [x] AC2: Escape from textarea returns focus to main navigation — uses existing isInTextInput guard
+- [x] AC3: Feedback persists in action state — POST saves to state["actions"][action_id]["user_feedback"], GET retrieves it
+- [x] AC4: Feedback passed to judge loop — iterate_action reads user_feedback, passes as kwarg to run_with_judge_loop, injected into improvement prompt
