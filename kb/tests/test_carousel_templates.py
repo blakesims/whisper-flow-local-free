@@ -1165,5 +1165,148 @@ class TestConfigBrandCtaText:
         assert "subtitle:" in prompt.lower() or "- subtitle:" in prompt
 
 
+class TestPhase6EmphasisAndFormats:
+    """Phase 6 tests: emphasis rendering + format variety across all templates."""
+
+    @pytest.fixture
+    def env(self):
+        return _make_env()
+
+    @pytest.fixture
+    def config(self):
+        with open(os.path.join(CAROUSEL_DIR, "config.json")) as f:
+            return json.load(f)
+
+    def _render(self, env, config, template_name, slides):
+        template_config = config["templates"][template_name]
+        context = {
+            "slides": slides,
+            "width": config["dimensions"]["width"],
+            "height": config["dimensions"]["height"],
+            "colors": template_config["colors"],
+            "fonts": template_config["fonts"],
+            "brand": config["brand"],
+            "header": config["header"],
+            "profile_photo_data": None,
+        }
+        if "font_sizes" in template_config:
+            context["font_sizes"] = template_config["font_sizes"]
+        template = env.get_template(template_config["file"])
+        return template.render(**context)
+
+    # --- Emphasis in bullets ---
+
+    @pytest.mark.parametrize("template_name", ["brand-purple", "modern-editorial", "tech-minimal"])
+    def test_emphasis_in_bullets(self, env, config, template_name):
+        """**word** in bullet items should render as <span class="accent-word">."""
+        slides = [
+            {"slide_number": 1, "type": "hook", "content": "Test Hook", "words": 2},
+            {"slide_number": 2, "type": "content", "bullets": [
+                "Use **Whisper** for transcription",
+                "Run **Claude** for analysis",
+            ], "words": 8, "title": "Steps"},
+            {"slide_number": 3, "type": "cta", "content": "End", "words": 1},
+        ]
+        html = self._render(env, config, template_name, slides)
+        assert '<span class="accent-word">Whisper</span>' in html, \
+            f"{template_name}: emphasis not rendered in bullet"
+        assert '<span class="accent-word">Claude</span>' in html, \
+            f"{template_name}: second emphasis not rendered in bullet"
+
+    # --- Emphasis in CTA heading ---
+
+    @pytest.mark.parametrize("template_name", ["brand-purple", "modern-editorial", "tech-minimal"])
+    def test_emphasis_in_cta_heading(self, env, config, template_name):
+        """**word** in CTA heading should render as accent-word span."""
+        slides = [
+            {"slide_number": 1, "type": "hook", "content": "Test", "words": 1},
+            {"slide_number": 2, "type": "cta", "content": "Join the **revolution** today", "words": 4},
+        ]
+        html = self._render(env, config, template_name, slides)
+        assert '<span class="accent-word">revolution</span>' in html, \
+            f"{template_name}: emphasis not rendered in CTA heading"
+
+    # --- Emphasis in hook title ---
+
+    @pytest.mark.parametrize("template_name", ["brand-purple", "modern-editorial", "tech-minimal"])
+    def test_emphasis_in_hook_title(self, env, config, template_name):
+        """**word** in hook title should render as accent-word span."""
+        slides = [
+            {"slide_number": 1, "type": "hook", "content": "I **automated** my workflow", "words": 4},
+            {"slide_number": 2, "type": "cta", "content": "End", "words": 1},
+        ]
+        html = self._render(env, config, template_name, slides)
+        assert '<span class="accent-word">automated</span>' in html, \
+            f"{template_name}: emphasis not rendered in hook title"
+
+    # --- format=numbered renders <ol> ---
+
+    @pytest.mark.parametrize("template_name", ["brand-purple", "modern-editorial", "tech-minimal"])
+    def test_format_numbered_renders_ol(self, env, config, template_name):
+        """format=numbered with bullets array should produce <ol> tags."""
+        slides = [
+            {"slide_number": 1, "type": "hook", "content": "Test", "words": 1},
+            {"slide_number": 2, "type": "content", "format": "numbered", "bullets": [
+                "First step",
+                "Second step",
+                "Third step",
+            ], "words": 6, "title": "Process"},
+            {"slide_number": 3, "type": "cta", "content": "End", "words": 1},
+        ]
+        html = self._render(env, config, template_name, slides)
+        assert "<ol>" in html, f"{template_name}: missing <ol> for format=numbered"
+        assert "<li>" in html, f"{template_name}: missing <li> in numbered list"
+        assert "First step" in html, f"{template_name}: missing numbered item content"
+
+    # --- format=paragraph renders via markdown_to_html ---
+
+    @pytest.mark.parametrize("template_name", ["brand-purple", "modern-editorial", "tech-minimal"])
+    def test_format_paragraph_renders_content(self, env, config, template_name):
+        """format=paragraph with content string should render via markdown_to_html."""
+        slides = [
+            {"slide_number": 1, "type": "hook", "content": "Test", "words": 1},
+            {"slide_number": 2, "type": "content", "format": "paragraph",
+             "content": "This is a paragraph of text.\nWith a second line.",
+             "words": 10, "title": "Info"},
+            {"slide_number": 3, "type": "cta", "content": "End", "words": 1},
+        ]
+        html = self._render(env, config, template_name, slides)
+        assert "<p>" in html, f"{template_name}: missing <p> for format=paragraph"
+        assert "This is a paragraph" in html, f"{template_name}: missing paragraph content"
+
+    # --- No format field defaults to bullets ---
+
+    @pytest.mark.parametrize("template_name", ["brand-purple", "modern-editorial", "tech-minimal"])
+    def test_no_format_defaults_to_bullets(self, env, config, template_name):
+        """Slides with bullets array but no format field should render as <ul>."""
+        slides = [
+            {"slide_number": 1, "type": "hook", "content": "Test", "words": 1},
+            {"slide_number": 2, "type": "content", "bullets": [
+                "Alpha item",
+                "Beta item",
+            ], "words": 4, "title": "Defaults"},
+            {"slide_number": 3, "type": "cta", "content": "End", "words": 1},
+        ]
+        html = self._render(env, config, template_name, slides)
+        assert "<ul>" in html, f"{template_name}: missing <ul> for default bullets"
+        assert "Alpha item" in html, f"{template_name}: missing bullet content"
+
+    # --- Backwards compatibility: content field only (no bullets, no format) ---
+
+    @pytest.mark.parametrize("template_name", ["brand-purple", "modern-editorial", "tech-minimal"])
+    def test_backwards_compat_content_only(self, env, config, template_name):
+        """Old slides with only content field (no bullets array) still render correctly."""
+        slides = [
+            {"slide_number": 1, "type": "hook", "content": "Test", "words": 1},
+            {"slide_number": 2, "type": "content",
+             "content": "- Legacy bullet one\n- Legacy bullet two",
+             "words": 6, "title": "Legacy"},
+            {"slide_number": 3, "type": "cta", "content": "End", "words": 1},
+        ]
+        html = self._render(env, config, template_name, slides)
+        assert "<ul>" in html, f"{template_name}: legacy content should render <ul>"
+        assert "Legacy bullet one" in html, f"{template_name}: missing legacy content"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

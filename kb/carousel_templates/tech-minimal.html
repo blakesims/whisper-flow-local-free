@@ -503,7 +503,21 @@
   <div class="slide-title">{{ slide.title }}</div>
   {% endif %}
   <div class="content">
+    {% if slide.format == 'numbered' and slide.bullets %}
+    <ol>
+      {% for item in slide.bullets %}<li>{{ item|highlight_words }}</li>
+      {% endfor %}
+    </ol>
+    {% elif slide.format == 'paragraph' and slide.content %}
     {{ slide.content|markdown_to_html }}
+    {% elif slide.bullets %}
+    <ul>
+      {% for item in slide.bullets %}<li>{{ item|highlight_words }}</li>
+      {% endfor %}
+    </ul>
+    {% elif slide.content %}
+    {{ slide.content|markdown_to_html }}
+    {% endif %}
   </div>
   <div class="slide-footer-left">step[{{ ci - 1 }}]</div>
   <div class="slide-footer">{{ ci }}/{{ content_slides|length }}</div>
