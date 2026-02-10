@@ -4,7 +4,7 @@
 
 Fix carousel output quality to match mockups in `kb/carousel_templates/mockups/`. Root cause was weak LLM prompt + schema design, not template/CSS issues.
 
-**Status:** ACTIVE — Phase 1-3+5 COMPLETE, Phase 4+6+7+8 remaining
+**Status:** CODE_REVIEW — Phase 1-3+5+6 COMPLETE, Phase 4+7+8 remaining
 
 ## Priority: 1
 
@@ -58,17 +58,31 @@ Changes shipped:
 - Font sizes extracted from hardcoded CSS to configurable `font_sizes` object in `config.json`
 - All text sizes bumped ~30% from original (two rounds of increases)
 
-### Phase 6: Emphasis + Content Variety Polish — NOT STARTED
+### Phase 6: Emphasis + Content Variety Polish — COMPLETE
 
 **A. Extend `highlight_words` to all slide types:**
-- Apply `|highlight_words` filter to content slide bullets (`{{ item }}`), paragraph content, and CTA heading
-- Update LLM prompt: make emphasis a global rule, not hook-only (e.g. "wrap 1-2 key terms per slide in `**double asterisks**`")
+- `|highlight_words` filter applied to: content slide bullets (brand-purple), CTA heading (all templates), hook title (all templates)
+- `_apply_emphasis()` helper extracted in `render.py`, shared by `highlight_words` filter and `markdown_to_html`
+- `markdown_to_html` now processes `**word**` patterns into `<span class="accent-word">` for content slides in modern-editorial and tech-minimal
+- `.accent-word` CSS class added to modern-editorial and tech-minimal templates
+- LLM system_instruction rule 7 updated: emphasis is global (all slide types), not hook-only
+- Prompt examples updated with `**emphasis**` markers in bullets
 
 **B. Content slide format variety:**
-- Template already supports `<ul>`, `<ol>`, and `<p>` via `markdown_to_html` on `slide.content` — but LLM prompt only ever requests `bullets` array
-- Consider allowing LLM to choose between bullets, numbered lists, or paragraph text per slide
-- Schema/prompt changes needed: maybe a `format` field (`"bullets"`, `"numbered"`, `"paragraph"`) or just let `content` field hold markdown and remove `bullets`-only constraint
-- Needs careful design — affects both rendering pipeline and frontend editing
+- Added `format` field to schema: `"bullets"` | `"numbered"` | `"paragraph"`
+- LLM system_instruction rule 2 updated: choose format per slide, vary across slides
+- Prompt includes examples for all three formats
+- brand-purple.html updated: `format=numbered` renders `<ol>`, `format=paragraph` renders via `markdown_to_html`, default remains `<ul>`
+- Backwards compatible: slides without `format` field still render as bullet lists
+- modern-editorial and tech-minimal already handle all formats via `markdown_to_html`
+
+Commits: `4a385cf`, `7e8cfec`
+
+**Pre-existing test failures (not introduced by Phase 6):**
+- 21x `font_sizes is undefined` — brand-purple direct-render tests (Phase 5 added `font_sizes` to template but test fixture never updated)
+- 3x prompt assertion mismatches — Phase 1 changed schema/prompt but tests not updated
+- 1x `wait_for_timeout(1000)` vs `(500)` — Phase 2 changed timeout but test not updated
+- 1x `test_prompt_mentions_title_and_subtitle` — prompt uses `title=` not `title:`
 
 ### Phase 7: KB Serve Frontend Fixes — NOT STARTED
 **Needs planning.** Multiple issues with the carousel editor UI in `kb serve`:
