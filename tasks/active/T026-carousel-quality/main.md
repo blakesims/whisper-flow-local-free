@@ -4,7 +4,7 @@
 
 Fix carousel output quality to match mockups in `kb/carousel_templates/mockups/`. Root cause was weak LLM prompt + schema design, not template/CSS issues.
 
-**Status:** CODE_REVIEW — Phase 1-3+5+6 COMPLETE, Phase 4+7+8 remaining
+**Status:** CODE_REVIEW — Phase 6 REVISE complete
 
 ## Priority: 1
 
@@ -74,9 +74,14 @@ Changes shipped:
 - Prompt includes examples for all three formats
 - brand-purple.html updated: `format=numbered` renders `<ol>`, `format=paragraph` renders via `markdown_to_html`, default remains `<ul>`
 - Backwards compatible: slides without `format` field still render as bullet lists
-- modern-editorial and tech-minimal already handle all formats via `markdown_to_html`
+- modern-editorial and tech-minimal updated with format-aware branching (REVISE fix)
 
-Commits: `4a385cf`, `7e8cfec`
+Commits: `4a385cf`, `7e8cfec`, `3b55d6a`
+
+**REVISE fix (2026-02-10):**
+- modern-editorial.html and tech-minimal.html: replaced `slide.content|markdown_to_html` with format-aware branching matching brand-purple (numbered/paragraph/bullets/content fallback)
+- Applied `|highlight_words` to bullet items in both templates
+- Added 21 new parametrized tests in `TestPhase6EmphasisAndFormats` covering emphasis rendering, format=numbered, format=paragraph, default bullets, and backwards compatibility across all 3 templates
 
 **Pre-existing test failures (not introduced by Phase 6):**
 - 21x `font_sizes is undefined` — brand-purple direct-render tests (Phase 5 added `font_sizes` to template but test fixture never updated)
@@ -129,6 +134,18 @@ Commits: `4a385cf`, `7e8cfec`
 
 ### Phase 4: End-to-End Validation — NOT STARTED
 Test across multiple transcripts, compare to mockups, update other templates.
+
+---
+
+## Code Review Log
+
+### Phase 6
+- **Gate:** REVISE
+- **Reviewed:** 2026-02-10
+- **Issues:** 1 critical, 1 major, 2 minor
+- **Summary:** Phase 6A (emphasis) is solid. Phase 6B has a critical gap: modern-editorial and tech-minimal templates do not handle `bullets` array data, rendering blank content slides for the primary new data format. Needs format-aware branching in both templates + new tests.
+
+-> Details: `code-review-phase-6.md`
 
 ---
 
