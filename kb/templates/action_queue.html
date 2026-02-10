@@ -1499,6 +1499,9 @@
                     } else {
                         selectedItem = null;
                     }
+                } else {
+                    const data = await response.json().catch(() => ({}));
+                    showToast(data.error || 'Failed to mark done');
                 }
             } catch (error) {
                 console.error('Failed to mark done:', error);

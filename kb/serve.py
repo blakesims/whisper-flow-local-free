@@ -218,9 +218,19 @@ def copy_action(action_id: str):
 
 @app.route('/api/action/<action_id>/done', methods=['POST'])
 def mark_done(action_id: str):
-    """Mark action as done."""
+    """Mark action as done.
+
+    Blocks complex types (AUTO_JUDGE_TYPES) from being quick-done.
+    These must go through the Review flow via [a] to stage or [s] to skip.
+    """
     if not validate_action_id(action_id):
         return jsonify({"error": "Invalid action ID format"}), 400
+
+    # Block complex types from quick-done (T028 Q5)
+    parts = action_id.split(ACTION_ID_SEP)
+    analysis_type = parts[1] if len(parts) == 2 else ""
+    if analysis_type in AUTO_JUDGE_TYPES:
+        return jsonify({"error": "Use [a] to stage or [s] to skip"}), 400
 
     state = load_action_state()
 
