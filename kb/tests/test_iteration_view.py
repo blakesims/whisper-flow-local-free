@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 class TestStageEndpoint:
     """Tests for POST /api/action/<id>/stage."""
 
-    def _setup(self, tmp_path, status="pending"):
+    def _setup(self, tmp_path, status="new"):
         """Create transcript and action state."""
         decimal_dir = tmp_path / "50.01.01"
         decimal_dir.mkdir(parents=True)
@@ -51,7 +51,7 @@ class TestStageEndpoint:
         (decimal_dir / "test-id.json").write_text(json.dumps(transcript))
 
         state = {"actions": {}}
-        if status != "pending":
+        if status != "new":
             state["actions"]["test-id--linkedin_v2"] = {
                 "status": status,
                 "copied_count": 0,
@@ -61,9 +61,9 @@ class TestStageEndpoint:
         state_file.write_text(json.dumps(state))
         return state_file
 
-    def test_stage_pending_item(self, tmp_path):
-        """Staging a pending item should succeed."""
-        state_file = self._setup(tmp_path, "pending")
+    def test_stage_new_item(self, tmp_path):
+        """Staging a new item should succeed."""
+        state_file = self._setup(tmp_path, "new")
 
         with patch("kb.serve.ACTION_STATE_PATH", state_file), \
              patch("kb.serve.KB_ROOT", tmp_path), \
@@ -83,9 +83,9 @@ class TestStageEndpoint:
         assert state["actions"]["test-id--linkedin_v2"]["status"] == "staged"
         assert "staged_at" in state["actions"]["test-id--linkedin_v2"]
 
-    def test_stage_draft_item(self, tmp_path):
-        """Staging a draft item should succeed."""
-        state_file = self._setup(tmp_path, "draft")
+    def test_stage_staged_item_succeeds(self, tmp_path):
+        """Staging an already-staged item should succeed (re-staging after iteration)."""
+        state_file = self._setup(tmp_path, "staged")
 
         with patch("kb.serve.ACTION_STATE_PATH", state_file), \
              patch("kb.serve.KB_ROOT", tmp_path), \
@@ -100,23 +100,9 @@ class TestStageEndpoint:
         state = json.loads(state_file.read_text())
         assert state["actions"]["test-id--linkedin_v2"]["status"] == "staged"
 
-    def test_stage_already_staged_fails(self, tmp_path):
-        """Staging an already-staged item should fail."""
-        state_file = self._setup(tmp_path, "staged")
-
-        with patch("kb.serve.ACTION_STATE_PATH", state_file), \
-             patch("kb.serve.KB_ROOT", tmp_path), \
-             patch("kb.serve.pyperclip.copy"):
-
-            from kb.serve import app
-            app.config["TESTING"] = True
-            with app.test_client() as client:
-                response = client.post("/api/action/test-id--linkedin_v2/stage")
-                assert response.status_code == 400
-
-    def test_stage_approved_item_fails(self, tmp_path):
-        """Staging an approved item should fail."""
-        state_file = self._setup(tmp_path, "approved")
+    def test_stage_done_item_fails(self, tmp_path):
+        """Staging a done item should fail."""
+        state_file = self._setup(tmp_path, "done")
 
         with patch("kb.serve.ACTION_STATE_PATH", state_file), \
              patch("kb.serve.KB_ROOT", tmp_path), \
@@ -130,7 +116,7 @@ class TestStageEndpoint:
 
     def test_stage_does_not_trigger_visual_pipeline(self, tmp_path):
         """Stage should NOT trigger visual pipeline."""
-        state_file = self._setup(tmp_path, "pending")
+        state_file = self._setup(tmp_path, "new")
 
         with patch("kb.serve.ACTION_STATE_PATH", state_file), \
              patch("kb.serve.KB_ROOT", tmp_path), \
@@ -176,7 +162,7 @@ class TestIterateEndpoint:
     """Tests for POST /api/action/<id>/iterate."""
 
     def _setup(self, tmp_path):
-        """Create transcript with versioned analysis."""
+        """Create transcript with versioned analysis and staged action state."""
         decimal_dir = tmp_path / "50.01.01"
         decimal_dir.mkdir(parents=True)
         transcript = {
@@ -208,7 +194,8 @@ class TestIterateEndpoint:
         transcript_path = decimal_dir / "test-id.json"
         transcript_path.write_text(json.dumps(transcript))
 
-        state = {"actions": {}}
+        # T028: iterate requires staged status
+        state = {"actions": {"test-id--linkedin_v2": {"status": "staged", "copied_count": 0, "created_at": "2026-02-08T09:00:00"}}}
         state_file = tmp_path / "action-state.json"
         state_file.write_text(json.dumps(state))
         return state_file, transcript_path
@@ -511,7 +498,8 @@ class TestPostingQueueV2:
         }
         (decimal_dir / "test-id.json").write_text(json.dumps(transcript))
 
-        state = {"actions": {}}
+        # T028: posting-queue-v2 only shows staged/ready items
+        state = {"actions": {"test-id--linkedin_v2": {"status": "staged", "copied_count": 0, "created_at": "2026-02-08T09:00:00"}}}
         state_file = tmp_path / "action-state.json"
         state_file.write_text(json.dumps(state))
         return state_file
@@ -564,11 +552,11 @@ class TestPostingQueueV2:
                 item = data["items"][0]
                 assert item["latest_score"] == 4.2
 
-    def test_excludes_approved_items(self, tmp_path):
-        """Approved items should not appear in the iteration queue."""
+    def test_excludes_new_items(self, tmp_path):
+        """New items should not appear in the Review queue (only staged/ready)."""
         state_file = self._setup(tmp_path)
         state = json.loads(state_file.read_text())
-        state["actions"]["test-id--linkedin_v2"] = {"status": "approved"}
+        state["actions"]["test-id--linkedin_v2"] = {"status": "new"}
         state_file.write_text(json.dumps(state))
 
         with patch("kb.serve.ACTION_STATE_PATH", state_file), \
@@ -581,11 +569,11 @@ class TestPostingQueueV2:
                 data = response.get_json()
                 assert data["total"] == 0
 
-    def test_includes_draft_items(self, tmp_path):
-        """Draft items should appear in the queue."""
+    def test_excludes_done_items(self, tmp_path):
+        """Done items should not appear in the Review queue."""
         state_file = self._setup(tmp_path)
         state = json.loads(state_file.read_text())
-        state["actions"]["test-id--linkedin_v2"] = {"status": "draft"}
+        state["actions"]["test-id--linkedin_v2"] = {"status": "done"}
         state_file.write_text(json.dumps(state))
 
         with patch("kb.serve.ACTION_STATE_PATH", state_file), \
@@ -596,7 +584,7 @@ class TestPostingQueueV2:
             with app.test_client() as client:
                 response = client.get("/api/posting-queue-v2")
                 data = response.get_json()
-                assert data["total"] == 1
+                assert data["total"] == 0
 
 
 # ===== Approve Handler Rewire =====

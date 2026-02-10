@@ -71,7 +71,7 @@ def _make_transcript(tmp_path, transcript_id="test-id", round_num=1, with_versio
     return transcript_path
 
 
-def _make_state(tmp_path, action_id="test-id--linkedin_v2", status="pending", **extra):
+def _make_state(tmp_path, action_id="test-id--linkedin_v2", status="new", **extra):
     """Create action state file."""
     state = {"actions": {}}
     if status is not None:
@@ -94,7 +94,7 @@ class TestStageCreatesEditVersion:
     def test_stage_creates_edit_version_n_0(self, tmp_path):
         """Staging should create linkedin_v2_N_0 in transcript JSON."""
         transcript_path = _make_transcript(tmp_path, round_num=1)
-        state_file = _make_state(tmp_path, status="pending")
+        state_file = _make_state(tmp_path, status="new")
 
         with patch("kb.serve.ACTION_STATE_PATH", state_file), \
              patch("kb.serve.KB_ROOT", tmp_path), \
@@ -135,7 +135,7 @@ class TestStageCreatesEditVersion:
         }
         transcript_path.write_text(json.dumps(transcript_data))
 
-        state_file = _make_state(tmp_path, status="draft")
+        state_file = _make_state(tmp_path, status="new")
 
         with patch("kb.serve.ACTION_STATE_PATH", state_file), \
              patch("kb.serve.KB_ROOT", tmp_path), \
@@ -154,7 +154,7 @@ class TestStageCreatesEditVersion:
     def test_stage_records_staged_round_in_state(self, tmp_path):
         """Action state should record staged_round and edit_count."""
         _make_transcript(tmp_path, round_num=2)
-        state_file = _make_state(tmp_path, status="pending")
+        state_file = _make_state(tmp_path, status="new")
 
         with patch("kb.serve.ACTION_STATE_PATH", state_file), \
              patch("kb.serve.KB_ROOT", tmp_path), \
@@ -274,7 +274,7 @@ class TestSaveEdit:
     def test_save_edit_requires_staged_status(self, tmp_path):
         """Save-edit should fail if item is not staged."""
         _make_transcript(tmp_path)
-        state_file = _make_state(tmp_path, status="pending")
+        state_file = _make_state(tmp_path, status="new")
 
         with patch("kb.serve.ACTION_STATE_PATH", state_file), \
              patch("kb.serve.KB_ROOT", tmp_path):
@@ -381,7 +381,7 @@ class TestGenerateVisuals:
     def test_generate_visuals_requires_staged(self, tmp_path):
         """Generate visuals should fail if item is not staged."""
         _make_transcript(tmp_path)
-        state_file = _make_state(tmp_path, status="pending")
+        state_file = _make_state(tmp_path, status="new")
 
         with patch("kb.serve.ACTION_STATE_PATH", state_file), \
              patch("kb.serve.KB_ROOT", tmp_path):
@@ -523,7 +523,7 @@ class TestStateTransitions:
     def test_staging_flow_end_to_end(self, tmp_path):
         """Full flow: stage -> edit -> generate -> ready -> publish."""
         transcript_path = _make_transcript(tmp_path, round_num=1)
-        state_file = _make_state(tmp_path, status="pending")
+        state_file = _make_state(tmp_path, status="new")
 
         with patch("kb.serve.ACTION_STATE_PATH", state_file), \
              patch("kb.serve.KB_ROOT", tmp_path), \
@@ -557,10 +557,10 @@ class TestStateTransitions:
 
                 mock_thread.start.assert_called_once()
 
-    def test_posted_requires_ready_or_approved(self, tmp_path):
-        """Mark-posted should only work for ready or approved items."""
+    def test_posted_requires_staged_or_ready(self, tmp_path):
+        """Mark-posted should only work for staged or ready items."""
         _make_transcript(tmp_path)
-        state_file = _make_state(tmp_path, status="staged")
+        state_file = _make_state(tmp_path, status="new")
 
         with patch("kb.serve.ACTION_STATE_PATH", state_file), \
              patch("kb.serve.KB_ROOT", tmp_path):
@@ -568,12 +568,12 @@ class TestStateTransitions:
             from kb.serve import app
             app.config["TESTING"] = True
             with app.test_client() as client:
-                # Staged items cannot be posted directly
+                # New items cannot be posted directly
                 response = client.post("/api/action/test-id--linkedin_v2/posted")
                 assert response.status_code == 400
 
     def test_posted_works_for_ready(self, tmp_path):
-        """Mark-posted should work for ready items."""
+        """Mark-posted should work for ready items, setting status to done."""
         _make_transcript(tmp_path)
         state_file = _make_state(tmp_path, status="ready")
 
@@ -587,7 +587,8 @@ class TestStateTransitions:
                 assert response.status_code == 200
 
                 state = json.loads(state_file.read_text())
-                assert state["actions"]["test-id--linkedin_v2"]["status"] == "posted"
+                assert state["actions"]["test-id--linkedin_v2"]["status"] == "done"
+                assert "posted_at" in state["actions"]["test-id--linkedin_v2"]
 
 
 # ===== Posting Queue V2 with Staging =====

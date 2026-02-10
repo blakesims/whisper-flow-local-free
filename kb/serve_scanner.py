@@ -215,7 +215,7 @@ def get_action_status(action_id: str, state: dict) -> dict:
     """Get status info for an action."""
     action_state = state["actions"].get(action_id, {})
     return {
-        "status": action_state.get("status", "pending"),
+        "status": action_state.get("status", "new"),
         "copied_count": action_state.get("copied_count", 0),
         "created_at": action_state.get("created_at", ""),
         "completed_at": action_state.get("completed_at", ""),

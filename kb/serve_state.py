@@ -6,8 +6,52 @@ import json
 import shutil
 import logging
 from pathlib import Path
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+
+def migrate_to_t028_statuses(path=None) -> int:
+    """Migrate action-state.json to T028 lifecycle statuses.
+
+    Idempotent: safe to run multiple times. Only modifies entries
+    with old status values.
+
+    Migrations:
+        pending  -> new
+        approved -> staged (preserves approved_at as staged_at)
+        draft    -> new
+        posted   -> done (preserves posted_at)
+        skipped  -> skip
+
+    Returns:
+        Number of items migrated.
+    """
+    state = load_action_state(path=path)
+    migrated = 0
+    for action_id, data in state.get("actions", {}).items():
+        status = data.get("status", "")
+        if status == "pending":
+            data["status"] = "new"
+            migrated += 1
+        elif status == "approved":
+            data["status"] = "staged"
+            data["staged_at"] = data.get("approved_at", datetime.now().isoformat())
+            migrated += 1
+        elif status == "draft":
+            data["status"] = "new"
+            migrated += 1
+        elif status == "posted":
+            data["status"] = "done"
+            # posted_at already preserved in the entry
+            migrated += 1
+        elif status == "skipped":
+            data["status"] = "skip"
+            migrated += 1
+    if migrated > 0:
+        save_action_state(state, path=path)
+        logger.info("T028 migration: migrated %d items to new statuses", migrated)
+    return migrated
 
 
 def load_action_state(path=None) -> dict:

@@ -1296,8 +1296,6 @@
                     statusHtml = '<span class="entity-status generating"><span class="spinner" style="width:8px;height:8px;border-width:1.5px;"></span> generating</span>';
                 } else if (item.status === 'staged') {
                     statusHtml = '<span class="entity-status staged">staged</span>';
-                } else if (item.status === 'draft') {
-                    statusHtml = '<span class="entity-status draft">draft</span>';
                 }
 
                 const roundsText = item.iteration_count > 0

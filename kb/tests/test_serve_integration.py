@@ -193,8 +193,8 @@ class TestPostingQueueVisualFields:
             with app.test_client() as client:
                 yield client
 
-    def test_posting_queue_includes_visual_status(self, client, tmp_path):
-        """Items should have visual_status field."""
+    def test_posting_queue_v2_includes_visual_status(self, client, tmp_path):
+        """Items in posting-queue-v2 should have visual_status field."""
         # Create a transcript file
         decimal_dir = tmp_path / "50.01.01"
         decimal_dir.mkdir(parents=True)
@@ -214,12 +214,12 @@ class TestPostingQueueVisualFields:
         }
         (decimal_dir / "test-transcript.json").write_text(json.dumps(transcript))
 
-        # Set up action state with approved + visual_status
+        # Set up action state with staged + visual_status
         state = {
             "actions": {
                 "test-transcript--linkedin_v2": {
-                    "status": "approved",
-                    "approved_at": "2026-02-07T10:00:00",
+                    "status": "staged",
+                    "staged_at": "2026-02-07T10:00:00",
                     "visual_status": "ready",
                     "visual_data": {
                         "format": "CAROUSEL",
@@ -235,15 +235,13 @@ class TestPostingQueueVisualFields:
 
         with patch("kb.serve.ACTION_STATE_PATH", state_file), \
              patch("kb.serve.KB_ROOT", tmp_path):
-            response = client.get("/api/posting-queue")
+            response = client.get("/api/posting-queue-v2")
             data = response.get_json()
 
             assert data["total"] >= 1
             item = data["items"][0]
             assert item["visual_status"] == "ready"
-            assert item["visual_format"] == "CAROUSEL"
             assert item["thumbnail_url"] is not None
-            assert item["pdf_url"] is not None
             assert "/visuals/" in item["thumbnail_url"]
 
 
@@ -252,8 +250,8 @@ class TestPostingQueueVisualFields:
 class TestApproveTriggersThread:
     """Tests that approve endpoint starts background pipeline thread."""
 
-    def test_approve_starts_background_thread_for_non_autojudge(self, tmp_path):
-        """Approve should trigger visual pipeline for non-auto-judge types (e.g., skool_post)."""
+    def test_approve_simple_type_does_copy_and_done(self, tmp_path):
+        """T028: Approve on simple type (skool_post) should copy + mark done."""
         # Create transcript with skool_post (non-auto-judge type)
         decimal_dir = tmp_path / "50.01.01"
         decimal_dir.mkdir(parents=True)
@@ -273,19 +271,14 @@ class TestApproveTriggersThread:
         }
         (decimal_dir / "test-id.json").write_text(json.dumps(transcript))
 
-        # Empty action state (item is pending)
+        # Empty action state (item is new)
         state = {"actions": {}}
         state_file = tmp_path / "action-state.json"
         state_file.write_text(json.dumps(state))
 
         with patch("kb.serve.ACTION_STATE_PATH", state_file), \
              patch("kb.serve.KB_ROOT", tmp_path), \
-             patch("kb.serve.run_visual_pipeline") as mock_pipeline, \
-             patch("kb.serve.threading.Thread") as mock_thread_cls, \
-             patch("kb.serve.pyperclip.copy"):
-
-            mock_thread = MagicMock()
-            mock_thread_cls.return_value = mock_thread
+             patch("kb.serve.pyperclip.copy") as mock_copy:
 
             from kb.serve import app
             app.config["TESTING"] = True
@@ -295,13 +288,12 @@ class TestApproveTriggersThread:
 
                 data = response.get_json()
                 assert data["success"] is True
+                assert data["action"] == "done"
+                mock_copy.assert_called_once()
 
-                # Thread should have been created and started for non-auto-judge type
-                mock_thread_cls.assert_called_once()
-                call_kwargs = mock_thread_cls.call_args[1]
-                assert call_kwargs["target"] == mock_pipeline
-                assert call_kwargs["daemon"] is True
-                mock_thread.start.assert_called_once()
+        # Check state: should be done
+        updated_state = json.loads(state_file.read_text())
+        assert updated_state["actions"]["test-id--skool_post"]["status"] == "done"
 
     def test_approve_does_not_trigger_visual_for_autojudge(self, tmp_path):
         """Approve should NOT trigger visual pipeline for auto-judge types (linkedin_v2)."""

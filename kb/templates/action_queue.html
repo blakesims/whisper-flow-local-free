@@ -813,7 +813,7 @@
         <div class="status-bar">
             <div class="status-section">
                 <span>[kb-serve]</span>
-                <span id="status-pending">0 pending</span>
+                <span id="status-pending">0 new</span>
                 <span id="status-processing">0 processing</span>
                 <span id="status-completed">0 completed today</span>
             </div>
@@ -1144,7 +1144,7 @@
                 header.className = 'section-header';
                 header.innerHTML = `
                     <div class="section-title">
-                        <span>📋 Ready for Action</span>
+                        <span>Ready for Triage</span>
                         <span class="section-count">${queueData.pending.length}</span>
                     </div>
                 `;
@@ -1363,7 +1363,7 @@
 
         // Update status bar
         function updateStatusBar() {
-            document.getElementById('status-pending').textContent = `${queueData.pending.length} pending`;
+            document.getElementById('status-pending').textContent = `${queueData.pending.length} new`;
             document.getElementById('status-processing').textContent = `${queueData.processing.length} processing`;
             document.getElementById('status-completed').textContent = `${queueData.completed.length} completed today`;
         }

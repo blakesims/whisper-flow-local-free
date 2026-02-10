@@ -62,25 +62,23 @@ from kb.serve_state import (
     save_action_state,
     load_prompt_feedback,
     save_prompt_feedback,
+    migrate_to_t028_statuses,
 )
 
 
 def migrate_approved_to_draft() -> int:
-    """Reset existing approved items to draft state.
+    """Legacy T023 migration — superseded by T028 migrate_to_t028_statuses().
 
-    One-time migration for T023: all previously approved items are reset
-    to 'draft' so they go through the new iteration workflow. The approval
-    timestamp is preserved in '_previously_approved_at'.
-
-    Returns:
-        Number of items migrated.
+    Kept for CLI backward compatibility (kb migrate --reset-approved).
+    References old status values "approved" -> "draft" intentionally.
     """
     state = load_action_state()
     count = 0
     for action_id, action_data in state.get("actions", {}).items():
-        if action_data.get("status") == "approved":
+        # Legacy: "approved" and "draft" are old T023 statuses
+        if action_data.get("status") == "approved":  # noqa: old status
             action_data["_previously_approved_at"] = action_data.get("completed_at", "")
-            action_data["status"] = "draft"
+            action_data["status"] = "draft"  # noqa: old status
             action_data.pop("completed_at", None)
             count += 1
     if count > 0:
@@ -114,12 +112,12 @@ def posting_queue():
 
 @app.route('/api/queue')
 def get_queue():
-    """List pending/completed actions."""
+    """List new/completed actions for queue triage."""
     state = load_action_state()
     items = scan_actionable_items()
 
     # Enrich items with state
-    pending = []
+    new_items = []
     completed = []
 
     for item in items:
@@ -128,12 +126,12 @@ def get_queue():
         item["copied_count"] = item_state["copied_count"]
         item["relative_time"] = format_relative_time(item["analyzed_at"])
 
-        if item_state["status"] == "pending":
-            pending.append(item)
-        elif item_state["status"] == "approved":
-            # Approved items go to posting queue, not main queue
+        if item_state["status"] == "new":
+            new_items.append(item)
+        elif item_state["status"] in ("staged", "ready"):
+            # Staged/ready items go to Review, not main queue
             pass
-        elif item_state["status"] in ("done", "skipped", "posted"):
+        elif item_state["status"] in ("done", "skip"):
             item["completed_at"] = item_state.get("completed_at") or item_state.get("posted_at", "")
 
             # Only show items completed today
@@ -145,12 +143,13 @@ def get_queue():
                 except ValueError:
                     pass
 
-    # Sort pending by analyzed_at (newest first)
-    pending.sort(key=lambda x: x.get("analyzed_at", ""), reverse=True)
+    # Sort new items by analyzed_at (newest first)
+    new_items.sort(key=lambda x: x.get("analyzed_at", ""), reverse=True)
     completed.sort(key=lambda x: x.get("completed_at", ""), reverse=True)
 
+    # Keep JSON key as "pending" for API contract compatibility (plan-review m1)
     return jsonify({
-        "pending": pending,
+        "pending": new_items,
         "completed": completed,
         "processing": [],  # TODO: Phase 2 - real-time analysis tracking
     })
@@ -199,7 +198,7 @@ def copy_action(action_id: str):
                 state = load_action_state()
                 if action_id not in state["actions"]:
                     state["actions"][action_id] = {
-                        "status": "pending",
+                        "status": "new",
                         "copied_count": 0,
                         "created_at": datetime.now().isoformat(),
                     }
@@ -250,12 +249,12 @@ def skip_action(action_id: str):
 
     if action_id not in state["actions"]:
         state["actions"][action_id] = {
-            "status": "skipped",
+            "status": "skip",
             "copied_count": 0,
             "created_at": datetime.now().isoformat(),
         }
     else:
-        state["actions"][action_id]["status"] = "skipped"
+        state["actions"][action_id]["status"] = "skip"
 
     state["actions"][action_id]["completed_at"] = datetime.now().isoformat()
     save_action_state(state)
@@ -265,70 +264,14 @@ def skip_action(action_id: str):
 
 @app.route('/api/posting-queue')
 def get_posting_queue():
-    """Get approved items for posting queue.
+    """Deprecated: use /api/posting-queue-v2 instead.
 
-    Returns only approved items filtered to actionable types (linkedin_post, skool_post).
-    Includes runway count by platform.
+    Returns empty result. No items will match old 'approved' filter after T028 migration.
     """
-    state = load_action_state()
-    items = scan_actionable_items()
-
-    # Filter to approved items only
-    approved_items = []
-    runway_counts = {}
-
-    for item in items:
-        item_state = state["actions"].get(item["id"], {})
-        status = item_state.get("status", "pending")
-
-        if status == "approved":
-            # Add state info to item
-            item["status"] = "approved"
-            item["approved_at"] = item_state.get("approved_at", "")
-            item["relative_time"] = format_relative_time(item["analyzed_at"])
-
-            # Add visual status info
-            item["visual_status"] = item_state.get("visual_status", "pending")
-            visual_data = item_state.get("visual_data", {})
-            item["visual_format"] = visual_data.get("format", "")
-
-            # Build thumbnail URL if available
-            thumbnail_paths = visual_data.get("thumbnail_paths", [])
-            if thumbnail_paths and len(thumbnail_paths) > 0:
-                # Convert absolute path to relative URL via /visuals/ route
-                first_thumb = thumbnail_paths[0]
-                try:
-                    rel_path = str(Path(first_thumb).relative_to(KB_ROOT))
-                    item["thumbnail_url"] = f"/visuals/{rel_path}"
-                except ValueError:
-                    item["thumbnail_url"] = None
-            else:
-                item["thumbnail_url"] = None
-
-            # Build PDF URL if available
-            pdf_path = visual_data.get("pdf_path", "")
-            if pdf_path:
-                try:
-                    rel_path = str(Path(pdf_path).relative_to(KB_ROOT))
-                    item["pdf_url"] = f"/visuals/{rel_path}"
-                except ValueError:
-                    item["pdf_url"] = None
-            else:
-                item["pdf_url"] = None
-
-            approved_items.append(item)
-
-            # Count by destination/platform
-            dest = item["destination"]
-            runway_counts[dest] = runway_counts.get(dest, 0) + 1
-
-    # Sort by approved_at (newest first)
-    approved_items.sort(key=lambda x: x.get("approved_at", ""), reverse=True)
-
     return jsonify({
-        "items": approved_items,
-        "runway_counts": runway_counts,
-        "total": len(approved_items),
+        "items": [],
+        "runway_counts": {},
+        "total": 0,
     })
 
 
@@ -354,75 +297,113 @@ def serve_visual(filepath: str):
 
 @app.route('/api/action/<action_id>/approve', methods=['POST'])
 def approve_action(action_id: str):
-    """Mark action as approved for posting queue.
+    """Approve action from Queue view (type-aware).
 
-    Sets status to 'approved' and records approved_at timestamp.
-    Also copies content to clipboard (auto-copy on approve).
-    Requires item to be in 'pending' status (or no status yet).
+    For AUTO_JUDGE_TYPES (complex): set status to 'staged', create initial edit version.
+    For simple types: copy to clipboard, set status to 'done'.
+    Requires item to be in 'new' status (or no status yet).
     """
     if not validate_action_id(action_id):
         return jsonify({"error": "Invalid action ID format"}), 400
 
-    # Get item content for clipboard copy
+    # Get item content and metadata
     items = scan_actionable_items()
     item_content = None
+    transcript_path = None
     for item in items:
         if item["id"] == action_id:
             item_content = item["content"]
+            transcript_path = item.get("transcript_path")
             break
 
     if item_content is None:
         return jsonify({"error": "Action not found"}), 404
 
-    # Update state
-    state = load_action_state()
-
-    # Validate state transition: must be pending (or not set) before approving
-    current_status = state["actions"].get(action_id, {}).get("status", "pending")
-    if current_status != "pending":
-        return jsonify({"error": f"Cannot approve item with status '{current_status}'. Item must be pending."}), 400
-
-    if action_id not in state["actions"]:
-        state["actions"][action_id] = {
-            "status": "approved",
-            "copied_count": 0,
-            "created_at": datetime.now().isoformat(),
-        }
-    else:
-        state["actions"][action_id]["status"] = "approved"
-
-    state["actions"][action_id]["approved_at"] = datetime.now().isoformat()
-    save_action_state(state)
-
-    # Auto-copy to clipboard
-    try:
-        pyperclip.copy(item_content)
-        copied = True
-    except Exception:
-        copied = False
-
-    # Trigger visual pipeline in background thread — but NOT for auto-judge types
-    # (linkedin_v2 items go through the iteration workflow: iterate -> stage -> generate visuals)
+    # Determine analysis type
     parts = action_id.split(ACTION_ID_SEP)
     analysis_type = parts[1] if len(parts) == 2 else ""
 
-    if analysis_type not in AUTO_JUDGE_TYPES:
-        transcript_path = None
-        for item in items:
-            if item["id"] == action_id:
-                transcript_path = item.get("transcript_path")
-                break
+    # Update state
+    state = load_action_state()
 
+    # Validate state transition: must be new (or not set) before approving
+    current_status = state["actions"].get(action_id, {}).get("status", "new")
+    if current_status != "new":
+        return jsonify({"error": f"Cannot approve item with status '{current_status}'. Item must be new."}), 400
+
+    if analysis_type in AUTO_JUDGE_TYPES:
+        # Complex type: stage for Review
+        if action_id not in state["actions"]:
+            state["actions"][action_id] = {
+                "status": "staged",
+                "copied_count": 0,
+                "created_at": datetime.now().isoformat(),
+            }
+        else:
+            state["actions"][action_id]["status"] = "staged"
+
+        state["actions"][action_id]["staged_at"] = datetime.now().isoformat()
+
+        # Create initial edit version (absorb from stage_action logic)
+        edit_round = 0
+        edit_number = 0
         if transcript_path:
-            thread = threading.Thread(
-                target=run_visual_pipeline,
-                args=(action_id, transcript_path),
-                daemon=True,
-            )
-            thread.start()
-            logger.info("[KB Serve] Visual pipeline started for %s", action_id)
+            try:
+                with open(transcript_path) as f:
+                    transcript_data = json.load(f)
 
-    return jsonify({"success": True, "copied": copied})
+                alias = transcript_data.get("analysis", {}).get(analysis_type, {})
+                current_round = alias.get("_round", 0)
+                edit_round = current_round
+
+                # Create _N_0 edit version (the raw LLM output snapshot)
+                edit_key = f"{analysis_type}_{current_round}_0"
+                if edit_key not in transcript_data.get("analysis", {}):
+                    transcript_data["analysis"][edit_key] = {
+                        "post": alias.get("post", ""),
+                        "_edited_at": datetime.now().isoformat(),
+                        "_source": f"{analysis_type}_{current_round}",
+                    }
+                    alias["_edit"] = 0
+                    with open(transcript_path, 'w') as f:
+                        json.dump(transcript_data, f, indent=2, ensure_ascii=False)
+            except (json.JSONDecodeError, IOError, KeyError) as e:
+                logger.warning("[KB Serve] Failed to create edit version on approve: %s", e)
+
+        state["actions"][action_id]["staged_round"] = edit_round
+        state["actions"][action_id]["edit_count"] = edit_number
+        save_action_state(state)
+
+        # Auto-copy to clipboard
+        try:
+            pyperclip.copy(item_content)
+            copied = True
+        except Exception:
+            copied = False
+
+        return jsonify({"success": True, "copied": copied, "action": "staged"})
+    else:
+        # Simple type: copy + done
+        if action_id not in state["actions"]:
+            state["actions"][action_id] = {
+                "status": "done",
+                "copied_count": 0,
+                "created_at": datetime.now().isoformat(),
+            }
+        else:
+            state["actions"][action_id]["status"] = "done"
+
+        state["actions"][action_id]["completed_at"] = datetime.now().isoformat()
+        save_action_state(state)
+
+        # Auto-copy to clipboard
+        try:
+            pyperclip.copy(item_content)
+            copied = True
+        except Exception:
+            copied = False
+
+        return jsonify({"success": True, "copied": copied, "action": "done"})
 
 
 @app.route('/api/action/<action_id>/stage', methods=['POST'])
@@ -430,8 +411,8 @@ def stage_action(action_id: str):
     """Stage an iteration for the curation workflow.
 
     Sets status to 'staged'. Does NOT trigger visual pipeline.
-    Used by 'a' shortcut in iteration view for linkedin_v2 items.
-    Requires item to be in 'pending' or 'draft' status.
+    Used by 'a' shortcut in Review view for re-staging after iteration.
+    Accepts items in 'new' or 'staged' status (staged for re-staging after iteration).
 
     Also creates the initial edit version (linkedin_v2_N_0) in the transcript JSON,
     where N is the current round number of the staged iteration.
@@ -455,10 +436,10 @@ def stage_action(action_id: str):
     # Update state
     state = load_action_state()
 
-    # Validate state transition: must be pending or draft
-    current_status = state["actions"].get(action_id, {}).get("status", "pending")
-    if current_status not in ("pending", "draft"):
-        return jsonify({"error": f"Cannot stage item with status '{current_status}'. Item must be pending or draft."}), 400
+    # Validate state transition: accept new (from queue) or staged (re-staging after iteration in Review)
+    current_status = state["actions"].get(action_id, {}).get("status", "new")
+    if current_status not in ("new", "staged"):
+        return jsonify({"error": f"Cannot stage item with status '{current_status}'. Item must be new or staged."}), 400
 
     if action_id not in state["actions"]:
         state["actions"][action_id] = {
@@ -536,7 +517,7 @@ def save_edit(action_id: str):
 
     # Must be staged to save edits
     state = load_action_state()
-    current_status = state["actions"].get(action_id, {}).get("status", "pending")
+    current_status = state["actions"].get(action_id, {}).get("status", "new")
     if current_status not in ("staged", "ready"):
         return jsonify({"error": f"Cannot edit item with status '{current_status}'. Item must be staged or ready."}), 400
 
@@ -619,7 +600,7 @@ def generate_visuals(action_id: str):
 
     # Must be staged to generate visuals
     state = load_action_state()
-    current_status = state["actions"].get(action_id, {}).get("status", "pending")
+    current_status = state["actions"].get(action_id, {}).get("status", "new")
     if current_status != "staged":
         return jsonify({"error": f"Cannot generate visuals for item with status '{current_status}'. Item must be staged."}), 400
 
@@ -758,7 +739,7 @@ def save_slides(action_id: str):
 
     # Must be staged or ready to save slide edits
     state = load_action_state()
-    current_status = state["actions"].get(action_id, {}).get("status", "pending")
+    current_status = state["actions"].get(action_id, {}).get("status", "new")
     if current_status not in ("staged", "ready"):
         return jsonify({"error": f"Cannot edit slides with status '{current_status}'. Item must be staged or ready."}), 400
 
@@ -891,7 +872,7 @@ def render_action(action_id: str):
 
     # Must be staged or ready
     state = load_action_state()
-    current_status = state["actions"].get(action_id, {}).get("status", "pending")
+    current_status = state["actions"].get(action_id, {}).get("status", "new")
     if current_status not in ("staged", "ready"):
         return jsonify({"error": f"Cannot render for item with status '{current_status}'. Item must be staged or ready."}), 400
 
@@ -1070,14 +1051,12 @@ def iterate_action(action_id: str):
     if not transcript_path:
         return jsonify({"error": "Transcript file not found"}), 404
 
-    # Update state to show iterating
+    # Validate status: must be staged before iterating (T028 Q3)
     state = load_action_state()
-    if action_id not in state["actions"]:
-        state["actions"][action_id] = {
-            "status": "pending",
-            "copied_count": 0,
-            "created_at": datetime.now().isoformat(),
-        }
+    current_status = state["actions"].get(action_id, {}).get("status", "new")
+    if current_status != "staged":
+        return jsonify({"error": "Item must be staged before iterating"}), 400
+
     state["actions"][action_id]["iterating"] = True
     save_action_state(state)
 
@@ -1219,11 +1198,11 @@ def get_iterations(action_id: str):
 
 @app.route('/api/posting-queue-v2')
 def get_posting_queue_v2():
-    """Get items for the iteration view posting queue.
+    """Get items for the iteration/Review view.
 
     Returns items grouped as entities (not individual iterations).
     Includes iteration counts and latest scores for each entity.
-    Draft, pending, staged, and ready items for linkedin_v2 types.
+    Only staged and ready items (T028 lifecycle).
     """
     state = load_action_state()
     items = scan_actionable_items()
@@ -1232,10 +1211,10 @@ def get_posting_queue_v2():
 
     for item in items:
         item_state = state["actions"].get(item["id"], {})
-        status = item_state.get("status", "pending")
+        status = item_state.get("status", "new")
 
-        # Include pending, draft, staged, and ready items
-        if status in ("pending", "draft", "staged", "ready"):
+        # Include only staged and ready items (T028)
+        if status in ("staged", "ready"):
             # Load iteration data for auto-judge types
             parts = item["id"].split(ACTION_ID_SEP)
             analysis_type = parts[1] if len(parts) == 2 else ""
@@ -1293,11 +1272,11 @@ def get_posting_queue_v2():
 
             entities.append(item)
 
-    # Sort: iterating first, then staged/ready before draft, then by latest_score descending
-    status_priority = {"ready": 0, "staged": 1, "pending": 2, "draft": 3}
+    # Sort: iterating first, then ready before staged, then by latest_score descending
+    status_priority = {"ready": 0, "staged": 1}
     entities.sort(key=lambda x: (
         not x.get("iterating", False),
-        status_priority.get(x.get("status", "pending"), 9),
+        status_priority.get(x.get("status", "new"), 9),
         -(x.get("latest_score") or 0),
         x.get("analyzed_at", ""),
     ), reverse=False)
@@ -1310,23 +1289,24 @@ def get_posting_queue_v2():
 
 @app.route('/api/action/<action_id>/posted', methods=['POST'])
 def mark_posted(action_id: str):
-    """Mark action as posted.
+    """Mark action as done (published).
 
-    Sets status to 'posted' and records posted_at timestamp.
-    Requires item to be in 'approved' or 'ready' status first.
+    Sets status to 'done' and records posted_at timestamp.
+    Requires item to be in 'staged' or 'ready' status first.
     """
     if not validate_action_id(action_id):
         return jsonify({"error": "Invalid action ID format"}), 400
 
     state = load_action_state()
 
-    # Validate state transition: must be approved or ready before posting
+    # Validate state transition: must be staged or ready before publishing
     current_status = state["actions"].get(action_id, {}).get("status", "")
-    if current_status not in ("approved", "ready"):
-        return jsonify({"error": "Item must be approved or ready before marking as posted"}), 400
+    if current_status not in ("staged", "ready"):
+        return jsonify({"error": "Item must be staged or ready before publishing"}), 400
 
-    state["actions"][action_id]["status"] = "posted"
+    state["actions"][action_id]["status"] = "done"
     state["actions"][action_id]["posted_at"] = datetime.now().isoformat()
+    state["actions"][action_id]["completed_at"] = datetime.now().isoformat()
     save_action_state(state)
 
     return jsonify({"success": True})
@@ -1363,16 +1343,16 @@ def flag_action(action_id: str):
     })
     save_prompt_feedback(feedback)
 
-    # Also mark action as skipped (reuse skip logic)
+    # Also mark action as skip (reuse skip logic)
     state = load_action_state()
     if action_id not in state["actions"]:
         state["actions"][action_id] = {
-            "status": "skipped",
+            "status": "skip",
             "copied_count": 0,
             "created_at": datetime.now().isoformat(),
         }
     else:
-        state["actions"][action_id]["status"] = "skipped"
+        state["actions"][action_id]["status"] = "skip"
 
     state["actions"][action_id]["completed_at"] = datetime.now().isoformat()
     state["actions"][action_id]["flagged"] = True  # Mark as flagged for reference
@@ -2121,6 +2101,11 @@ def main():
     print(f"[KB Serve] Action State: {ACTION_STATE_PATH}")
     print(f"[KB Serve] Video Inventory: {INVENTORY_PATH}")
     print(f"[KB Serve] Press Ctrl+C to stop")
+
+    # T028: Migrate old status values to new lifecycle statuses
+    migrated = migrate_to_t028_statuses()
+    if migrated > 0:
+        print(f"[KB Serve] T028 migration: {migrated} items migrated to new statuses")
 
     # Auto-scan videos if inventory is stale (>1hr)
     check_and_auto_scan()
