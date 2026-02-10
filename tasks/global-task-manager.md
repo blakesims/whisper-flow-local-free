@@ -5,15 +5,18 @@
 | ID   | Task Name | Priority (1-5) | Phases (Done/Total) | Status | Dependencies | Rules Required | Link to `main.md` |
 | :--- | :---- | :---- | :--- | :---- | :--- | :---- | :---- |
 | T014 | Cap AI Markers for Intra-Segment Editing | 3 | 0/4 | PLANNING | T013 | - | [main.md](planning/T014-cap-ai-markers/main.md) |
-| T026 | Carousel Output Quality — Close Gap to Mockups | 1 | 7/8 | ACTIVE | T024 | - | [main.md](active/T026-carousel-quality/main.md) |
+| T026 | Carousel Output Quality — Close Gap to Mockups | 1 | 8/8 | ACTIVE | T024 | - | [main.md](active/T026-carousel-quality/main.md) |
 | T027 | Diagram Renderer — Replace Mermaid with JSON→SVG | 3 | 0/? | PLANNING | T026 | - | [main.md](planning/T027-diagram-renderer/main.md) |
-| T028 | Content Lifecycle — Queue/Review State Machine | 2 | 0/? | PLANNING | T026#P8 | - | [main.md](planning/T028-content-lifecycle/main.md) |
+| T029 | Review UX Polish — Bugs + Vim Nav + Manual Feedback | 2 | 0/5 | ACTIVE | T028 | - | [main.md](active/T029-review-ux-polish/main.md) |
 
 ## Notes
 - Priority: 1=Highest, 5=Lowest
 - For dependencies, use format: `T00X` or `T00X#PY` for phase-specific dependencies
 - Status values: PLANNING, ACTIVE, ONGOING, BLOCKED, PAUSED
 - For ongoing tasks without distinct phases, use "Ongoing" in the "Phases" column
+
+## Recently Completed (2026-02-10)
+- T028: Content Lifecycle — Queue/Review State Machine - 4 phases: migration+filters, type-aware approve+done blocking, review UX, tests ([main.md](planning/T028-content-lifecycle/main.md))
 
 ## Recently Completed (2026-02-08)
 - T024: Carousel Template Redesign - 5 phases: mockups, template conversion, content slides + markdown, mermaid SVG, polish ([main.md](active/T024-carousel-template-redesign/main.md))
