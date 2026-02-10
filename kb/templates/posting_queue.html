@@ -1049,11 +1049,12 @@
             </div>
             <div class="shortcut-bar" id="shortcut-bar">
                 <span class="shortcut"><span class="key-hint">j/k</span> entities</span>
-                <span class="shortcut"><span class="key-hint">Up/Dn</span> rounds</span>
+                <span class="shortcut"><span class="key-hint">h/l</span> rounds</span>
+                <span class="shortcut"><span class="key-hint">gg/G</span> first/last</span>
                 <span class="shortcut"><span class="key-hint">i</span> iterate</span>
                 <span class="shortcut"><span class="key-hint">a</span> stage</span>
                 <span class="shortcut"><span class="key-hint">c</span> copy</span>
-                <span class="shortcut"><span class="key-hint">g</span> generate</span>
+                <span class="shortcut"><span class="key-hint">v</span> visuals</span>
                 <span class="shortcut"><span class="key-hint">s</span> save</span>
             </div>
         </div>
@@ -1108,6 +1109,8 @@
         let slidesData = null;      // from /api/action/<id>/slides
         let selectedTemplate = null; // selected template name
         let slidesModified = false;  // track if slides have been edited
+        let pendingG = false;           // T029: gg double-key state
+        let pendingGTimeout = null;     // T029: gg timeout handle
 
         // XSS protection helper
         function escapeHtml(text) {
@@ -1595,7 +1598,7 @@
                         <span class="round-nav-label">Round:</span>
                         <div class="round-tabs">${roundTabsHtml}</div>
                         ${scoreProgressionHtml}
-                        <span class="round-nav-hint"><span class="key-hint">Up</span>/<span class="key-hint">Dn</span></span>
+                        <span class="round-nav-hint"><span class="key-hint">h</span>/<span class="key-hint">l</span></span>
                     </div>
 
                     ${scoresHtml}
@@ -2430,9 +2433,9 @@
 
         // Keyboard navigation
         document.addEventListener('keydown', function(e) {
-            // Skip shortcuts when typing in textarea (except Escape and Ctrl+S)
-            const isInTextarea = document.activeElement && document.activeElement.tagName === 'TEXTAREA';
-            if (isInTextarea) {
+            // Skip shortcuts when typing in input/textarea (except Escape and Ctrl+S)
+            const isInTextInput = document.activeElement && (document.activeElement.tagName === 'TEXTAREA' || document.activeElement.tagName === 'INPUT');
+            if (isInTextInput) {
                 // Ctrl+S / Cmd+S to save from textarea
                 if ((e.ctrlKey || e.metaKey) && e.key === 's') {
                     e.preventDefault();
@@ -2458,6 +2461,11 @@
                 return;
             }
             if (e.key === 'v') {
+                // In staging mode, 'v' means generate visuals (not navigate to videos)
+                if (isStagingMode()) {
+                    generateVisuals();
+                    return;
+                }
                 window.location.href = '/videos';
                 return;
             }
@@ -2474,22 +2482,56 @@
             const filteredItems = getFilteredItems();
             if (filteredItems.length === 0) return;
 
+            // gg/G: vim jump-to-first / jump-to-last (ported from calendar app)
+            if (e.key === 'g' && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+                if (pendingG) {
+                    // gg — jump to first entity
+                    e.preventDefault();
+                    pendingG = false;
+                    clearTimeout(pendingGTimeout);
+                    pendingGTimeout = null;
+                    selectEntity(0);
+                } else {
+                    // Start waiting for second g
+                    pendingG = true;
+                    pendingGTimeout = setTimeout(function() {
+                        pendingG = false;
+                        pendingGTimeout = null;
+                    }, 500);
+                }
+                return;
+            }
+            if (e.key === 'G') {
+                // G (shift+g) — jump to last entity
+                e.preventDefault();
+                pendingG = false;
+                if (pendingGTimeout) { clearTimeout(pendingGTimeout); pendingGTimeout = null; }
+                selectEntity(filteredItems.length - 1);
+                return;
+            }
+
+            // Clear pending g on any other key
+            if (pendingG) {
+                pendingG = false;
+                if (pendingGTimeout) { clearTimeout(pendingGTimeout); pendingGTimeout = null; }
+            }
+
             if (e.key === 'j') {
                 // Move down through entities (filtered)
                 selectEntity(Math.min(selectedEntityIndex + 1, filteredItems.length - 1));
             } else if (e.key === 'k') {
                 // Move up through entities (filtered)
                 selectEntity(Math.max(selectedEntityIndex - 1, 0));
-            } else if (e.key === 'ArrowDown') {
-                // Move to next round within entity
+            } else if (e.key === 'l' || e.key === 'ArrowDown') {
+                // l / ArrowDown: next round (forward in time)
                 e.preventDefault();
                 if (iterationsData && selectedRoundIndex < iterationsData.iterations.length - 1) {
                     selectedRoundIndex++;
                     if (selectedEntity) entityRoundIndex[selectedEntity.id] = selectedRoundIndex;
                     renderIterationView();
                 }
-            } else if (e.key === 'ArrowUp') {
-                // Move to previous round within entity
+            } else if (e.key === 'h' || e.key === 'ArrowUp') {
+                // h / ArrowUp: prev round (back in time)
                 e.preventDefault();
                 if (iterationsData && selectedRoundIndex > 0) {
                     selectedRoundIndex--;
@@ -2505,11 +2547,6 @@
             } else if (e.key === 'c') {
                 // Copy
                 copyContent();
-            } else if (e.key === 'g') {
-                // Generate visuals (staging mode only)
-                if (isStagingMode()) {
-                    generateVisuals();
-                }
             } else if (e.key === 's') {
                 // Save edit (staging mode only)
                 if (isStagingMode()) {
