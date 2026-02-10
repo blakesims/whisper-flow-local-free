@@ -1,7 +1,7 @@
 # T029: Review UX Polish — Bugs + Vim Nav + Manual Feedback
 
 ## Meta
-- **Status:** CODE_REVIEW
+- **Status:** COMPLETE
 - **Created:** 2026-02-10
 - **Priority:** 2
 - **Depends on:** T028
@@ -229,3 +229,26 @@ Blake's design preference: Study the vim motion patterns from his calendar/plann
 - [x] AC2: Escape from textarea returns focus to main navigation — uses existing isInTextInput guard
 - [x] AC3: Feedback persists in action state — POST saves to state["actions"][action_id]["user_feedback"], GET retrieves it
 - [x] AC4: Feedback passed to judge loop — iterate_action reads user_feedback, passes as kwarg to run_with_judge_loop, injected into improvement prompt
+
+---
+
+## Code Review Log
+
+### Phases 1-4 (Combined Review)
+- **Gate:** PASS
+- **Reviewed:** 2026-02-10
+- **Issues:** 0 critical, 2 major, 4 minor
+- **Summary:** All ACs verified. Clean refactoring, real tests (11 new, 0 regressions), correct vim keybindings. Two major UX issues: stale feedback text bleeds between entities (fetchUserFeedback only sets value when truthy, never clears), and user_feedback persists permanently across iterations (re-sent to LLM even after addressed). Neither blocks core functionality.
+
+-> Details: `code-review.md`
+
+### Code Review Fixes (commit `52af579`)
+- Fixed stale feedback bleed: textarea always set to value (including empty), notes section collapses when entity has no feedback
+- Fixed feedback persistence: user_feedback cleared from action state after iteration starts, preventing re-send on subsequent iterations
+
+---
+
+## Completion
+- **Completed:** 2026-02-10
+- **Summary:** All 5 bugs/UX issues resolved. Round state persists across entity switches. Judge scores always visible. No more 400s for non-iterable types. Vim keybindings (h/l, gg/G) ported from calendar app. Manual feedback flows end-to-end from textarea through judge loop. 11 new tests, 0 regressions.
+- **Commits:** `9268d3e`, `5085202`, `f6cb404`, `e012320`, `d8a648c`, `52af579`
