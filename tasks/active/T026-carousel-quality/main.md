@@ -4,7 +4,7 @@
 
 Fix carousel output quality to match mockups in `kb/carousel_templates/mockups/`. Root cause was weak LLM prompt + schema design, not template/CSS issues.
 
-**Status:** CODE_REVIEW
+**Status:** EXECUTING_PHASE_4
 
 ## Priority: 1
 
@@ -178,6 +178,14 @@ Test across multiple transcripts, compare to mockups, update other templates.
 - **Summary:** Solid implementation. Serialization layer, backend save-slides overhaul, and canGenerate/canReRender split all correct. 54 tests passing, zero regressions. Minor issues: unescaped CSS class (pre-existing), empty bullets edge case, double-period in format conversion.
 
 -> Details: `code-review-phase-7.md`
+
+### Phase 8
+- **Gate:** PASS
+- **Reviewed:** 2026-02-10
+- **Issues:** 0 critical, 0 major, 4 minor
+- **Summary:** Solid implementation across all three sub-phases. Strengths API fix correct (both versioned + backward-compat paths), score progression text-only as decided, decimal filter thorough with all 7 callsites updated, analysis picker keyboard-driven with comprehensive validation. 19 new tests passing, zero regressions. Minor issues: force mode not passed to auto-judge types, polling has no timeout, force hint missing from picker UI, score progression uses array index instead of entry.round.
+
+-> Details: `code-review-phase-8.md`
 
 ---
 

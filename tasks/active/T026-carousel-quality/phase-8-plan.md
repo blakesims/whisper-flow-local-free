@@ -15,6 +15,14 @@ Surface all judge feedback data in the iteration view (improvements, strengths, 
   - New analysis type creation from UI
   - Real-time streaming of analysis output
 
+### UX Principles (from Blake, 2026-02-10)
+- **No buttons — keyboard only.** All actions triggered via keybinds.
+- **Queue = inbox triage.** Items start here. Quick decisions: approve (a), done (d), skip (s), copy (c).
+- **Review = refinement.** Only items explicitly approved from Queue appear here. This is where iterate, edit slides, generate visuals happen.
+- **"Publish" = manual for now** (copy and post). Future: auto-publish via API.
+- **Visuals are optional.** linkedin_v2 defaults to generating visuals, but user can choose text-only.
+- **linkedin_post v1 is retired.** Only linkedin_v2 going forward. Existing v1 analyses can be regenerated as v2.
+
 ---
 
 ## Sub-Phase 8A: Render Judge Feedback in Iteration View
@@ -47,18 +55,24 @@ The `/api/action/<id>/iterations` endpoint does NOT include `strengths` in its r
     3. **Rewritten hook**: If `current.scores.rewritten_hook` is non-null, show in a highlighted box with the suggested replacement hook
   - Insert `${feedbackHtml}` into the pane innerHTML between `${scoresHtml}` and the `.post-section` div
 
-- [ ] **Task 8A.4: Add score progression mini-chart**
+- [ ] **Task 8A.4: Add text-only score progression**
   - File: `/home/blake/repos/personal/whisper-transcribe-ui/kb/templates/posting_queue.html`
   - Use the top-level `iterationsData.score_history` array (already returned by the API)
-  - Render a simple ASCII/CSS bar chart or inline sparkline showing overall score per round
+  - Render as plain text showing overall score per round, e.g. "Round 1: 3.2 → Round 2: 3.8 → Round 3: 4.1"
   - Place above or beside the round navigator (`.round-nav`)
-  - Keep it minimal: colored dots or bars showing the score at each round, using existing color scheme (red < 3, yellow 3-3.9, green >= 4)
+  - Use existing color scheme for each score value (red < 3, yellow 3-3.9, green >= 4) via inline `<span>` color
+
+- [ ] **Task 8A.5: Add tests for 8A changes**
+  - File: `/home/blake/repos/personal/whisper-transcribe-ui/kb/tests/test_serve_integration.py` (or new test file)
+  - Test that `GET /api/action/<id>/iterations` response includes `strengths` array
+  - Test that rounds with no judge data don't crash the frontend rendering logic
+  - Test the score_history data structure is present and correctly ordered
 
 ### Acceptance Criteria
 
 - [ ] AC-8A.1: Viewing an entity with judge data shows improvements (criterion + issue + suggestion) below the scores grid
 - [ ] AC-8A.2: Strengths are displayed as a list for each round that has judge data
-- [ ] AC-8A.3: Rewritten hook appears when the judge provided one (hook_strength < 4)
+- [ ] AC-8A.3: Rewritten hook appears when the judge provided one (check `if (rewritten_hook)`, not score threshold)
 - [ ] AC-8A.4: Score progression is visible showing how overall score changed across rounds
 - [ ] AC-8A.5: Rounds with no judge data (not yet judged) show "Not judged" without crashing
 
@@ -153,14 +167,15 @@ Allow Blake to trigger `kb analyze -t <type>` on a transcript from the browse UI
   - Extract a shared `find_transcript_by_id(transcript_id)` helper in `serve_visual.py` (or a new utils module) that returns `(transcript_data, file_path)` or `None`
   - Refactor existing callsites to use it
 
-- [ ] **Task 8C.4: Add "Run Analysis" button to browse transcript detail view**
+- [ ] **Task 8C.4: Add keyboard-triggered analysis in browse transcript detail view**
   - File: `/home/blake/repos/personal/whisper-transcribe-ui/kb/templates/browse.html`
-  - When viewing a transcript's detail, add an "Analyze" button/section
-  - Show a multi-select of available analysis types (from `/api/analysis-types`)
-  - Grey out types already present in the transcript's `analysis_types` list (unless "force" checkbox is ticked)
-  - On click: POST to `/api/transcript/<id>/analyze` with selected types
-  - Show a toast/spinner indicating analysis is running
+  - Keybind: `a` opens analysis type picker when viewing a transcript detail
+  - Show a keyboard-navigable list of available analysis types (from `/api/analysis-types`)
+  - Grey out types already present in the transcript's analysis (unless `f` toggles force mode)
+  - Enter confirms selection → POST to `/api/transcript/<id>/analyze`
+  - Show inline status indicator while analysis runs
   - Poll for completion (check if new analysis types appear on the transcript)
+  - Only expose user-facing types: linkedin_v2, skool_post, skool_weekly_catchup (hide internal: visual_format, carousel_slides, linkedin_judge, linkedin_post)
 
 - [ ] **Task 8C.5: Processing state tracking**
   - File: `/home/blake/repos/personal/whisper-transcribe-ui/kb/serve_state.py` (or inline in `serve.py`)
@@ -173,11 +188,17 @@ Allow Blake to trigger `kb analyze -t <type>` on a transcript from the browse UI
 
 - [ ] AC-8C.1: `POST /api/transcript/<id>/analyze` starts analysis in background thread and returns immediately
 - [ ] AC-8C.2: Available analysis types are listed via API endpoint
-- [ ] AC-8C.3: Browse transcript detail shows "Analyze" button with type selector
-- [ ] AC-8C.4: Already-analyzed types are shown as disabled (unless force is checked)
+- [ ] AC-8C.3: Browse transcript detail: pressing `a` opens keyboard-navigable analysis type picker
+- [ ] AC-8C.4: Already-analyzed types are shown as disabled (unless `f` toggles force mode)
 - [ ] AC-8C.5: Analysis completion refreshes the transcript detail to show new analysis
 - [ ] AC-8C.6: Error handling: invalid transcript ID returns 404, invalid analysis type returns 400
 - [ ] AC-8C.7: Concurrent analysis requests for the same transcript are rejected (409 Conflict)
+- [ ] AC-8C.8: linkedin_post (v1) items filtered out of staging/review views and analysis type picker
+
+**Tests for 8C:**
+- [ ] Test `POST /api/transcript/<id>/analyze` returns 200 with valid types, 400 with invalid type, 404 with bad transcript_id
+- [ ] Test `GET /api/analysis-types` returns only user-facing types (excludes visual_format, carousel_slides, linkedin_judge, linkedin_post)
+- [ ] Test concurrent analysis rejection (409)
 
 ### Files
 
@@ -204,9 +225,9 @@ Allow Blake to trigger `kb analyze -t <type>` on a transcript from the browse UI
 
 | # | Question | Options | Impact | Resolution |
 |---|----------|---------|--------|------------|
-| 1 | Score progression chart style | A) CSS bar chart (colored bars per round) B) Inline colored dots (minimal) C) Text-only "3.2 -> 3.8 -> 4.1" | Affects visual complexity in iteration view | OPEN |
-| 2 | Where should the "Analyze" button live? | A) Browse transcript detail only B) Also add to posting queue (right pane, when viewing a draft item) C) Both + a standalone /analyze page | Affects scope of 8C | OPEN |
-| 3 | Should 8C analysis types include carousel_slides and visual_format? | A) Show ALL analysis types B) Only show non-internal types (exclude visual_format, carousel_slides, linkedin_judge) C) Show all but mark internal ones as "advanced" | Exposing internal pipeline types could confuse | OPEN |
+| 1 | Score progression chart style | A) CSS bar chart B) Inline dots C) Text-only | Affects visual complexity | **RESOLVED: C) Text-only** — scores per round already shown, keep simple |
+| 2 | Where should the "Analyze" button live? | A) Browse detail only B) Also posting queue C) Both + standalone | Affects scope of 8C | **RESOLVED: Browse detail only, keyboard-triggered** (`a` key). No buttons — all keyboard. |
+| 3 | Which analysis types to expose? | A) All B) Non-internal only C) All with "advanced" label | Exposing internals could confuse | **RESOLVED: B) Non-internal only** — hide visual_format, carousel_slides, linkedin_judge. Expose: linkedin_v2, skool_post, skool_weekly_catchup. linkedin_post (v1) config stays but is filtered out of staging/review and analysis picker. Existing v1 items remain in queue for triage. Config default update (decimals → linkedin_v2) is a separate manual step. |
 
 ### Decisions Made (Autonomous)
 

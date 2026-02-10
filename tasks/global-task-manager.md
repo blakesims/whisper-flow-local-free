@@ -5,7 +5,9 @@
 | ID   | Task Name | Priority (1-5) | Phases (Done/Total) | Status | Dependencies | Rules Required | Link to `main.md` |
 | :--- | :---- | :---- | :--- | :---- | :--- | :---- | :---- |
 | T014 | Cap AI Markers for Intra-Segment Editing | 3 | 0/4 | PLANNING | T013 | - | [main.md](planning/T014-cap-ai-markers/main.md) |
-| T026 | Carousel Output Quality — Close Gap to Mockups | 1 | 4/4 | ACTIVE | T024 | - | [main.md](active/T026-carousel-quality/main.md) |
+| T026 | Carousel Output Quality — Close Gap to Mockups | 1 | 7/8 | ACTIVE | T024 | - | [main.md](active/T026-carousel-quality/main.md) |
+| T027 | Diagram Renderer — Replace Mermaid with JSON→SVG | 3 | 0/? | PLANNING | T026 | - | [main.md](planning/T027-diagram-renderer/main.md) |
+| T028 | Content Lifecycle — Queue/Review State Machine | 2 | 0/? | PLANNING | T026#P8 | - | [main.md](planning/T028-content-lifecycle/main.md) |
 
 ## Notes
 - Priority: 1=Highest, 5=Lowest
