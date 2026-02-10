@@ -1102,6 +1102,7 @@
         let selectedEntityIndex = 0;
         let selectedEntity = null;
         let iterationsData = null;  // from /api/action/<id>/iterations
+        let selectedDecimalFilter = null;  // null = "All", or a decimal string like "50.03.01"
         let selectedRoundIndex = -1; // which round is active in the detail pane
         let templatesData = null;   // from /api/templates
         let slidesData = null;      // from /api/action/<id>/slides
@@ -1156,11 +1157,28 @@
             try {
                 const response = await fetch('/api/posting-queue-v2');
                 queueData = await response.json();
+
+                // Re-apply filter: clamp selectedEntityIndex to filtered list
+                const filtered = getFilteredItems();
+                if (selectedEntityIndex >= filtered.length) {
+                    selectedEntityIndex = Math.max(0, filtered.length - 1);
+                }
+
+                // If currently selected entity disappeared from filtered list, re-select
+                if (selectedEntity && !filtered.find(i => i.id === selectedEntity.id)) {
+                    if (filtered.length > 0) {
+                        selectedEntityIndex = 0;
+                        selectedEntity = filtered[0];
+                    } else {
+                        selectedEntity = null;
+                    }
+                }
+
                 renderEntityList();
                 updateStatusBar();
 
                 // Auto-select first item if none selected
-                if (selectedEntity === null && queueData.items.length > 0) {
+                if (selectedEntity === null && filtered.length > 0) {
                     selectEntity(0);
                 }
 
@@ -1173,6 +1191,21 @@
                 document.getElementById('connection-status').innerHTML = 'disconnected';
                 document.getElementById('connection-status').style.color = 'var(--red)';
             }
+        }
+
+        // Get filtered items based on selectedDecimalFilter
+        function getFilteredItems() {
+            if (!selectedDecimalFilter) return queueData.items;
+            return queueData.items.filter(item => item.source_decimal === selectedDecimalFilter);
+        }
+
+        // Get unique decimals from all items
+        function getUniqueDecimals() {
+            const decimals = new Set();
+            for (const item of queueData.items) {
+                if (item.source_decimal) decimals.add(item.source_decimal);
+            }
+            return Array.from(decimals).sort();
         }
 
         // Render entity list
@@ -1190,18 +1223,60 @@
                 return;
             }
 
-            // Section header
+            const filteredItems = getFilteredItems();
+            const totalItems = queueData.items.length;
+            const filteredCount = filteredItems.length;
+            const countLabel = selectedDecimalFilter
+                ? `${filteredCount}/${totalItems}`
+                : `${totalItems}`;
+
+            // Build decimal filter dropdown
+            const decimals = getUniqueDecimals();
+            let filterOptionsHtml = '<option value="">All decimals</option>';
+            for (const d of decimals) {
+                const selected = d === selectedDecimalFilter ? ' selected' : '';
+                filterOptionsHtml += `<option value="${escapeHtml(d)}"${selected}>${escapeHtml(d)}</option>`;
+            }
+
+            // Section header with filter
             const header = document.createElement('div');
             header.className = 'section-header';
             header.innerHTML = `
                 <div class="section-title">
                     <span>Iterations</span>
-                    <span class="section-count">${queueData.total}</span>
+                    <span class="section-count">${countLabel}</span>
                 </div>
+                <select class="template-select" id="decimal-filter" style="max-width:120px;">
+                    ${filterOptionsHtml}
+                </select>
             `;
             list.appendChild(header);
 
-            queueData.items.forEach((item, index) => {
+            // Attach filter change handler
+            const filterSelect = header.querySelector('#decimal-filter');
+            filterSelect.addEventListener('change', () => {
+                selectedDecimalFilter = filterSelect.value || null;
+                const newFiltered = getFilteredItems();
+                // Clamp selectedEntityIndex to filtered list
+                if (selectedEntityIndex >= newFiltered.length) {
+                    selectedEntityIndex = Math.max(0, newFiltered.length - 1);
+                }
+                renderEntityList();
+                // Re-select entity from filtered list
+                if (newFiltered.length > 0) {
+                    selectEntity(selectedEntityIndex);
+                }
+            });
+
+            if (filteredItems.length === 0) {
+                const empty = document.createElement('div');
+                empty.className = 'empty-state';
+                empty.innerHTML = `<div class="empty-state-text">No items for ${escapeHtml(selectedDecimalFilter)}</div>`;
+                list.appendChild(empty);
+                return;
+            }
+
+            filteredItems.forEach((item, index) => {
                 const el = document.createElement('div');
                 el.className = 'entity-item';
                 if (index === selectedEntityIndex) el.classList.add('selected');
@@ -1245,12 +1320,13 @@
             });
         }
 
-        // Select an entity
+        // Select an entity (index into filtered list)
         async function selectEntity(index) {
-            if (index < 0 || index >= queueData.items.length) return;
+            const filtered = getFilteredItems();
+            if (index < 0 || index >= filtered.length) return;
 
             selectedEntityIndex = index;
-            selectedEntity = queueData.items[index];
+            selectedEntity = filtered[index];
 
             // Update UI
             document.querySelectorAll('.entity-item').forEach((el, i) => {
@@ -1587,8 +1663,9 @@
                     showToast('Staged! Content copied to clipboard.');
                     await fetchQueue();
 
-                    // Re-select the same entity
-                    if (selectedEntityIndex < queueData.items.length) {
+                    // Re-select the same entity (from filtered list)
+                    const filteredAfterStage = getFilteredItems();
+                    if (selectedEntityIndex < filteredAfterStage.length) {
                         selectEntity(selectedEntityIndex);
                     }
                 } else {
@@ -1930,9 +2007,10 @@
                 if (response.ok) {
                     showToast('Published! Content copied to clipboard.');
                     await fetchQueue();
-                    // Select next entity if available
-                    if (queueData.items.length > 0) {
-                        selectEntity(Math.min(selectedEntityIndex, queueData.items.length - 1));
+                    // Select next entity if available (from filtered list)
+                    const filteredAfterPublish = getFilteredItems();
+                    if (filteredAfterPublish.length > 0) {
+                        selectEntity(Math.min(selectedEntityIndex, filteredAfterPublish.length - 1));
                     }
                 } else {
                     showToast(data.error || 'Publish failed');
@@ -2260,7 +2338,11 @@
 
         // Update status bar
         function updateStatusBar() {
-            document.getElementById('status-count').textContent = `${queueData.total} entities`;
+            const filtered = getFilteredItems();
+            const label = selectedDecimalFilter
+                ? `${filtered.length}/${queueData.total} entities`
+                : `${queueData.total} entities`;
+            document.getElementById('status-count').textContent = label;
         }
 
         // Show toast notification
@@ -2322,13 +2404,14 @@
                 return;
             }
 
-            if (queueData.items.length === 0) return;
+            const filteredItems = getFilteredItems();
+            if (filteredItems.length === 0) return;
 
             if (e.key === 'j') {
-                // Move down through entities
-                selectEntity(Math.min(selectedEntityIndex + 1, queueData.items.length - 1));
+                // Move down through entities (filtered)
+                selectEntity(Math.min(selectedEntityIndex + 1, filteredItems.length - 1));
             } else if (e.key === 'k') {
-                // Move up through entities
+                // Move up through entities (filtered)
                 selectEntity(Math.max(selectedEntityIndex - 1, 0));
             } else if (e.key === 'ArrowDown') {
                 // Move to next round within entity
