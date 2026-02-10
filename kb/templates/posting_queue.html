@@ -1532,7 +1532,8 @@
             // Determine which buttons are available
             const isReady = status === 'ready' || visualStatus === 'ready' || visualStatus === 'text_only';
             const isGenerating = visualStatus === 'generating';
-            const canGenerate = (status === 'staged' || visualStatus === 'stale') && !isGenerating;
+            const canGenerate = status === 'staged' && !isGenerating;
+            const canReRender = (status === 'staged' || status === 'ready' || visualStatus === 'stale') && !isGenerating;
             const canPublish = isReady;
 
             // Build template selector and slide editor
@@ -1573,7 +1574,7 @@
                             <span>${isGenerating ? 'Generating...' : 'Generate Visuals'}</span>
                             <span class="key">g</span>
                         </button>
-                        <button class="btn btn-render" onclick="reRender()" ${canGenerate ? '' : 'disabled'}>
+                        <button class="btn btn-render" onclick="reRender()" ${canReRender ? '' : 'disabled'}>
                             <span>Re-render</span>
                         </button>
                         <button class="btn btn-publish" onclick="publishItem()" ${canPublish ? '' : 'disabled'}>
