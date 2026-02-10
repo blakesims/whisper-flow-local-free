@@ -593,6 +593,148 @@
             font-size: 10px;
             font-weight: 600;
         }
+
+        /* Analysis picker overlay (Phase 8C) */
+        .analysis-picker-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(17, 17, 27, 0.8);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+
+        .analysis-picker-overlay.show {
+            display: flex;
+        }
+
+        .analysis-picker {
+            background: var(--base);
+            border: 1px solid var(--surface1);
+            border-radius: 8px;
+            width: 400px;
+            max-height: 500px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .analysis-picker-header {
+            padding: 12px 16px;
+            background: var(--mantle);
+            border-bottom: 1px solid var(--surface0);
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--sapphire);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .analysis-picker-header .hint {
+            font-size: 10px;
+            color: var(--overlay0);
+            font-weight: 400;
+        }
+
+        .analysis-picker-list {
+            overflow-y: auto;
+            padding: 4px 0;
+        }
+
+        .analysis-picker-item {
+            padding: 10px 16px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            transition: background 0.1s;
+        }
+
+        .analysis-picker-item:hover {
+            background: var(--mantle);
+        }
+
+        .analysis-picker-item.selected {
+            background: var(--surface0);
+            border-left: 3px solid var(--sapphire);
+        }
+
+        .analysis-picker-item.disabled {
+            opacity: 0.4;
+            cursor: default;
+        }
+
+        .analysis-picker-item .type-name {
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .analysis-picker-item .type-desc {
+            font-size: 11px;
+            color: var(--overlay0);
+            margin-top: 2px;
+        }
+
+        .analysis-picker-item .type-status {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+
+        .analysis-picker-item .type-status.exists {
+            background: var(--surface1);
+            color: var(--overlay0);
+        }
+
+        .analysis-picker-item .type-status.running {
+            background: var(--yellow);
+            color: var(--crust);
+        }
+
+        .analysis-picker-footer {
+            padding: 8px 16px;
+            background: var(--mantle);
+            border-top: 1px solid var(--surface0);
+            font-size: 10px;
+            color: var(--overlay0);
+            display: flex;
+            gap: 12px;
+        }
+
+        /* Analyzing status indicator */
+        .analyzing-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: var(--yellow);
+            color: var(--crust);
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border: 2px solid var(--crust);
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
     </style>
 </head>
 <body>
@@ -647,6 +789,7 @@
                 <span class="shortcut"><span class="key-hint">Enter</span> select</span>
                 <span class="shortcut"><span class="key-hint">Esc</span> back</span>
                 <span class="shortcut"><span class="key-hint">c</span> copy</span>
+                <span class="shortcut"><span class="key-hint">a</span> analyze</span>
             </div>
         </div>
 
@@ -662,6 +805,22 @@
                 <span class="status-item"><span class="status-key">b</span> browse</span>
                 <span class="status-item"><span class="status-key">v</span> videos</span>
                 <span class="status-item"><span class="status-key">p</span> prompts</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Analysis picker overlay -->
+    <div class="analysis-picker-overlay" id="analysis-picker-overlay">
+        <div class="analysis-picker">
+            <div class="analysis-picker-header">
+                <span>Run Analysis</span>
+                <span class="hint"><span class="key-hint">j/k</span> select <span class="key-hint">Enter</span> run <span class="key-hint">Esc</span> close</span>
+            </div>
+            <div class="analysis-picker-list" id="analysis-picker-list">
+                <!-- Populated by JS -->
+            </div>
+            <div class="analysis-picker-footer">
+                <span>Types already analyzed are greyed out</span>
             </div>
         </div>
     </div>
@@ -687,6 +846,11 @@
         let activeTab = 'analyses';  // 'analyses' or 'transcript'
         let isSearchMode = false;
         let searchDebounce = null;
+        let analysisPickerOpen = false;
+        let analysisTypes = [];       // from /api/analysis-types
+        let pickerIndex = 0;
+        let analyzingTranscript = null; // transcript_id currently being analyzed
+        let forceMode = false;          // toggled by 'f' in picker
 
         // Fetch categories
         async function fetchCategories() {
@@ -863,7 +1027,19 @@
                 `;
             }
 
+            // Show analyzing status if this transcript is being analyzed
+            let analyzingHtml = '';
+            if (analyzingTranscript === selectedTranscript.id) {
+                analyzingHtml = `
+                    <div class="analyzing-status">
+                        <span class="spinner"></span>
+                        Analyzing...
+                    </div>
+                `;
+            }
+
             let tabsHtml = `
+                ${analyzingHtml}
                 <div class="tabs">
                     <div class="tab ${activeTab === 'analyses' ? 'active' : ''}" onclick="switchTab('analyses')">
                         Analyses (${selectedTranscript.analyses.length})
@@ -1088,8 +1264,192 @@
             return div.innerHTML;
         }
 
+        // === Analysis Picker ===
+
+        // Fetch available analysis types
+        async function fetchAnalysisTypes() {
+            try {
+                const response = await fetch('/api/analysis-types');
+                const data = await response.json();
+                analysisTypes = data.types || [];
+            } catch (error) {
+                console.error('Failed to fetch analysis types:', error);
+            }
+        }
+
+        // Open the analysis picker
+        function openAnalysisPicker() {
+            if (!selectedTranscript) return;
+            if (analysisTypes.length === 0) return;
+
+            analysisPickerOpen = true;
+            forceMode = false;
+            pickerIndex = 0;
+
+            // Find first non-disabled item
+            const existingTypes = selectedTranscript.analyses.map(a => a.name);
+            for (let i = 0; i < analysisTypes.length; i++) {
+                if (!existingTypes.includes(analysisTypes[i].name)) {
+                    pickerIndex = i;
+                    break;
+                }
+            }
+
+            renderAnalysisPicker();
+            document.getElementById('analysis-picker-overlay').classList.add('show');
+        }
+
+        // Close the analysis picker
+        function closeAnalysisPicker() {
+            analysisPickerOpen = false;
+            document.getElementById('analysis-picker-overlay').classList.remove('show');
+        }
+
+        // Render analysis picker list
+        function renderAnalysisPicker() {
+            const list = document.getElementById('analysis-picker-list');
+            if (!selectedTranscript) return;
+
+            const existingTypes = selectedTranscript.analyses.map(a => a.name);
+
+            list.innerHTML = '';
+            analysisTypes.forEach((type, index) => {
+                const exists = existingTypes.includes(type.name);
+                const isDisabled = exists && !forceMode;
+                const isSelected = index === pickerIndex;
+
+                const div = document.createElement('div');
+                div.className = 'analysis-picker-item';
+                if (isSelected) div.classList.add('selected');
+                if (isDisabled) div.classList.add('disabled');
+
+                let statusHtml = '';
+                if (exists) {
+                    statusHtml = `<span class="type-status exists">${forceMode ? 're-run' : 'done'}</span>`;
+                }
+
+                div.innerHTML = `
+                    <div>
+                        <div class="type-name">${escapeHtml(type.name)}</div>
+                        <div class="type-desc">${escapeHtml(type.description || '')}</div>
+                    </div>
+                    ${statusHtml}
+                `;
+
+                div.addEventListener('click', () => {
+                    if (isDisabled) return;
+                    pickerIndex = index;
+                    renderAnalysisPicker();
+                    confirmAnalysis();
+                });
+
+                list.appendChild(div);
+            });
+        }
+
+        // Confirm analysis selection
+        async function confirmAnalysis() {
+            if (!selectedTranscript || pickerIndex < 0 || pickerIndex >= analysisTypes.length) return;
+
+            const type = analysisTypes[pickerIndex];
+            const existingTypes = selectedTranscript.analyses.map(a => a.name);
+            const isDisabled = existingTypes.includes(type.name) && !forceMode;
+            if (isDisabled) return;
+
+            closeAnalysisPicker();
+
+            try {
+                const response = await fetch(`/api/transcript/${selectedTranscript.id}/analyze`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        analysis_types: [type.name],
+                        force: forceMode,
+                    }),
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    showToast(`Analysis started: ${type.name}`);
+                    analyzingTranscript = selectedTranscript.id;
+                    renderDetail();
+                    pollAnalysisCompletion();
+                } else if (response.status === 409) {
+                    showToast('Analysis already in progress');
+                } else {
+                    showToast(data.error || 'Analysis failed');
+                }
+            } catch (error) {
+                console.error('Analysis request failed:', error);
+                showToast('Analysis request failed');
+            }
+        }
+
+        // Poll for analysis completion
+        function pollAnalysisCompletion() {
+            if (!analyzingTranscript) return;
+
+            const transcriptId = analyzingTranscript;
+            const check = async () => {
+                try {
+                    const response = await fetch('/api/processing');
+                    const data = await response.json();
+
+                    if (!data.processing[transcriptId]) {
+                        // Analysis complete
+                        analyzingTranscript = null;
+                        showToast('Analysis complete!');
+                        // Reload transcript detail to show new analyses
+                        if (selectedTranscript && selectedTranscript.id === transcriptId) {
+                            await loadTranscriptDetail(transcriptId);
+                        }
+                        return;
+                    }
+
+                    // Still processing, poll again
+                    setTimeout(check, 2000);
+                } catch (error) {
+                    console.error('Poll failed:', error);
+                    setTimeout(check, 3000);
+                }
+            };
+
+            setTimeout(check, 2000);
+        }
+
         // Keyboard navigation
         document.addEventListener('keydown', function(e) {
+            // Analysis picker keyboard handling (when open, captures all keys)
+            if (analysisPickerOpen) {
+                if (e.key === 'Escape') {
+                    closeAnalysisPicker();
+                    return;
+                }
+                if (e.key === 'j' || e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    pickerIndex = Math.min(pickerIndex + 1, analysisTypes.length - 1);
+                    renderAnalysisPicker();
+                    return;
+                }
+                if (e.key === 'k' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    pickerIndex = Math.max(pickerIndex - 1, 0);
+                    renderAnalysisPicker();
+                    return;
+                }
+                if (e.key === 'Enter') {
+                    confirmAnalysis();
+                    return;
+                }
+                if (e.key === 'f') {
+                    // Toggle force mode
+                    forceMode = !forceMode;
+                    renderAnalysisPicker();
+                    return;
+                }
+                return; // Swallow all other keys while picker is open
+            }
+
             // Check if search input is focused
             const searchInput = document.getElementById('search-input');
             const isSearchFocused = document.activeElement === searchInput;
@@ -1133,6 +1493,12 @@
             }
 
             if (isSearchFocused) return;
+
+            // 'a' key: open analysis picker when viewing transcript detail
+            if (e.key === 'a' && focusPane === 2 && selectedTranscript) {
+                openAnalysisPicker();
+                return;
+            }
 
             if (e.key === 'j') {
                 // Move down
@@ -1213,6 +1579,7 @@
 
         // Initialize
         fetchCategories();
+        fetchAnalysisTypes();
     </script>
 </body>
 </html>

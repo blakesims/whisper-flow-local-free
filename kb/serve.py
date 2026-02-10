@@ -1529,6 +1529,164 @@ def get_transcript(transcript_id: str):
     return jsonify({"error": "Transcript not found"}), 404
 
 
+# Internal analysis types hidden from user-facing UI
+_INTERNAL_ANALYSIS_TYPES = {"visual_format", "carousel_slides", "linkedin_judge", "linkedin_post"}
+
+
+@app.route('/api/analysis-types')
+def get_analysis_types():
+    """List available analysis types for user-facing UI.
+
+    Filters out internal types (visual_format, carousel_slides, linkedin_judge, linkedin_post).
+    """
+    all_types = list_analysis_types()
+    user_types = [
+        t for t in all_types
+        if t["name"] not in _INTERNAL_ANALYSIS_TYPES
+    ]
+    return jsonify({"types": user_types})
+
+
+@app.route('/api/transcript/<transcript_id>/analyze', methods=['POST'])
+def analyze_transcript(transcript_id: str):
+    """Trigger analysis on a transcript from the browse UI.
+
+    Runs requested analysis types in a background thread.
+    For AUTO_JUDGE_TYPES, uses run_with_judge_loop.
+    For regular types, uses analyze_transcript_file.
+
+    Request body: { "analysis_types": ["linkedin_v2", "summary"], "force": false }
+    """
+    # Validate transcript ID
+    if not re.match(r'^[\w\.\-]+$', transcript_id):
+        return jsonify({"error": "Invalid transcript ID format"}), 400
+
+    data = request.get_json()
+    if not data or "analysis_types" not in data:
+        return jsonify({"error": "Request body must contain 'analysis_types' field"}), 400
+
+    requested_types = data["analysis_types"]
+    force = data.get("force", False)
+
+    if not isinstance(requested_types, list) or len(requested_types) == 0:
+        return jsonify({"error": "'analysis_types' must be a non-empty list"}), 400
+
+    if not all(isinstance(t, str) for t in requested_types):
+        return jsonify({"error": "'analysis_types' must be a list of strings"}), 400
+
+    # Validate each analysis type exists
+    valid_names = {t["name"] for t in list_analysis_types()}
+    for t in requested_types:
+        if t not in valid_names:
+            return jsonify({"error": f"Unknown analysis type: '{t}'"}), 400
+
+    # Find transcript file
+    transcript_path = None
+    for decimal_dir in KB_ROOT.iterdir():
+        if not decimal_dir.is_dir():
+            continue
+        if decimal_dir.name in ("config", "examples"):
+            continue
+        for json_file in decimal_dir.glob("*.json"):
+            try:
+                with open(json_file) as f:
+                    tdata = json.load(f)
+                if tdata.get("id") == transcript_id:
+                    transcript_path = str(json_file)
+                    break
+            except (json.JSONDecodeError, IOError):
+                continue
+        if transcript_path:
+            break
+
+    if not transcript_path:
+        return jsonify({"error": "Transcript not found"}), 404
+
+    # Check for concurrent analysis
+    state = load_action_state()
+    processing = state.get("processing", {})
+    if transcript_id in processing:
+        return jsonify({"error": "Analysis already in progress for this transcript"}), 409
+
+    # Track processing state
+    if "processing" not in state:
+        state["processing"] = {}
+    state["processing"][transcript_id] = {
+        "types": requested_types,
+        "started_at": datetime.now().isoformat(),
+    }
+    save_action_state(state)
+
+    # Run in background thread
+    def _run_analysis():
+        try:
+            with open(transcript_path) as f:
+                transcript_data = json.load(f)
+
+            existing_analysis = transcript_data.get("analysis", {})
+
+            # Split into auto-judge and regular types
+            auto_judge_types = [t for t in requested_types if t in AUTO_JUDGE_TYPES]
+            regular_types = [t for t in requested_types if t not in AUTO_JUDGE_TYPES]
+
+            # Run auto-judge types via run_with_judge_loop
+            for atype in auto_judge_types:
+                judge_type = AUTO_JUDGE_TYPES[atype]
+                try:
+                    run_with_judge_loop(
+                        transcript_data=transcript_data,
+                        analysis_type=atype,
+                        judge_type=judge_type,
+                        max_rounds=1,
+                        existing_analysis=existing_analysis,
+                        save_path=transcript_path,
+                    )
+                    # Reload after save
+                    with open(transcript_path) as f:
+                        transcript_data = json.load(f)
+                    existing_analysis = transcript_data.get("analysis", {})
+                except Exception as e:
+                    logger.error("[KB Serve] Analysis failed for %s/%s: %s", transcript_id, atype, e)
+
+            # Run regular types via analyze_transcript_file
+            if regular_types:
+                try:
+                    from kb.analyze import analyze_transcript_file
+                    analyze_transcript_file(
+                        transcript_path=transcript_path,
+                        analysis_types=regular_types,
+                        force=force,
+                    )
+                except Exception as e:
+                    logger.error("[KB Serve] Analysis failed for %s/%s: %s", transcript_id, regular_types, e)
+
+        except Exception as e:
+            logger.error("[KB Serve] Analysis background thread error for %s: %s", transcript_id, e)
+        finally:
+            # Clear processing state
+            st = load_action_state()
+            st.get("processing", {}).pop(transcript_id, None)
+            save_action_state(st)
+
+    thread = threading.Thread(target=_run_analysis, daemon=True)
+    thread.start()
+    logger.info("[KB Serve] Analysis started for %s: %s", transcript_id, requested_types)
+
+    return jsonify({
+        "success": True,
+        "message": "Analysis started",
+        "types": requested_types,
+    })
+
+
+@app.route('/api/processing')
+def get_processing():
+    """Get currently processing transcript analyses."""
+    state = load_action_state()
+    processing = state.get("processing", {})
+    return jsonify({"processing": processing})
+
+
 @app.route('/api/search')
 def search_transcripts():
     """Search transcripts by query term."""
