@@ -1171,6 +1171,7 @@ def get_iterations(action_id: str):
                 "overall": judge_data.get("overall_score", 0),
                 "criteria": judge_data.get("scores", {}),
                 "improvements": judge_data.get("improvements", []),
+                "strengths": judge_data.get("strengths", []),
                 "rewritten_hook": judge_data.get("rewritten_hook"),
             }
 
@@ -1193,6 +1194,7 @@ def get_iterations(action_id: str):
                 "overall": judge_data.get("overall_score", 0),
                 "criteria": judge_data.get("scores", {}),
                 "improvements": judge_data.get("improvements", []),
+                "strengths": judge_data.get("strengths", []),
                 "rewritten_hook": judge_data.get("rewritten_hook"),
             }
         iterations.append(iteration)

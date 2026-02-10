@@ -923,6 +923,108 @@
             max-height: 400px;
             overflow-y: auto;
         }
+
+        /* Feedback sections (Phase 8A) */
+        .feedback-section {
+            margin-bottom: 16px;
+        }
+
+        .feedback-section-title {
+            color: var(--overlay0);
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        .improvement-card {
+            background: var(--mantle);
+            border: 1px solid var(--surface0);
+            border-radius: 6px;
+            padding: 10px 12px;
+            margin-bottom: 6px;
+        }
+
+        .improvement-criterion {
+            color: var(--sapphire);
+            font-size: 11px;
+            font-weight: 600;
+            margin-bottom: 4px;
+            text-transform: capitalize;
+        }
+
+        .improvement-issue {
+            color: var(--red);
+            font-size: 12px;
+            margin-bottom: 4px;
+        }
+
+        .improvement-suggestion {
+            color: var(--green);
+            font-size: 12px;
+        }
+
+        .improvement-label {
+            color: var(--overlay0);
+            font-size: 10px;
+            font-weight: 600;
+            margin-right: 4px;
+        }
+
+        .strengths-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .strength-item {
+            background: rgba(166, 227, 161, 0.1);
+            border: 1px solid rgba(166, 227, 161, 0.2);
+            border-radius: 4px;
+            padding: 6px 10px;
+            margin-bottom: 4px;
+            color: var(--green);
+            font-size: 12px;
+        }
+
+        .rewritten-hook {
+            background: rgba(203, 166, 247, 0.1);
+            border: 1px solid rgba(203, 166, 247, 0.2);
+            border-radius: 6px;
+            padding: 12px;
+            font-size: 12px;
+            color: var(--text);
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
+
+        .rewritten-hook-label {
+            color: var(--mauve);
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 6px;
+        }
+
+        /* Score progression (Phase 8A) */
+        .score-progression {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: var(--overlay0);
+            flex-wrap: wrap;
+        }
+
+        .score-progression-label {
+            font-weight: 600;
+            color: var(--subtext0);
+        }
+
+        .score-progression-arrow {
+            color: var(--overlay0);
+        }
     </style>
 </head>
 <body>
@@ -1270,6 +1372,76 @@
                 `;
             }
 
+            // Build feedback section (improvements, strengths, rewritten hook)
+            let feedbackHtml = '';
+            if (current.scores) {
+                // Improvements
+                const improvements = current.scores.improvements || [];
+                if (improvements.length > 0) {
+                    let improvementsHtml = '';
+                    for (const imp of improvements) {
+                        improvementsHtml += `
+                            <div class="improvement-card">
+                                <div class="improvement-criterion">${escapeHtml(formatCriterion(imp.criterion || ''))}</div>
+                                <div class="improvement-issue"><span class="improvement-label">Issue:</span>${escapeHtml(imp.current_issue || '')}</div>
+                                <div class="improvement-suggestion"><span class="improvement-label">Fix:</span>${escapeHtml(imp.suggestion || '')}</div>
+                            </div>
+                        `;
+                    }
+                    feedbackHtml += `
+                        <div class="feedback-section">
+                            <div class="feedback-section-title">Improvements</div>
+                            ${improvementsHtml}
+                        </div>
+                    `;
+                }
+
+                // Strengths
+                const strengths = current.scores.strengths || [];
+                if (strengths.length > 0) {
+                    let strengthsHtml = '';
+                    for (const s of strengths) {
+                        strengthsHtml += `<li class="strength-item">${escapeHtml(s)}</li>`;
+                    }
+                    feedbackHtml += `
+                        <div class="feedback-section">
+                            <div class="feedback-section-title">Strengths</div>
+                            <ul class="strengths-list">${strengthsHtml}</ul>
+                        </div>
+                    `;
+                }
+
+                // Rewritten hook
+                const rewrittenHook = current.scores.rewritten_hook;
+                if (rewrittenHook) {
+                    feedbackHtml += `
+                        <div class="feedback-section">
+                            <div class="rewritten-hook-label">Suggested Hook Rewrite</div>
+                            <div class="rewritten-hook">${escapeHtml(rewrittenHook)}</div>
+                        </div>
+                    `;
+                }
+            }
+
+            // Build score progression text
+            let scoreProgressionHtml = '';
+            const scoreHistory = iterationsData.score_history || [];
+            if (scoreHistory.length > 1) {
+                let progressionParts = [];
+                scoreHistory.forEach((entry, i) => {
+                    const score = (entry.overall || 0).toFixed(1);
+                    const sc = scoreClass(entry.overall);
+                    const colorVar = sc === 'high' ? 'var(--green)' : (sc === 'mid' ? 'var(--yellow)' : 'var(--red)');
+                    progressionParts.push(`<span style="color:${colorVar};">R${i}: ${score}</span>`);
+                });
+                scoreProgressionHtml = `
+                    <div class="score-progression">
+                        <span class="score-progression-label">Progress:</span>
+                        ${progressionParts.join('<span class="score-progression-arrow"> → </span>')}
+                    </div>
+                `;
+            }
+
             // Iterating overlay
             let iteratingHtml = '';
             if (iterationsData.iterating) {
@@ -1299,10 +1471,13 @@
                     <div class="round-nav">
                         <span class="round-nav-label">Round:</span>
                         <div class="round-tabs">${roundTabsHtml}</div>
+                        ${scoreProgressionHtml}
                         <span class="round-nav-hint"><span class="key-hint">Up</span>/<span class="key-hint">Dn</span></span>
                     </div>
 
                     ${scoresHtml}
+
+                    ${feedbackHtml}
 
                     <div class="post-section">
                         <div class="post-section-title">Post Content (Round ${current.round})</div>
