@@ -305,6 +305,62 @@ def serve_visual(filepath: str):
     )
 
 
+def _stage_item(action_id: str, state: dict, transcript_path: str | None) -> int:
+    """Stage an item: set status, create initial edit version, save state.
+
+    Shared helper for approve_action() and stage_action().
+    Returns the edit_round number.
+    """
+    # Set status to staged + create action entry if needed
+    if action_id not in state["actions"]:
+        state["actions"][action_id] = {
+            "status": "staged",
+            "copied_count": 0,
+            "created_at": datetime.now().isoformat(),
+        }
+    else:
+        state["actions"][action_id]["status"] = "staged"
+
+    state["actions"][action_id]["staged_at"] = datetime.now().isoformat()
+
+    # Create initial edit version (_N_0) for auto-judge types
+    parts = action_id.split(ACTION_ID_SEP)
+    analysis_type = parts[1] if len(parts) == 2 else ""
+    edit_round = 0
+    edit_number = 0
+
+    if analysis_type in AUTO_JUDGE_TYPES and transcript_path:
+        try:
+            with open(transcript_path) as f:
+                transcript_data = json.load(f)
+
+            alias = transcript_data.get("analysis", {}).get(analysis_type, {})
+            current_round = alias.get("_round", 0)
+            edit_round = current_round
+
+            # Create _N_0 edit version (the raw LLM output snapshot)
+            edit_key = f"{analysis_type}_{current_round}_0"
+            if edit_key not in transcript_data.get("analysis", {}):
+                transcript_data["analysis"][edit_key] = {
+                    "post": alias.get("post", ""),
+                    "_edited_at": datetime.now().isoformat(),
+                    "_source": f"{analysis_type}_{current_round}",
+                }
+                # Update alias _edit metadata
+                alias["_edit"] = 0
+                with open(transcript_path, 'w') as f:
+                    json.dump(transcript_data, f, indent=2, ensure_ascii=False)
+
+        except (json.JSONDecodeError, IOError, KeyError) as e:
+            logger.warning("[KB Serve] Failed to create edit version on stage: %s", e)
+
+    state["actions"][action_id]["staged_round"] = edit_round
+    state["actions"][action_id]["edit_count"] = edit_number
+    save_action_state(state)
+
+    return edit_round
+
+
 @app.route('/api/action/<action_id>/approve', methods=['POST'])
 def approve_action(action_id: str):
     """Approve action from Queue view (type-aware).
@@ -343,46 +399,7 @@ def approve_action(action_id: str):
 
     if analysis_type in AUTO_JUDGE_TYPES:
         # Complex type: stage for Review
-        if action_id not in state["actions"]:
-            state["actions"][action_id] = {
-                "status": "staged",
-                "copied_count": 0,
-                "created_at": datetime.now().isoformat(),
-            }
-        else:
-            state["actions"][action_id]["status"] = "staged"
-
-        state["actions"][action_id]["staged_at"] = datetime.now().isoformat()
-
-        # Create initial edit version (absorb from stage_action logic)
-        edit_round = 0
-        edit_number = 0
-        if transcript_path:
-            try:
-                with open(transcript_path) as f:
-                    transcript_data = json.load(f)
-
-                alias = transcript_data.get("analysis", {}).get(analysis_type, {})
-                current_round = alias.get("_round", 0)
-                edit_round = current_round
-
-                # Create _N_0 edit version (the raw LLM output snapshot)
-                edit_key = f"{analysis_type}_{current_round}_0"
-                if edit_key not in transcript_data.get("analysis", {}):
-                    transcript_data["analysis"][edit_key] = {
-                        "post": alias.get("post", ""),
-                        "_edited_at": datetime.now().isoformat(),
-                        "_source": f"{analysis_type}_{current_round}",
-                    }
-                    alias["_edit"] = 0
-                    with open(transcript_path, 'w') as f:
-                        json.dump(transcript_data, f, indent=2, ensure_ascii=False)
-            except (json.JSONDecodeError, IOError, KeyError) as e:
-                logger.warning("[KB Serve] Failed to create edit version on approve: %s", e)
-
-        state["actions"][action_id]["staged_round"] = edit_round
-        state["actions"][action_id]["edit_count"] = edit_number
-        save_action_state(state)
+        _stage_item(action_id, state, transcript_path)
 
         # Auto-copy to clipboard
         try:
@@ -451,51 +468,7 @@ def stage_action(action_id: str):
     if current_status not in ("new", "staged"):
         return jsonify({"error": f"Cannot stage item with status '{current_status}'. Item must be new or staged."}), 400
 
-    if action_id not in state["actions"]:
-        state["actions"][action_id] = {
-            "status": "staged",
-            "copied_count": 0,
-            "created_at": datetime.now().isoformat(),
-        }
-    else:
-        state["actions"][action_id]["status"] = "staged"
-
-    state["actions"][action_id]["staged_at"] = datetime.now().isoformat()
-
-    # Create initial edit version (_N_0) for auto-judge types
-    parts = action_id.split(ACTION_ID_SEP)
-    analysis_type = parts[1] if len(parts) == 2 else ""
-    edit_round = 0
-    edit_number = 0
-
-    if analysis_type in AUTO_JUDGE_TYPES and transcript_path:
-        try:
-            with open(transcript_path) as f:
-                transcript_data = json.load(f)
-
-            alias = transcript_data.get("analysis", {}).get(analysis_type, {})
-            current_round = alias.get("_round", 0)
-            edit_round = current_round
-
-            # Create _N_0 edit version (the raw LLM output snapshot)
-            edit_key = f"{analysis_type}_{current_round}_0"
-            if edit_key not in transcript_data.get("analysis", {}):
-                transcript_data["analysis"][edit_key] = {
-                    "post": alias.get("post", ""),
-                    "_edited_at": datetime.now().isoformat(),
-                    "_source": f"{analysis_type}_{current_round}",
-                }
-                # Update alias _edit metadata
-                alias["_edit"] = 0
-                with open(transcript_path, 'w') as f:
-                    json.dump(transcript_data, f, indent=2, ensure_ascii=False)
-
-        except (json.JSONDecodeError, IOError, KeyError) as e:
-            logger.warning("[KB Serve] Failed to create edit version on stage: %s", e)
-
-    state["actions"][action_id]["staged_round"] = edit_round
-    state["actions"][action_id]["edit_count"] = edit_number
-    save_action_state(state)
+    edit_round = _stage_item(action_id, state, transcript_path)
 
     # Auto-copy to clipboard
     try:
@@ -1266,6 +1239,7 @@ def get_posting_queue_v2():
             item["latest_score"] = latest_score
             item["score_history"] = score_history
             item["iterating"] = iterating
+            item["iterable"] = analysis_type in AUTO_JUDGE_TYPES  # T029: frontend checks before calling /iterations
             item["relative_time"] = format_relative_time(item["analyzed_at"])
 
             # Staging metadata
