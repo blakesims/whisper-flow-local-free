@@ -1,7 +1,7 @@
 # T028: Content Lifecycle — Queue/Review State Machine
 
 ## Meta
-- **Status:** CODE_REVIEW
+- **Status:** COMPLETE
 - **Created:** 2026-02-10
 - **Last Updated:** 2026-02-10
 - **Priority:** 2
@@ -302,9 +302,18 @@ Separate Queue and Review into distinct lifecycle stages so new content appears 
 ---
 
 ## Code Review Log
-<!-- To be filled by code reviewer -->
+
+### Phases 1-4 (combined review)
+- **Gate:** PASS
+- **Reviewed:** 2026-02-10
+- **Issues:** 0 critical, 2 major, 3 minor
+- **Summary:** All ACs verified, 29/29 new tests pass, zero regressions (434 passed, 39 pre-existing failures). Major issues are maintenance/UX quality (duplicated staging logic, stale toast text) -- not blocking production.
+
+-> Details: `code-review.md`
 
 ---
 
 ## Completion
-<!-- To be filled on completion -->
+- **Completed:** 2026-02-10
+- **Summary:** Content lifecycle state machine fully implemented. Queue shows only `new` items, Review shows only `staged`/`ready` items. Type-aware approve routes simple types to copy+done and complex types to staged. `[d]` blocked for complex types with toast. Iterate requires staged status. Idempotent migration at server startup. 29 new lifecycle tests.
+- **Learnings:** Extract shared helpers when "absorbing" logic between endpoints to avoid duplication. Frontend toasts should adapt to backend response variants. Grep-based ACs are effective for codebase-wide rename tasks.
