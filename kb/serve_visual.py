@@ -55,7 +55,7 @@ def _find_transcript_file(action_id: str, kb_root=None) -> Path | None:
     return None
 
 
-def run_visual_pipeline(action_id: str, transcript_path: str):
+def run_visual_pipeline(action_id: str, transcript_path: str, template_name: str = None):
     """
     Run the full visual pipeline in a background thread.
 
@@ -162,7 +162,7 @@ def run_visual_pipeline(action_id: str, transcript_path: str):
         logger.info("[Visual Pipeline] Rendering carousel for %s -> %s", action_id, visuals_dir)
 
         from kb.render import render_pipeline
-        result = render_pipeline(slides_output, str(visuals_dir))
+        result = render_pipeline(slides_output, str(visuals_dir), template_name=template_name)
 
         if result.get("pdf_path"):
             # Make paths relative to KB_ROOT for serving

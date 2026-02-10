@@ -633,9 +633,13 @@ def generate_visuals(action_id: str):
     if not transcript_path:
         return jsonify({"error": "Transcript file not found"}), 404
 
+    # Get template from request if provided
+    data = request.get_json() or {}
+    template_name = data.get("template")
+
     # Start visual pipeline in background thread
     def _run_and_update_status():
-        run_visual_pipeline(action_id, str(transcript_path))
+        run_visual_pipeline(action_id, str(transcript_path), template_name=template_name)
         # After visuals complete, update status to "ready" if visual_status is "ready"
         st = load_action_state()
         if action_id in st["actions"]:
