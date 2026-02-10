@@ -1103,6 +1103,7 @@
         let iterationsData = null;  // from /api/action/<id>/iterations
         let selectedDecimalFilter = null;  // null = "All", or a decimal string like "50.03.01"
         let selectedRoundIndex = -1; // which round is active in the detail pane
+        let entityRoundIndex = {};  // T029: cache selectedRoundIndex per entity id
         let templatesData = null;   // from /api/templates
         let slidesData = null;      // from /api/action/<id>/slides
         let selectedTemplate = null; // selected template name
@@ -1183,7 +1184,7 @@
 
                 // If an entity is selected and iterating, refresh iterations
                 // (skip if pollIteration is already polling to prevent dual-poll race)
-                if (selectedEntity && selectedEntity.iterating && !iterationPollActive) {
+                if (selectedEntity && selectedEntity.iterable && selectedEntity.iterating && !iterationPollActive) {
                     await fetchIterations(selectedEntity.id);
                 }
             } catch (error) {
@@ -1336,6 +1337,14 @@
 
             document.getElementById('preview-type-label').textContent = selectedEntity.type;
 
+            // T029: Skip /iterations call for non-iterable types (prevents 400s)
+            if (!selectedEntity.iterable) {
+                iterationsData = { iterations: [], iterating: false, total_rounds: 0, score_history: [] };
+                selectedRoundIndex = -1;
+                renderNonIterableView();
+                return;
+            }
+
             // Show staging view for staged/ready items, iteration view for others
             if (selectedEntity.status === 'staged' || selectedEntity.status === 'ready') {
                 await fetchIterations(selectedEntity.id);
@@ -1353,9 +1362,13 @@
                 const response = await fetch(`/api/action/${actionId}/iterations`);
                 iterationsData = await response.json();
 
-                // Default to latest round
+                // T029 BUG-3: Restore cached round index, or default to latest
                 if (iterationsData.iterations.length > 0) {
-                    selectedRoundIndex = iterationsData.iterations.length - 1;
+                    if (actionId in entityRoundIndex && entityRoundIndex[actionId] < iterationsData.iterations.length) {
+                        selectedRoundIndex = entityRoundIndex[actionId];
+                    } else {
+                        selectedRoundIndex = iterationsData.iterations.length - 1;
+                    }
                 } else {
                     selectedRoundIndex = -1;
                 }
@@ -1370,6 +1383,42 @@
                     </div>
                 `;
             }
+        }
+
+        // T029: Render clean state for non-iterable items
+        function renderNonIterableView() {
+            const pane = document.getElementById('preview-pane');
+            if (!selectedEntity) return;
+
+            pane.innerHTML = `
+                <div class="iteration-view">
+                    <div class="iteration-header">
+                        <div class="iteration-title">${escapeHtml(selectedEntity.source_title)}</div>
+                        <div class="iteration-subtitle">
+                            <span>${escapeHtml(selectedEntity.source_decimal)}</span>
+                            <span class="platform-badge ${PLATFORM_CLASS[selectedEntity.destination] || ''}">${escapeHtml(selectedEntity.destination)}</span>
+                            <span>~${selectedEntity.word_count} words</span>
+                        </div>
+                    </div>
+                    <div class="scores-section">
+                        <div class="not-judged">Not iterable</div>
+                    </div>
+                    <div class="post-section">
+                        <div class="post-section-title">Content</div>
+                        <div class="post-text">${escapeHtml(selectedEntity.content || '')}</div>
+                    </div>
+                    <div class="actions-bar">
+                        <button class="btn btn-primary" onclick="stageItem()">
+                            <span>Stage</span>
+                            <span class="key">a</span>
+                        </button>
+                        <button class="btn btn-secondary" onclick="copyContent()">
+                            <span>Copy</span>
+                            <span class="key">c</span>
+                        </button>
+                    </div>
+                </div>
+            `;
         }
 
         // Render the iteration detail view
@@ -1441,7 +1490,7 @@
             } else {
                 scoresHtml = `
                     <div class="scores-section">
-                        <div class="not-judged">Not judged</div>
+                        <div class="not-judged">Awaiting judge...</div>
                     </div>
                 `;
             }
@@ -1579,6 +1628,7 @@
             pane.querySelectorAll('.round-tab').forEach(tab => {
                 tab.addEventListener('click', () => {
                     selectedRoundIndex = parseInt(tab.dataset.round);
+                    if (selectedEntity) entityRoundIndex[selectedEntity.id] = selectedRoundIndex;
                     renderIterationView();
                 });
             });
@@ -1634,7 +1684,17 @@
                         // Iteration complete - refresh everything
                         iterationPollActive = false;
                         iterationsData = data;
+
+                        // T029 BUG-4: Select latest round that HAS scores, not just latest round
                         selectedRoundIndex = data.iterations.length - 1;
+                        for (let ri = data.iterations.length - 1; ri >= 0; ri--) {
+                            if (data.iterations[ri].scores) {
+                                selectedRoundIndex = ri;
+                                break;
+                            }
+                        }
+                        if (selectedEntity) entityRoundIndex[selectedEntity.id] = selectedRoundIndex;
+
                         renderIterationView();
 
                         // Also refresh the entity list for updated scores
@@ -2425,6 +2485,7 @@
                 e.preventDefault();
                 if (iterationsData && selectedRoundIndex < iterationsData.iterations.length - 1) {
                     selectedRoundIndex++;
+                    if (selectedEntity) entityRoundIndex[selectedEntity.id] = selectedRoundIndex;
                     renderIterationView();
                 }
             } else if (e.key === 'ArrowUp') {
@@ -2432,6 +2493,7 @@
                 e.preventDefault();
                 if (iterationsData && selectedRoundIndex > 0) {
                     selectedRoundIndex--;
+                    if (selectedEntity) entityRoundIndex[selectedEntity.id] = selectedRoundIndex;
                     renderIterationView();
                 }
             } else if (e.key === 'i') {
