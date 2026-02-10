@@ -1009,6 +1009,41 @@ def get_edit_history(action_id: str):
         return jsonify({"error": "Failed to load edit history"}), 500
 
 
+@app.route('/api/action/<action_id>/feedback', methods=['GET', 'POST'])
+def action_feedback(action_id: str):
+    """Get or save user feedback text for an action.
+
+    POST: Save user_feedback to action state.
+    GET: Retrieve current user_feedback.
+    Stored in state["actions"][action_id]["user_feedback"].
+    """
+    if not validate_action_id(action_id):
+        return jsonify({"error": "Invalid action ID format"}), 400
+
+    state = load_action_state()
+
+    if request.method == 'GET':
+        feedback = state.get("actions", {}).get(action_id, {}).get("user_feedback", "")
+        return jsonify({"user_feedback": feedback})
+
+    # POST
+    data = request.get_json()
+    if not data or "user_feedback" not in data:
+        return jsonify({"error": "Request body must contain 'user_feedback' field"}), 400
+
+    if action_id not in state["actions"]:
+        state["actions"][action_id] = {
+            "status": "new",
+            "copied_count": 0,
+            "created_at": datetime.now().isoformat(),
+        }
+
+    state["actions"][action_id]["user_feedback"] = data["user_feedback"]
+    save_action_state(state)
+
+    return jsonify({"success": True})
+
+
 @app.route('/api/action/<action_id>/iterate', methods=['POST'])
 def iterate_action(action_id: str):
     """Trigger next improvement round in background thread.
@@ -1045,6 +1080,9 @@ def iterate_action(action_id: str):
     if action_state.get("iterating", False):
         return jsonify({"error": "Iteration already in progress"}), 409
 
+    # T029: Read user feedback before starting iteration
+    user_feedback = action_state.get("user_feedback", "")
+
     state["actions"][action_id]["iterating"] = True
     save_action_state(state)
 
@@ -1062,6 +1100,7 @@ def iterate_action(action_id: str):
                 max_rounds=1,
                 existing_analysis=existing_analysis,
                 save_path=str(transcript_path),
+                user_feedback=user_feedback or None,
             )
         except Exception as e:
             logger.error("[KB Serve] Iteration failed for %s: %s", action_id, e)

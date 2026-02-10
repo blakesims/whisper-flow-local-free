@@ -629,3 +629,237 @@ class TestApproveRewire:
 
                 # No visual pipeline thread for auto-judge types
                 mock_thread_cls.assert_not_called()
+
+
+# ===== T029: User Feedback Endpoint =====
+
+class TestFeedbackEndpoint:
+    """Tests for GET/POST /api/action/<id>/feedback."""
+
+    def _setup(self, tmp_path, status="staged"):
+        """Create action state."""
+        state = {"actions": {}}
+        if status != "new":
+            state["actions"]["test-id--linkedin_v2"] = {
+                "status": status,
+                "copied_count": 0,
+                "created_at": "2026-02-08T09:00:00",
+            }
+        state_file = tmp_path / "action-state.json"
+        state_file.write_text(json.dumps(state))
+        return state_file
+
+    def test_get_empty_feedback(self, tmp_path):
+        """GET should return empty string when no feedback set."""
+        state_file = self._setup(tmp_path)
+
+        with patch("kb.serve.ACTION_STATE_PATH", state_file):
+            from kb.serve import app
+            app.config["TESTING"] = True
+            with app.test_client() as client:
+                response = client.get("/api/action/test-id--linkedin_v2/feedback")
+                assert response.status_code == 200
+                data = response.get_json()
+                assert data["user_feedback"] == ""
+
+    def test_post_and_get_feedback(self, tmp_path):
+        """POST should save feedback, GET should return it."""
+        state_file = self._setup(tmp_path)
+
+        with patch("kb.serve.ACTION_STATE_PATH", state_file):
+            from kb.serve import app
+            app.config["TESTING"] = True
+            with app.test_client() as client:
+                # POST feedback
+                response = client.post(
+                    "/api/action/test-id--linkedin_v2/feedback",
+                    json={"user_feedback": "make the hook shorter"},
+                )
+                assert response.status_code == 200
+                assert response.get_json()["success"] is True
+
+                # GET feedback
+                response = client.get("/api/action/test-id--linkedin_v2/feedback")
+                assert response.status_code == 200
+                data = response.get_json()
+                assert data["user_feedback"] == "make the hook shorter"
+
+    def test_post_feedback_persists_in_state(self, tmp_path):
+        """Feedback should be saved to action state file."""
+        state_file = self._setup(tmp_path)
+
+        with patch("kb.serve.ACTION_STATE_PATH", state_file):
+            from kb.serve import app
+            app.config["TESTING"] = True
+            with app.test_client() as client:
+                client.post(
+                    "/api/action/test-id--linkedin_v2/feedback",
+                    json={"user_feedback": "test feedback"},
+                )
+
+        state = json.loads(state_file.read_text())
+        assert state["actions"]["test-id--linkedin_v2"]["user_feedback"] == "test feedback"
+
+    def test_post_feedback_creates_action_if_missing(self, tmp_path):
+        """POST should create action entry if it doesn't exist."""
+        state_file = self._setup(tmp_path, "new")
+
+        with patch("kb.serve.ACTION_STATE_PATH", state_file):
+            from kb.serve import app
+            app.config["TESTING"] = True
+            with app.test_client() as client:
+                response = client.post(
+                    "/api/action/test-id--linkedin_v2/feedback",
+                    json={"user_feedback": "some notes"},
+                )
+                assert response.status_code == 200
+
+        state = json.loads(state_file.read_text())
+        assert "test-id--linkedin_v2" in state["actions"]
+        assert state["actions"]["test-id--linkedin_v2"]["user_feedback"] == "some notes"
+
+    def test_post_feedback_missing_field(self, tmp_path):
+        """POST without user_feedback field should return 400."""
+        state_file = self._setup(tmp_path)
+
+        with patch("kb.serve.ACTION_STATE_PATH", state_file):
+            from kb.serve import app
+            app.config["TESTING"] = True
+            with app.test_client() as client:
+                response = client.post(
+                    "/api/action/test-id--linkedin_v2/feedback",
+                    json={"note": "wrong field"},
+                )
+                assert response.status_code == 400
+
+    def test_feedback_invalid_id(self):
+        """Invalid action ID should return 400."""
+        from kb.serve import app
+        app.config["TESTING"] = True
+        with app.test_client() as client:
+            response = client.get("/api/action/invalid/feedback")
+            assert response.status_code == 400
+
+    def test_feedback_overwrite(self, tmp_path):
+        """Second POST should overwrite previous feedback."""
+        state_file = self._setup(tmp_path)
+
+        with patch("kb.serve.ACTION_STATE_PATH", state_file):
+            from kb.serve import app
+            app.config["TESTING"] = True
+            with app.test_client() as client:
+                client.post(
+                    "/api/action/test-id--linkedin_v2/feedback",
+                    json={"user_feedback": "first"},
+                )
+                client.post(
+                    "/api/action/test-id--linkedin_v2/feedback",
+                    json={"user_feedback": "second"},
+                )
+                response = client.get("/api/action/test-id--linkedin_v2/feedback")
+                assert response.get_json()["user_feedback"] == "second"
+
+
+# ===== T029: User Feedback Passed to Iteration =====
+
+class TestFeedbackPassedToIteration:
+    """Tests that user_feedback is passed to run_with_judge_loop."""
+
+    def _setup(self, tmp_path, user_feedback=""):
+        """Create transcript and action state with optional user feedback."""
+        decimal_dir = tmp_path / "50.01.01"
+        decimal_dir.mkdir(parents=True, exist_ok=True)
+        transcript = {
+            "id": "test-id",
+            "title": "Test Transcript",
+            "decimal": "50.01.01",
+            "transcript": "This is a test transcript for iteration.",
+            "source": {"type": "audio"},
+            "analysis": {
+                "linkedin_v2": {
+                    "post": "Draft 0 text",
+                    "_model": "gemini-2.0-flash",
+                    "_analyzed_at": "2026-02-08T10:00:00",
+                    "_round": 0,
+                    "_history": {"scores": [{"round": 0, "overall": 3.5, "criteria": {"hook_strength": 3}}]},
+                },
+                "linkedin_v2_0": {
+                    "post": "Draft 0 text",
+                    "_model": "gemini-2.0-flash",
+                    "_analyzed_at": "2026-02-08T10:00:00",
+                },
+                "linkedin_judge_0": {
+                    "overall_score": 3.5,
+                    "scores": {"hook_strength": 3},
+                    "improvements": [{"criterion": "hook", "suggestion": "improve it"}],
+                },
+            },
+        }
+        transcript_path = decimal_dir / "test-id.json"
+        transcript_path.write_text(json.dumps(transcript))
+
+        action_data = {
+            "status": "staged",
+            "copied_count": 0,
+            "created_at": "2026-02-08T09:00:00",
+        }
+        if user_feedback:
+            action_data["user_feedback"] = user_feedback
+
+        state = {"actions": {"test-id--linkedin_v2": action_data}}
+        state_file = tmp_path / "action-state.json"
+        state_file.write_text(json.dumps(state))
+        return state_file, transcript_path
+
+    def test_iterate_passes_user_feedback(self, tmp_path):
+        """Iterate should pass user_feedback to run_with_judge_loop."""
+        state_file, _ = self._setup(tmp_path, user_feedback="make the hook shorter")
+
+        with patch("kb.serve.ACTION_STATE_PATH", state_file), \
+             patch("kb.serve.KB_ROOT", tmp_path), \
+             patch("kb.serve.threading.Thread") as mock_thread_cls, \
+             patch("kb.serve.run_with_judge_loop") as mock_judge:
+
+            mock_thread = MagicMock()
+            mock_thread_cls.return_value = mock_thread
+
+            from kb.serve import app
+            app.config["TESTING"] = True
+            with app.test_client() as client:
+                response = client.post("/api/action/test-id--linkedin_v2/iterate")
+                assert response.status_code == 200
+
+                # Thread was started - extract the target function and call it
+                mock_thread_cls.assert_called_once()
+                target_fn = mock_thread_cls.call_args[1]["target"]
+                target_fn()
+
+                # run_with_judge_loop should have been called with user_feedback
+                mock_judge.assert_called_once()
+                call_kwargs = mock_judge.call_args[1]
+                assert call_kwargs["user_feedback"] == "make the hook shorter"
+
+    def test_iterate_no_feedback_passes_none(self, tmp_path):
+        """Iterate without user_feedback should pass None."""
+        state_file, _ = self._setup(tmp_path, user_feedback="")
+
+        with patch("kb.serve.ACTION_STATE_PATH", state_file), \
+             patch("kb.serve.KB_ROOT", tmp_path), \
+             patch("kb.serve.threading.Thread") as mock_thread_cls, \
+             patch("kb.serve.run_with_judge_loop") as mock_judge:
+
+            mock_thread = MagicMock()
+            mock_thread_cls.return_value = mock_thread
+
+            from kb.serve import app
+            app.config["TESTING"] = True
+            with app.test_client() as client:
+                response = client.post("/api/action/test-id--linkedin_v2/iterate")
+                assert response.status_code == 200
+
+                target_fn = mock_thread_cls.call_args[1]["target"]
+                target_fn()
+
+                mock_judge.assert_called_once()
+                call_kwargs = mock_judge.call_args[1]
+                assert call_kwargs["user_feedback"] is None

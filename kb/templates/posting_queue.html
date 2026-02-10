@@ -654,6 +654,55 @@
         .overall-delta.down { color: var(--red); }
         .overall-delta.same { color: var(--overlay0); }
 
+        /* T029: User feedback/notes section */
+        .notes-section {
+            padding: 8px 16px;
+            border-bottom: 1px solid var(--surface0);
+        }
+        .notes-toggle {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            color: var(--subtext0);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            user-select: none;
+        }
+        .notes-toggle:hover {
+            color: var(--text);
+        }
+        .notes-toggle .key-hint {
+            background: var(--surface0);
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-size: 10px;
+        }
+        .notes-textarea {
+            width: 100%;
+            background: var(--mantle);
+            padding: 10px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            line-height: 1.5;
+            color: var(--text);
+            border: 1px solid var(--surface0);
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            resize: vertical;
+            min-height: 60px;
+            max-height: 200px;
+            outline: none;
+            transition: border-color 0.2s;
+            margin-top: 6px;
+        }
+        .notes-textarea:focus {
+            border-color: var(--sapphire);
+        }
+        .notes-textarea::placeholder {
+            color: var(--overlay0);
+        }
+
         /* Staging area textarea */
         .staging-textarea {
             flex: 1;
@@ -1111,6 +1160,7 @@
         let slidesModified = false;  // track if slides have been edited
         let pendingG = false;           // T029: gg double-key state
         let pendingGTimeout = null;     // T029: gg timeout handle
+        let notesOpen = false;          // T029: notes textarea visibility
 
         // XSS protection helper
         function escapeHtml(text) {
@@ -1605,6 +1655,19 @@
 
                     ${feedbackHtml}
 
+                    <div class="notes-section" id="notes-section">
+                        <div class="notes-toggle" onclick="toggleNotes()">
+                            <span>${notesOpen ? '&#x25BC;' : '&#x25B6;'} Your Notes</span>
+                            <span class="key-hint">n</span>
+                        </div>
+                        <textarea
+                            id="notes-textarea"
+                            class="notes-textarea"
+                            placeholder="Your feedback for next iteration..."
+                            style="display: ${notesOpen ? 'block' : 'none'};"
+                        ></textarea>
+                    </div>
+
                     <div class="post-section">
                         <div class="post-section-title">Post Content (Round ${current.round})</div>
                         <div class="post-text">${escapeHtml(current.post)}</div>
@@ -1635,6 +1698,74 @@
                     renderIterationView();
                 });
             });
+
+            // T029: Attach notes textarea blur handler and load existing feedback
+            const notesTextarea = document.getElementById('notes-textarea');
+            if (notesTextarea && selectedEntity) {
+                notesTextarea.addEventListener('blur', () => saveUserFeedback());
+                // Load existing feedback
+                fetchUserFeedback();
+            }
+        }
+
+        // T029: Toggle notes section visibility
+        function toggleNotes() {
+            notesOpen = !notesOpen;
+            const textarea = document.getElementById('notes-textarea');
+            const section = document.getElementById('notes-section');
+            if (textarea) {
+                textarea.style.display = notesOpen ? 'block' : 'none';
+                if (notesOpen) textarea.focus();
+            }
+            // Update toggle arrow
+            if (section) {
+                const toggle = section.querySelector('.notes-toggle span:first-child');
+                if (toggle) toggle.innerHTML = (notesOpen ? '&#x25BC;' : '&#x25B6;') + ' Your Notes';
+            }
+        }
+
+        // T029: Fetch existing user feedback for current entity
+        async function fetchUserFeedback() {
+            if (!selectedEntity) return;
+            try {
+                const response = await fetch(`/api/action/${selectedEntity.id}/feedback`);
+                if (response.ok) {
+                    const data = await response.json();
+                    const textarea = document.getElementById('notes-textarea');
+                    if (textarea && data.user_feedback) {
+                        textarea.value = data.user_feedback;
+                        // Auto-open if there's existing feedback
+                        if (data.user_feedback && !notesOpen) {
+                            notesOpen = true;
+                            textarea.style.display = 'block';
+                            const section = document.getElementById('notes-section');
+                            if (section) {
+                                const toggle = section.querySelector('.notes-toggle span:first-child');
+                                if (toggle) toggle.innerHTML = '&#x25BC; Your Notes';
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to fetch user feedback:', error);
+            }
+        }
+
+        // T029: Save user feedback on blur
+        async function saveUserFeedback() {
+            if (!selectedEntity) return;
+            const textarea = document.getElementById('notes-textarea');
+            if (!textarea) return;
+
+            try {
+                await fetch(`/api/action/${selectedEntity.id}/feedback`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_feedback: textarea.value }),
+                });
+            } catch (error) {
+                console.error('Failed to save user feedback:', error);
+            }
         }
 
         // Trigger iteration (BUG-2: added iterateLocked guard to prevent re-entry)
@@ -2547,6 +2678,15 @@
             } else if (e.key === 'c') {
                 // Copy
                 copyContent();
+            } else if (e.key === 'n') {
+                // T029: Toggle notes textarea
+                const notesTextarea = document.getElementById('notes-textarea');
+                if (notesTextarea) {
+                    if (!notesOpen) {
+                        toggleNotes();
+                    }
+                    notesTextarea.focus();
+                }
             } else if (e.key === 's') {
                 // Save edit (staging mode only)
                 if (isStagingMode()) {

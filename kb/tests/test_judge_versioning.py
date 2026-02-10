@@ -776,3 +776,18 @@ class TestHistoryInjectionTemplate:
         assert "FEEDBACK:" not in result
         assert "Start" in result
         assert "End" in result
+
+
+# ===== T029: User Feedback in Judge Loop =====
+
+class TestUserFeedbackInJudgeLoop:
+    """Tests that user_feedback parameter is accepted and injected."""
+
+    def test_run_with_judge_loop_accepts_user_feedback(self):
+        """run_with_judge_loop should accept user_feedback parameter."""
+        import inspect
+        from kb.judge import run_with_judge_loop
+        sig = inspect.signature(run_with_judge_loop)
+        assert "user_feedback" in sig.parameters
+        # Default should be None
+        assert sig.parameters["user_feedback"].default is None

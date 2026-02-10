@@ -139,7 +139,8 @@ def run_with_judge_loop(
     model: str = DEFAULT_MODEL,
     max_rounds: int = 1,
     existing_analysis: dict | None = None,
-    save_path: str | None = None
+    save_path: str | None = None,
+    user_feedback: str | None = None,
 ) -> tuple[dict, dict]:
     """
     Run an analysis type with an LLM judge improvement loop, saving versioned outputs.
@@ -207,6 +208,9 @@ def run_with_judge_loop(
     if history:
         # We have prior rounds, inject history as judge_feedback
         judge_feedback_text = json.dumps(history, indent=2)
+        # T029: Append user feedback if provided
+        if user_feedback:
+            judge_feedback_text += f"\n\nThe author has provided this feedback: {user_feedback}"
 
         analysis_def = load_analysis_type(analysis_type)
         prompt_context = resolve_optional_inputs(analysis_def, existing_analysis, transcript_text)
@@ -302,6 +306,9 @@ def run_with_judge_loop(
         # Build full history for injection
         history = _build_history_from_existing(existing_analysis, analysis_type, judge_type)
         judge_feedback_text = json.dumps(history, indent=2)
+        # T029: Append user feedback if provided
+        if user_feedback:
+            judge_feedback_text += f"\n\nThe author has provided this feedback: {user_feedback}"
 
         # Build context with judge_feedback for conditional template
         analysis_def = load_analysis_type(analysis_type)
