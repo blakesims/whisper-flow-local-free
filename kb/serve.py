@@ -1080,8 +1080,11 @@ def iterate_action(action_id: str):
     if action_state.get("iterating", False):
         return jsonify({"error": "Iteration already in progress"}), 409
 
-    # T029: Read user feedback before starting iteration
+    # T029: Read and clear user feedback before starting iteration
+    # (prevents stale feedback re-sending on subsequent iterations)
     user_feedback = action_state.get("user_feedback", "")
+    if user_feedback:
+        state["actions"][action_id]["user_feedback"] = ""
 
     state["actions"][action_id]["iterating"] = True
     save_action_state(state)

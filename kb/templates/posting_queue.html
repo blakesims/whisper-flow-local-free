@@ -1732,17 +1732,21 @@
                 if (response.ok) {
                     const data = await response.json();
                     const textarea = document.getElementById('notes-textarea');
-                    if (textarea && data.user_feedback) {
-                        textarea.value = data.user_feedback;
-                        // Auto-open if there's existing feedback
-                        if (data.user_feedback && !notesOpen) {
-                            notesOpen = true;
-                            textarea.style.display = 'block';
-                            const section = document.getElementById('notes-section');
-                            if (section) {
-                                const toggle = section.querySelector('.notes-toggle span:first-child');
+                    if (textarea) {
+                        textarea.value = data.user_feedback || '';
+                        // Auto-open if there's existing feedback, collapse if empty
+                        const section = document.getElementById('notes-section');
+                        const toggle = section ? section.querySelector('.notes-toggle span:first-child') : null;
+                        if (data.user_feedback) {
+                            if (!notesOpen) {
+                                notesOpen = true;
+                                textarea.style.display = 'block';
                                 if (toggle) toggle.innerHTML = '&#x25BC; Your Notes';
                             }
+                        } else if (notesOpen) {
+                            notesOpen = false;
+                            textarea.style.display = 'none';
+                            if (toggle) toggle.innerHTML = '&#x25B6; Your Notes';
                         }
                     }
                 }
