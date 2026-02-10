@@ -1779,6 +1779,59 @@
             }
         }
 
+        // === Slide Data Serialization Layer ===
+
+        // Convert slide data into editable text for the textarea
+        function slideToEditableText(slide) {
+            const slideType = slide.type || 'content';
+            // Hook, CTA, mermaid: use content string
+            if (slideType === 'hook' || slideType === 'cta' || slideType === 'mermaid') {
+                return slide.content || '';
+            }
+            // Content slides: prefer bullets array, fall back to content
+            if (slide.bullets && Array.isArray(slide.bullets) && slide.bullets.length > 0) {
+                return slide.bullets.join('\n');
+            }
+            return slide.content || '';
+        }
+
+        // Parse edited text back into slide data fields
+        function editableTextToSlideFields(text, slide, selectedFormat) {
+            const slideType = slide.type || 'content';
+            // Hook/CTA: just content (subtitle handled separately)
+            if (slideType === 'hook' || slideType === 'cta') {
+                return { content: text };
+            }
+            // Mermaid: pass-through unchanged
+            if (slideType === 'mermaid') {
+                return { content: text };
+            }
+            // Content slides: parse based on selectedFormat
+            if (selectedFormat === 'paragraph') {
+                return { content: text, bullets: null, format: 'paragraph' };
+            }
+            // bullets or numbered: split by newline, filter empty
+            const bullets = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+            const contentFallback = bullets.join('. ');
+            return { bullets: bullets, format: selectedFormat || 'bullets', content: contentFallback };
+        }
+
+        // Convert textarea content when switching formats
+        function convertContentForFormatChange(text, oldFormat, newFormat) {
+            // bullets/numbered to paragraph: join lines with period-space
+            if ((oldFormat === 'bullets' || oldFormat === 'numbered') && newFormat === 'paragraph') {
+                const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+                return lines.join('. ');
+            }
+            // paragraph to bullets/numbered: split by newline (single line = one bullet)
+            if (oldFormat === 'paragraph' && (newFormat === 'bullets' || newFormat === 'numbered')) {
+                // Keep text as-is; user has newlines or doesn't
+                return text;
+            }
+            // bullets <-> numbered: no content change needed
+            return text;
+        }
+
         // Fetch slides for selected entity
         async function fetchSlides(actionId) {
             try {
