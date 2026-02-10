@@ -4,7 +4,6 @@
 
 | ID   | Task Name | Priority (1-5) | Phases (Done/Total) | Status | Dependencies | Rules Required | Link to `main.md` |
 | :--- | :---- | :---- | :--- | :---- | :--- | :---- | :---- |
-| T012 | KB Transcription Architecture + Zoom | 2 | 2/3 | ACTIVE | - | task-documentation | [main.md](active/T012-kb-zoom-meetings/main.md) |
 | T014 | Cap AI Markers for Intra-Segment Editing | 3 | 0/4 | PLANNING | T013 | - | [main.md](planning/T014-cap-ai-markers/main.md) |
 | T026 | Carousel Output Quality — Close Gap to Mockups | 1 | 4/4 | ACTIVE | T024 | - | [main.md](active/T026-carousel-quality/main.md) |
 
@@ -34,6 +33,7 @@
 - T016: KB Video Pipeline Integration - 4 phases: video discovery with smart matching, file reorganization, dashboard videos tab, async transcription queue ([main.md](completed/T016-kb-video-pipeline/main.md))
 - T015: KB Serve - Action Queue Dashboard - 6 phases: core server, compound analysis, config-driven actions, file inbox, browse mode, server deployment ([main.md](completed/T015-kb-serve-dashboard/main.md))
 - T013: Cap Recording Auto-Clean - `kb clean` command with LLM analysis, trigger phrases, interactive review, soft-delete ([main.md](completed/T013-cap-clean/main.md))
+- T012: KB Transcription Architecture + Zoom  
 
 ## Recently Archived (2025-01-16)
 - T002: UI Implementation
