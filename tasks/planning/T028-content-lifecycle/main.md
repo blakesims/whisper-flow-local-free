@@ -1,7 +1,7 @@
 # T028: Content Lifecycle — Queue/Review State Machine
 
 ## Meta
-- **Status:** READY
+- **Status:** CODE_REVIEW
 - **Created:** 2026-02-10
 - **Last Updated:** 2026-02-10
 - **Priority:** 2
@@ -244,7 +244,60 @@ Separate Queue and Review into distinct lifecycle stages so new content appears 
 ---
 
 ## Execution Log
-<!-- To be filled by executor -->
+
+### Phase 1: Status Migration + Comprehensive Status Audit (commit `6db413b`)
+- 1.1: Added `migrate_to_t028_statuses()` in `kb/serve_state.py` -- idempotent, all 5 old->new mappings
+- 1.2: Migration call in `main()` before `app.run()` in `kb/serve.py`
+- 1.3: Comprehensive status audit -- updated 12+ locations across `serve.py`, `serve_scanner.py`, both templates
+- 1.4: `/api/queue` filters `new` items only; keeps `"pending"` JSON key for API compat (plan-review m1)
+- 1.5: `/api/posting-queue-v2` filters `staged`+`ready` only; updated sort priority map (m2)
+- 1.6: Deprecated `/api/posting-queue` v1 (returns empty)
+- Also completed atomically: 2.1 (approve rewrite), 2.4 (iterate guard), 2.5 (header/status), 2.6 (stage acceptance)
+- Updated `mark_posted` to accept `staged`/`ready` (m3); iterate keeps status as `staged` (m4)
+- Tests: updated `test_iteration_view.py`, `test_serve_integration.py`, `test_staging.py` for new statuses
+- Result: 39 failed (pre-existing), 405 passed -- zero regressions
+
+### Phase 2: Queue View - Type-Aware Approve + Done Blocking (commit `4aed58b`)
+- 2.2: `mark_done()` blocks AUTO_JUDGE_TYPES with 400 + "Use [a] to stage or [s] to skip"
+- 2.3: Frontend `markDone()` in `action_queue.html` shows toast on non-ok response
+- Tasks 2.1, 2.4, 2.5, 2.6 completed in Phase 1 (atomicity requirement)
+- Result: 39 failed (pre-existing), 405 passed -- zero regressions
+
+### Phase 3: Review View - Filter + Publish + Stage Key Fix (commit `5d1debe`)
+- 3.1: Backend already filters staged+ready (Phase 1); frontend entity list already handles these statuses
+- 3.2: `mark_posted` already sets done+posted_at (Phase 1)
+- 3.3: Status bar counts correct (no old labels)
+- 3.4: `[a]` key works for staged items -- `stage_action()` accepts `("new", "staged")`
+- 3.5: Removed orphaned `.entity-status.draft` CSS class from `posting_queue.html`
+- Result: 39 failed (pre-existing), 405 passed -- zero regressions
+
+### Phase 4: Test + Verify (commit `ac1ed07`)
+- Created `kb/tests/test_t028_lifecycle.py` with 29 tests across 9 test classes:
+  - TestMigration (8 tests): idempotent, all old statuses, preserves posted_at, empty state
+  - TestApproveComplexType (3): linkedin_v2 -> staged, not in queue, rejects non-new
+  - TestApproveSimpleType (2): skool_post -> done+copied, never in review
+  - TestDoneBlockedForComplexTypes (2): 400 for linkedin_v2, allowed for simple
+  - TestIterateRequiresStaged (3): rejects new, done, skip
+  - TestPublishFlow (4): staged->done, ready->done, rejects new, not in review after
+  - TestSkipFromBothViews (4): skip new, skip staged, not in queue, not in review
+  - TestNoOldStatusLiterals (1): grep assertion on serve.py
+  - TestNoItemInBothViews (2): new only in queue, staged only in review
+- Result: 39 failed (pre-existing), 434 passed (29 new) -- zero regressions
+
+### Files Modified
+- `kb/serve_state.py` -- migration function
+- `kb/serve.py` -- approve rewrite, done blocking, iterate guard, status audit, migration call
+- `kb/serve_scanner.py` -- default status change
+- `kb/templates/action_queue.html` -- header, status bar, toast on 400
+- `kb/templates/posting_queue.html` -- removed draft badge + CSS
+- `kb/tests/test_iteration_view.py` -- updated for new statuses
+- `kb/tests/test_serve_integration.py` -- updated for new statuses
+- `kb/tests/test_staging.py` -- updated for new statuses
+- `kb/tests/test_t028_lifecycle.py` -- new, 29 lifecycle tests
+
+### Deviations
+- Phase 2 tasks 2.1, 2.4, 2.5, 2.6 executed with Phase 1 (plan noted "1.1 + 1.4 + 1.5 must deploy together" and approve rewrite was atomically required)
+- Phase 3 tasks were largely pre-completed by Phase 1; only orphaned CSS removal was new work
 
 ---
 
