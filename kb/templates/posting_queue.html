@@ -1832,6 +1832,28 @@
             return text;
         }
 
+        // Handle format dropdown change on a content slide
+        function handleFormatChange(selectEl, slideNum) {
+            const oldFormat = selectEl.dataset.currentFormat;
+            const newFormat = selectEl.value;
+            if (oldFormat === newFormat) return;
+
+            // Find the content textarea in the same slide card
+            const card = selectEl.closest('.slide-card');
+            const textarea = card.querySelector('.slide-content-input');
+            if (textarea) {
+                textarea.value = convertContentForFormatChange(textarea.value, oldFormat, newFormat);
+            }
+
+            // Update tracked format
+            selectEl.dataset.currentFormat = newFormat;
+
+            // Mark slides as modified
+            slidesModified = true;
+            const saveSlidesBtn = document.getElementById('btn-save-slides');
+            if (saveSlidesBtn) saveSlidesBtn.disabled = false;
+        }
+
         // Fetch slides for selected entity
         async function fetchSlides(actionId) {
             try {
@@ -1852,19 +1874,38 @@
         async function saveSlides() {
             if (!selectedEntity || !slidesData || !slidesModified) return;
 
-            // Collect edited slides from DOM
+            // Collect edited slides from DOM (exclude mermaid slides)
             const slideCards = document.querySelectorAll('.slide-card');
             const editedSlides = [];
 
             slideCards.forEach(card => {
                 const slideNum = parseInt(card.dataset.slideNumber);
+                const slideType = card.dataset.slideType || 'content';
+
+                // Exclude mermaid slides from save (read-only, nothing to persist)
+                if (slideType === 'mermaid') return;
+
                 const titleInput = card.querySelector('.slide-title-input');
                 const contentInput = card.querySelector('.slide-content-input');
+                const subtitleInput = card.querySelector('.slide-subtitle-input');
+                const formatSelect = card.querySelector('.slide-format-select');
 
                 if (titleInput || contentInput) {
+                    // Find the original slide data for this slide number
+                    const originalSlide = slidesData.slides.find(s => s.slide_number === slideNum) || {};
+                    const selectedFormat = formatSelect ? formatSelect.value : (originalSlide.format || 'bullets');
+                    const text = contentInput ? contentInput.value : '';
+
+                    // Use serialization layer to parse text back into structured fields
+                    const fields = editableTextToSlideFields(text, originalSlide, selectedFormat);
+
                     const edited = { slide_number: slideNum };
                     if (titleInput) edited.title = titleInput.value;
-                    if (contentInput) edited.content = contentInput.value;
+                    if (subtitleInput) edited.subtitle = subtitleInput.value;
+
+                    // Merge parsed fields
+                    Object.assign(edited, fields);
+
                     editedSlides.push(edited);
                 }
             });
@@ -1941,16 +1982,45 @@
                 const slideType = slide.type || 'content';
                 const slideNum = slide.slide_number || 0;
                 const title = slide.title || '';
-                const content = slide.content || '';
                 const isMermaid = slideType === 'mermaid';
+                const isHookOrCta = slideType === 'hook' || slideType === 'cta';
 
-                // Mermaid slides: content is read-only (diagram code)
+                // Use serialization layer to get editable text
+                const editableText = slideToEditableText(slide);
                 const contentReadonly = isMermaid ? 'readonly' : '';
-                const contentRows = content.split('\n').length;
+                const mermaidStyle = isMermaid ? 'style="font-family: monospace; font-size: 12px;"' : '';
+                const contentRows = editableText.split('\n').length;
                 const rows = Math.max(2, Math.min(6, contentRows));
 
+                // Format dropdown for content slides only
+                let formatDropdownHtml = '';
+                if (slideType === 'content') {
+                    const currentFormat = slide.format || 'bullets';
+                    formatDropdownHtml = `
+                            <div class="slide-field">
+                                <div class="slide-field-label">Format</div>
+                                <select class="slide-format-select" data-slide-number="${slideNum}" data-current-format="${escapeHtml(currentFormat)}"
+                                    onchange="handleFormatChange(this, ${slideNum})">
+                                    <option value="bullets" ${currentFormat === 'bullets' ? 'selected' : ''}>Bullets</option>
+                                    <option value="numbered" ${currentFormat === 'numbered' ? 'selected' : ''}>Numbered</option>
+                                    <option value="paragraph" ${currentFormat === 'paragraph' ? 'selected' : ''}>Paragraph</option>
+                                </select>
+                            </div>`;
+                }
+
+                // Subtitle field for hook and CTA slides
+                let subtitleHtml = '';
+                if (isHookOrCta) {
+                    const subtitle = slide.subtitle || '';
+                    subtitleHtml = `
+                            <div class="slide-field">
+                                <div class="slide-field-label">Subtitle</div>
+                                <textarea class="slide-textarea slide-subtitle-input" rows="1">${escapeHtml(subtitle)}</textarea>
+                            </div>`;
+                }
+
                 slidesHtml += `
-                    <div class="slide-card" data-slide-number="${slideNum}">
+                    <div class="slide-card" data-slide-number="${slideNum}" data-slide-type="${escapeHtml(slideType)}">
                         <div class="slide-card-header">
                             <span class="slide-type-badge ${slideType}">${escapeHtml(slideType)}</span>
                             <span class="slide-number">Slide ${slideNum}</span>
@@ -1960,10 +2030,12 @@
                                 <div class="slide-field-label">Title</div>
                                 <textarea class="slide-textarea slide-title-input" rows="1">${escapeHtml(title)}</textarea>
                             </div>
+                            ${formatDropdownHtml}
                             <div class="slide-field">
                                 <div class="slide-field-label">Content${isMermaid ? ' (read-only)' : ''}</div>
-                                <textarea class="slide-textarea slide-content-input" rows="${rows}" ${contentReadonly}>${escapeHtml(content)}</textarea>
+                                <textarea class="slide-textarea slide-content-input" rows="${rows}" ${contentReadonly} ${mermaidStyle}>${escapeHtml(editableText)}</textarea>
                             </div>
+                            ${subtitleHtml}
                         </div>
                     </div>
                 `;
