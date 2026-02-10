@@ -363,6 +363,237 @@ class TestSaveSlides:
         assert "_slides_edited_at" in transcript_data["analysis"]["carousel_slides"]
 
 
+# ===== Phase 7: Save bullets, format, subtitle =====
+
+def _make_transcript_with_bullets(tmp_path, transcript_id="test-id"):
+    """Create transcript with Phase 6 bullet-format slide data."""
+    decimal_dir = tmp_path / "50.01.01"
+    decimal_dir.mkdir(parents=True, exist_ok=True)
+
+    analysis = {
+        "linkedin_v2": {
+            "post": "Draft text",
+            "_round": 1,
+            "_edit": 0,
+        },
+        "carousel_slides": {
+            "output": {
+                "slides": [
+                    {"slide_number": 1, "type": "hook", "title": "Hook", "content": "Headline", "subtitle": "Subheading", "words": 3},
+                    {"slide_number": 2, "type": "content", "title": "Key Points", "bullets": ["Point A", "Point B", "Point C"], "format": "bullets", "content": "Point A. Point B. Point C", "words": 10},
+                    {"slide_number": 3, "type": "content", "title": "Steps", "bullets": ["Step 1", "Step 2"], "format": "numbered", "content": "Step 1. Step 2", "words": 6},
+                    {"slide_number": 4, "type": "content", "title": "Summary", "content": "A paragraph of text.", "format": "paragraph", "words": 5},
+                    {"slide_number": 5, "type": "mermaid", "title": "Diagram", "content": "graph LR\n  A-->B", "words": 0},
+                    {"slide_number": 6, "type": "cta", "title": "Follow Me", "content": "What do you think?", "subtitle": "Drop a comment", "words": 5},
+                ],
+                "total_slides": 6,
+                "has_mermaid": True,
+            },
+        },
+    }
+
+    transcript = {
+        "id": transcript_id,
+        "title": "Test Transcript",
+        "decimal": "50.01.01",
+        "transcript": "Test.",
+        "source": {"type": "audio"},
+        "analysis": analysis,
+    }
+    path = decimal_dir / f"{transcript_id}.json"
+    path.write_text(json.dumps(transcript))
+    return path
+
+
+class TestSaveSlidesPhase7:
+    """Tests for Phase 7 save-slides: bullets, format, subtitle handling."""
+
+    def test_save_bullets(self, tmp_path):
+        """Saving bullets array should persist both bullets and content fallback."""
+        transcript_path = _make_transcript_with_bullets(tmp_path)
+        state_file = _make_state(tmp_path)
+
+        with patch("kb.serve.ACTION_STATE_PATH", state_file), \
+             patch("kb.serve.KB_ROOT", tmp_path):
+            from kb.serve import app
+            app.config["TESTING"] = True
+            with app.test_client() as client:
+                response = client.post(
+                    "/api/action/test-id--linkedin_v2/save-slides",
+                    json={"slides": [
+                        {"slide_number": 2, "title": "Key Points", "bullets": ["New A", "New B"], "format": "bullets", "content": "New A. New B"},
+                    ]},
+                    content_type="application/json",
+                )
+                assert response.status_code == 200
+
+        data = json.loads(transcript_path.read_text())
+        slide = data["analysis"]["carousel_slides"]["output"]["slides"][1]
+        assert slide["bullets"] == ["New A", "New B"]
+        assert slide["content"] == "New A. New B"
+        assert slide["format"] == "bullets"
+
+    def test_save_paragraph_clears_bullets(self, tmp_path):
+        """Saving paragraph format should clear bullets field."""
+        transcript_path = _make_transcript_with_bullets(tmp_path)
+        state_file = _make_state(tmp_path)
+
+        with patch("kb.serve.ACTION_STATE_PATH", state_file), \
+             patch("kb.serve.KB_ROOT", tmp_path):
+            from kb.serve import app
+            app.config["TESTING"] = True
+            with app.test_client() as client:
+                response = client.post(
+                    "/api/action/test-id--linkedin_v2/save-slides",
+                    json={"slides": [
+                        {"slide_number": 2, "content": "Now a paragraph.", "format": "paragraph", "bullets": None},
+                    ]},
+                    content_type="application/json",
+                )
+                assert response.status_code == 200
+
+        data = json.loads(transcript_path.read_text())
+        slide = data["analysis"]["carousel_slides"]["output"]["slides"][1]
+        assert slide["content"] == "Now a paragraph."
+        assert slide["format"] == "paragraph"
+        assert "bullets" not in slide
+
+    def test_save_subtitle(self, tmp_path):
+        """Saving subtitle on hook/CTA should persist."""
+        transcript_path = _make_transcript_with_bullets(tmp_path)
+        state_file = _make_state(tmp_path)
+
+        with patch("kb.serve.ACTION_STATE_PATH", state_file), \
+             patch("kb.serve.KB_ROOT", tmp_path):
+            from kb.serve import app
+            app.config["TESTING"] = True
+            with app.test_client() as client:
+                response = client.post(
+                    "/api/action/test-id--linkedin_v2/save-slides",
+                    json={"slides": [
+                        {"slide_number": 1, "title": "Hook", "content": "New headline", "subtitle": "New subheading"},
+                        {"slide_number": 6, "title": "Follow Me", "content": "Updated CTA", "subtitle": "Updated sub"},
+                    ]},
+                    content_type="application/json",
+                )
+                assert response.status_code == 200
+
+        data = json.loads(transcript_path.read_text())
+        hook = data["analysis"]["carousel_slides"]["output"]["slides"][0]
+        cta = data["analysis"]["carousel_slides"]["output"]["slides"][5]
+        assert hook["subtitle"] == "New subheading"
+        assert cta["subtitle"] == "Updated sub"
+
+    def test_save_numbered_format(self, tmp_path):
+        """Saving numbered format should persist format field."""
+        transcript_path = _make_transcript_with_bullets(tmp_path)
+        state_file = _make_state(tmp_path)
+
+        with patch("kb.serve.ACTION_STATE_PATH", state_file), \
+             patch("kb.serve.KB_ROOT", tmp_path):
+            from kb.serve import app
+            app.config["TESTING"] = True
+            with app.test_client() as client:
+                response = client.post(
+                    "/api/action/test-id--linkedin_v2/save-slides",
+                    json={"slides": [
+                        {"slide_number": 3, "bullets": ["Updated 1", "Updated 2", "Updated 3"], "format": "numbered", "content": "Updated 1. Updated 2. Updated 3"},
+                    ]},
+                    content_type="application/json",
+                )
+                assert response.status_code == 200
+
+        data = json.loads(transcript_path.read_text())
+        slide = data["analysis"]["carousel_slides"]["output"]["slides"][2]
+        assert slide["format"] == "numbered"
+        assert slide["bullets"] == ["Updated 1", "Updated 2", "Updated 3"]
+
+    def test_invalid_format_returns_400(self, tmp_path):
+        """Invalid format value should return 400."""
+        _make_transcript_with_bullets(tmp_path)
+        state_file = _make_state(tmp_path)
+
+        with patch("kb.serve.ACTION_STATE_PATH", state_file), \
+             patch("kb.serve.KB_ROOT", tmp_path):
+            from kb.serve import app
+            app.config["TESTING"] = True
+            with app.test_client() as client:
+                response = client.post(
+                    "/api/action/test-id--linkedin_v2/save-slides",
+                    json={"slides": [
+                        {"slide_number": 2, "format": "invalid_format"},
+                    ]},
+                    content_type="application/json",
+                )
+                assert response.status_code == 400
+                assert "Invalid format" in response.get_json()["error"]
+
+    def test_invalid_bullets_returns_400(self, tmp_path):
+        """Non-list bullets should return 400."""
+        _make_transcript_with_bullets(tmp_path)
+        state_file = _make_state(tmp_path)
+
+        with patch("kb.serve.ACTION_STATE_PATH", state_file), \
+             patch("kb.serve.KB_ROOT", tmp_path):
+            from kb.serve import app
+            app.config["TESTING"] = True
+            with app.test_client() as client:
+                response = client.post(
+                    "/api/action/test-id--linkedin_v2/save-slides",
+                    json={"slides": [
+                        {"slide_number": 2, "bullets": "not a list"},
+                    ]},
+                    content_type="application/json",
+                )
+                assert response.status_code == 400
+                assert "bullets" in response.get_json()["error"]
+
+    def test_invalid_subtitle_returns_400(self, tmp_path):
+        """Non-string subtitle should return 400."""
+        _make_transcript_with_bullets(tmp_path)
+        state_file = _make_state(tmp_path)
+
+        with patch("kb.serve.ACTION_STATE_PATH", state_file), \
+             patch("kb.serve.KB_ROOT", tmp_path):
+            from kb.serve import app
+            app.config["TESTING"] = True
+            with app.test_client() as client:
+                response = client.post(
+                    "/api/action/test-id--linkedin_v2/save-slides",
+                    json={"slides": [
+                        {"slide_number": 1, "subtitle": 123},
+                    ]},
+                    content_type="application/json",
+                )
+                assert response.status_code == 400
+                assert "subtitle" in response.get_json()["error"]
+
+    def test_save_and_refetch_bullets(self, tmp_path):
+        """Saved bullets should be returned on next GET."""
+        _make_transcript_with_bullets(tmp_path)
+        state_file = _make_state(tmp_path)
+
+        with patch("kb.serve.ACTION_STATE_PATH", state_file), \
+             patch("kb.serve.KB_ROOT", tmp_path):
+            from kb.serve import app
+            app.config["TESTING"] = True
+            with app.test_client() as client:
+                client.post(
+                    "/api/action/test-id--linkedin_v2/save-slides",
+                    json={"slides": [
+                        {"slide_number": 2, "bullets": ["Saved A", "Saved B"], "format": "bullets", "content": "Saved A. Saved B"},
+                    ]},
+                    content_type="application/json",
+                )
+
+                response = client.get("/api/action/test-id--linkedin_v2/slides")
+                assert response.status_code == 200
+                data = response.get_json()
+                slide = data["slides"][1]
+                assert slide["bullets"] == ["Saved A", "Saved B"]
+                assert slide["format"] == "bullets"
+
+
 # ===== POST /api/action/<id>/render =====
 
 class TestRenderEndpoint:

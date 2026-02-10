@@ -791,7 +791,18 @@ def save_slides(action_id: str):
 
         existing_slides = slides_output.get("slides", carousel_slides.get("slides", []))
 
-        # Update existing slides with edits (preserving type, only updating title/content)
+        # Validate incoming fields
+        valid_formats = ("bullets", "numbered", "paragraph")
+        for edited in edited_slides:
+            if "format" in edited and edited["format"] not in valid_formats:
+                return jsonify({"error": f"Invalid format '{edited['format']}'. Must be one of: {', '.join(valid_formats)}"}), 400
+            if "bullets" in edited and edited["bullets"] is not None:
+                if not isinstance(edited["bullets"], list) or not all(isinstance(b, str) for b in edited["bullets"]):
+                    return jsonify({"error": "'bullets' must be a list of strings"}), 400
+            if "subtitle" in edited and not isinstance(edited["subtitle"], str):
+                return jsonify({"error": "'subtitle' must be a string"}), 400
+
+        # Update existing slides with edits (preserving type)
         for edited in edited_slides:
             slide_num = edited.get("slide_number")
             if slide_num is None:
@@ -800,10 +811,29 @@ def save_slides(action_id: str):
             # Find matching existing slide
             for existing in existing_slides:
                 if existing.get("slide_number") == slide_num:
-                    # Update content fields only; type is read-only
+                    # Update title
                     if "title" in edited:
                         existing["title"] = edited["title"]
-                    if "content" in edited:
+
+                    # Update subtitle (hook/CTA slides)
+                    if "subtitle" in edited:
+                        existing["subtitle"] = edited["subtitle"]
+
+                    # Update format
+                    if "format" in edited:
+                        existing["format"] = edited["format"]
+
+                    # Update content based on format
+                    if "bullets" in edited and edited["bullets"] is not None:
+                        existing["bullets"] = edited["bullets"]
+                        # Set content as fallback string
+                        existing["content"] = ". ".join(edited["bullets"])
+                    elif "format" in edited and edited["format"] == "paragraph":
+                        # Paragraph format: clear bullets, write content
+                        existing.pop("bullets", None)
+                        if "content" in edited:
+                            existing["content"] = edited["content"]
+                    elif "content" in edited:
                         existing["content"] = edited["content"]
                     break
 
