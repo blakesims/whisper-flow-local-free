@@ -313,6 +313,38 @@ Separate Queue and Review into distinct lifecycle stages so new content appears 
 
 ---
 
+## Bugs Found During Smoke Test (2026-02-10)
+
+### BUG-2 (CRITICAL): `[i]` triggers multiple iterations instead of one
+- **Symptom:** Pressing `[i]` once causes 2+ judge rounds to fire, with /iterations polling continuing for extended period
+- **Root cause:** `iterate_action()` in serve.py has NO re-entry guard. It sets `iterating=True` and spawns a background thread without checking if already iterating. Keyboard repeat or a second press spawns parallel iteration threads.
+- **Fix required:**
+  1. Server: Add `if state["actions"][action_id].get("iterating", False): return 409` before starting thread
+  2. Client: Debounce `[i]` keypress; add local `iterationInProgress` flag in `triggerIterate()`
+  3. Client: Unify dual polling paths (`pollIteration()` + `fetchQueue()→fetchIterations()`) to prevent race conditions
+- **Files:** serve.py (~line 1070), posting_queue.html (`triggerIterate()` ~line 1587, `pollIteration()` ~line 1616)
+
+### BUG-3: Round navigation state resets when switching items
+- **Symptom:** Arrow keys change rounds, but navigating away from item and back resets to latest round
+- **Root cause:** `fetchIterations()` always resets `selectedRoundIndex` to latest. `selectEntity()` re-calls `fetchIterations()` on every focus.
+- **Fix:** Cache `selectedRoundIndex` per entity (e.g. `entityRoundIndex[actionId]`), restore on re-select
+- **Files:** posting_queue.html (~line 1350-1362, ~line 1321-1347)
+
+### BUG-4: Judge scores only visible intermittently
+- **Symptom:** Scores appear sometimes, disappear after iteration completes or round change
+- **Root cause:** Scores conditionally rendered only when `current.scores` exists. After iteration, `selectedRoundIndex` resets to latest round which may not have judge data populated yet. No persistent grade summary across rounds.
+- **Files:** posting_queue.html (~line 1405-1446, ~line 1615-1634)
+
+### NOTE: 400s on /iterations for linkedin_post items
+- **Symptom:** `GET /api/action/...--linkedin_post/iterations` returns 400
+- **Root cause:** Expected behavior — `linkedin_post` is not in `AUTO_JUDGE_TYPES`. Frontend calls /iterations for all Review items regardless of type. Should either: (a) skip the call for non-iterable types, or (b) return empty 200 instead of 400.
+
+### UX observations (not bugs, future work)
+- `gg`/`G` vim navigation not implemented (jump to top/bottom)
+- Round navigation uses Arrow keys; `h/l` would be more vim-consistent
+- No way to input manual feedback/notes before triggering iteration
+- No persistent view of judge grades across all rounds (only visible per-round)
+
 ## Completion
 - **Completed:** 2026-02-10
 - **Summary:** Content lifecycle state machine fully implemented. Queue shows only `new` items, Review shows only `staged`/`ready` items. Type-aware approve routes simple types to copy+done and complex types to staged. `[d]` blocked for complex types with toast. Iterate requires staged status. Idempotent migration at server startup. 29 new lifecycle tests.

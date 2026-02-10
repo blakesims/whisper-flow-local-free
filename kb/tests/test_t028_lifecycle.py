@@ -370,6 +370,22 @@ class TestIterateRequiresStaged:
                 response = client.post("/api/action/test-id--linkedin_v2/iterate")
                 assert response.status_code == 400
 
+    def test_iterate_rejects_if_already_iterating(self, tmp_path):
+        """BUG-2: re-entry guard returns 409 when already iterating."""
+        _make_transcript(tmp_path, "test-id", "linkedin_v2")
+        state_file = _make_state(tmp_path, "test-id--linkedin_v2", "staged",
+                                 iterating=True)
+
+        with patch("kb.serve.ACTION_STATE_PATH", state_file), \
+             patch("kb.serve.KB_ROOT", tmp_path):
+            from kb.serve import app
+            app.config["TESTING"] = True
+            with app.test_client() as client:
+                response = client.post("/api/action/test-id--linkedin_v2/iterate")
+                assert response.status_code == 409
+                data = response.get_json()
+                assert "already in progress" in data["error"]
+
 
 # ===== 4.6: Staged -> Iterate -> Ready -> Publish -> Done =====
 

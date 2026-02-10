@@ -1063,9 +1063,14 @@ def iterate_action(action_id: str):
 
     # Validate status: must be staged before iterating (T028 Q3)
     state = load_action_state()
-    current_status = state["actions"].get(action_id, {}).get("status", "new")
+    action_state = state["actions"].get(action_id, {})
+    current_status = action_state.get("status", "new")
     if current_status != "staged":
         return jsonify({"error": "Item must be staged before iterating"}), 400
+
+    # Re-entry guard: reject if already iterating (BUG-2 fix)
+    if action_state.get("iterating", False):
+        return jsonify({"error": "Iteration already in progress"}), 409
 
     state["actions"][action_id]["iterating"] = True
     save_action_state(state)

@@ -1182,7 +1182,8 @@
                 }
 
                 // If an entity is selected and iterating, refresh iterations
-                if (selectedEntity && selectedEntity.iterating) {
+                // (skip if pollIteration is already polling to prevent dual-poll race)
+                if (selectedEntity && selectedEntity.iterating && !iterationPollActive) {
                     await fetchIterations(selectedEntity.id);
                 }
             } catch (error) {
@@ -1583,9 +1584,11 @@
             });
         }
 
-        // Trigger iteration
+        // Trigger iteration (BUG-2: added iterateLocked guard to prevent re-entry)
+        let iterateLocked = false;
         async function triggerIterate() {
-            if (!selectedEntity || iterationsData.iterating) return;
+            if (!selectedEntity || iterationsData.iterating || iterateLocked) return;
+            iterateLocked = true;
 
             try {
                 const response = await fetch(`/api/action/${selectedEntity.id}/iterate`, {
@@ -1595,26 +1598,31 @@
 
                 if (response.ok) {
                     showToast('Iteration started...');
-                    // Immediately update UI to show iterating state
                     iterationsData.iterating = true;
                     selectedEntity.iterating = true;
                     renderIterationView();
                     renderEntityList();
-
-                    // Start polling for completion
                     pollIteration();
+                } else if (response.status === 409) {
+                    // Already iterating server-side, sync UI state
+                    iterationsData.iterating = true;
+                    selectedEntity.iterating = true;
                 } else {
                     showToast(data.error || 'Iterate failed');
                 }
             } catch (error) {
                 console.error('Iterate failed:', error);
                 showToast('Iterate failed');
+            } finally {
+                iterateLocked = false;
             }
         }
 
-        // Poll for iteration completion
+        // Poll for iteration completion (BUG-2: track active poll to prevent dual-poll)
+        let iterationPollActive = false;
         async function pollIteration() {
-            if (!selectedEntity) return;
+            if (!selectedEntity || iterationPollActive) return;
+            iterationPollActive = true;
 
             const actionId = selectedEntity.id;
             const check = async () => {
@@ -1624,6 +1632,7 @@
 
                     if (!data.iterating) {
                         // Iteration complete - refresh everything
+                        iterationPollActive = false;
                         iterationsData = data;
                         selectedRoundIndex = data.iterations.length - 1;
                         renderIterationView();
@@ -1639,6 +1648,7 @@
                     setTimeout(check, 2000);
                 } catch (error) {
                     console.error('Poll failed:', error);
+                    iterationPollActive = false;
                     setTimeout(check, 3000);
                 }
             };
