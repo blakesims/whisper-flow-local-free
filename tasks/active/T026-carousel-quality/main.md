@@ -4,7 +4,7 @@
 
 Fix carousel output quality to match mockups in `kb/carousel_templates/mockups/`. Root cause was weak LLM prompt + schema design, not template/CSS issues.
 
-**Status:** CODE_REVIEW — Phase 6 REVISE complete
+**Status:** CODE_REVIEW
 
 ## Priority: 1
 
@@ -89,8 +89,8 @@ Commits: `4a385cf`, `7e8cfec`, `3b55d6a`
 - 1x `wait_for_timeout(1000)` vs `(500)` — Phase 2 changed timeout but test not updated
 - 1x `test_prompt_mentions_title_and_subtitle` — prompt uses `title=` not `title:`
 
-### Phase 7: KB Serve Frontend Fixes — NOT STARTED
-**Needs planning.** Multiple issues with the carousel editor UI in `kb serve`:
+### Phase 7: KB Serve Frontend Fixes — READY
+**Plan:** `phase-7-plan.md` (Revision 2). Multiple issues with the carousel editor UI in `kb serve`:
 
 **A. Save Slides not persisting changes:**
 - Editing title/content in the frontend and clicking "Save Slides" doesn't appear to save back to the JSON
@@ -137,15 +137,91 @@ Test across multiple transcripts, compare to mockups, update other templates.
 
 ---
 
+## Plan Review -- Phase 7
+- **Gate:** READY (Round 2)
+- **Reviewed:** 2026-02-10
+- **Summary (R1):** NEEDS_WORK -- 2 critical, 3 major, 3 minor. Format dropdown missing, canGenerate shared, mermaid save ambiguous.
+- **Summary (R2):** READY -- All 8 R1 issues resolved. 3 new minor notes (implementation details, not blocking). Plan is comprehensive with accurate source code references, well-sequenced phases, and explicit acceptance criteria for all edge cases.
+- **Issues (R2):** 0 critical, 0 major, 3 minor (implementation details the executor can handle)
+- **Open Questions Finalized:** None -- all 3 were resolved by Blake. No new questions requiring human input.
+
+-> Details: `plan-review.md`
+
+---
+
 ## Code Review Log
 
 ### Phase 6
-- **Gate:** REVISE
+- **Gate:** PASS (Round 2)
 - **Reviewed:** 2026-02-10
-- **Issues:** 1 critical, 1 major, 2 minor
-- **Summary:** Phase 6A (emphasis) is solid. Phase 6B has a critical gap: modern-editorial and tech-minimal templates do not handle `bullets` array data, rendering blank content slides for the primary new data format. Needs format-aware branching in both templates + new tests.
+- **Round 1:** REVISE -- 1 critical (blank content in 2 templates), 1 major (no tests)
+- **Round 2:** PASS -- 0 critical, 0 major, 0 new minor. All round 1 issues resolved. 21 new tests passing, no regressions.
+- **Summary:** Format-aware branching now consistent across all 3 templates. Test coverage comprehensive via parametrized cross-template tests.
 
 -> Details: `code-review-phase-6.md`
+
+---
+
+## Execution Log
+
+### Phase 7: KB Serve Frontend Fixes (Sub-phases 1-4)
+- **Status:** COMPLETE
+- **Started:** 2026-02-10
+- **Completed:** 2026-02-10
+- **Commits:** `69cee16`, `b6effd8`, `7325671`, `7b9a9ae`
+- **Files Modified:**
+  - `kb/templates/posting_queue.html` -- added serialization layer (3 functions), format-aware slide editor UI, format dropdown, subtitle fields, updated saveSlides(), split canGenerate/canReRender
+  - `kb/serve.py` -- updated save_slides() to handle bullets/format/subtitle, validation, stale field clearing
+  - `kb/tests/test_slide_editing.py` -- 8 new tests for Phase 7 backend (bullets, paragraph, subtitle, format switching, validation, round-trip)
+- **Notes:**
+  - Plan review minor note #1 (oldFormat tracking): implemented via `data-current-format` attribute on select element, updated in `handleFormatChange()`
+  - Plan review minor note #2 (selectedFormat for non-content slides): `editableTextToSlideFields` checks `slide.type` first, only uses `selectedFormat` for content slides
+  - Plan review minor note #3 (redundant visualStatus check): kept as defensive coding per recommendation
+  - Pre-existing test failure in `test_carousel_templates.py::test_slide_item_schema` (Phase 1 schema change, test not updated) -- NOT introduced by Phase 7
+  - 54 tests passing across `test_slide_editing.py` + `test_serve_integration.py`
+
+### Tasks Completed
+- [x] Task 1.1: `slideToEditableText()` -- serialize slide data to editable text
+- [x] Task 1.2: `editableTextToSlideFields()` -- parse back with selectedFormat parameter
+- [x] Task 1.3: Subtitle handling for hook/CTA (separate field in serializer)
+- [x] Task 1.4: `convertContentForFormatChange()` -- format switching helper
+- [x] Task 2.1: `buildSlideEditorHtml()` uses `slideToEditableText()`
+- [x] Task 2.2: Format dropdown per content slide with onchange handler
+- [x] Task 2.3: Subtitle textarea for hook/CTA slides
+- [x] Task 2.4: Mermaid read-only monospace textarea
+- [x] Task 2.5: `saveSlides()` uses serialization layer, excludes mermaid
+- [x] Task 3.1: Backend save loop writes bullets/format/subtitle
+- [x] Task 3.2: Stale field clearing (bullets cleared for paragraph, content set as fallback for bullets)
+- [x] Task 3.3: Input validation with 400 errors
+- [x] Task 4.1: Split canGenerate (staged) and canReRender (staged/ready/stale)
+- [x] Task 4.2: Buttons mapped to correct variables
+- [x] Task 4.3: Template selector Re-render confirmed correct (uses reRender() internal guard)
+- [x] Task 4.4: Thumbnail refresh confirmed (pollVisualGeneration calls renderStagingView)
+
+### Acceptance Criteria
+- [x] P1-AC1: slideToEditableText round-trips cleanly (bullets.join -> split -> identical array)
+- [x] P1-AC2: Empty lines and trailing whitespace stripped in editableTextToSlideFields
+- [x] P1-AC3: Mermaid passes through unchanged
+- [x] P1-AC4: convertContentForFormatChange joins bullets with `. `, single-line paragraph stays as one bullet
+- [x] P2-AC1: Bullet slides display as line-separated text
+- [x] P2-AC2: Numbered slides display with "numbered" selected in dropdown
+- [x] P2-AC3: Paragraph slides display content with "paragraph" selected
+- [x] P2-AC4: Hook/CTA show content and subtitle fields
+- [x] P2-AC5: Mermaid shows read-only monospace textarea
+- [x] P2-AC6: Format change bullets->paragraph converts textarea (lines joined with `. `)
+- [x] P2-AC7: Format change paragraph->bullets keeps text as-is
+- [x] P2-AC8: Format change persists to backend via save
+- [x] P2-AC9: Mermaid excluded from save payload
+- [x] P3-AC1: Bullet edits persist (bullets array + content fallback) -- test_save_bullets
+- [x] P3-AC2: Paragraph saves clear bullets -- test_save_paragraph_clears_bullets
+- [x] P3-AC3: Subtitle edits persist -- test_save_subtitle
+- [x] P3-AC4: Re-render uses updated data (verified via save+refetch round-trip)
+- [x] P3-AC5: Invalid format returns 400 -- test_invalid_format_returns_400
+- [x] P4-AC1: Ready items: Re-render enabled, Generate disabled (canReRender includes ready)
+- [x] P4-AC2: Staged items: both enabled (both canGenerate and canReRender true)
+- [x] P4-AC3: Template switch + Re-render starts render (reRender() sends template)
+- [x] P4-AC4: Thumbnail updates after render (pollVisualGeneration -> renderStagingView)
+- [x] P4-AC5: Template-only switch works without save (reRender accepts ready status)
 
 ---
 
