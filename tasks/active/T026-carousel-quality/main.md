@@ -4,7 +4,7 @@
 
 Fix carousel output quality to match mockups in `kb/carousel_templates/mockups/`. Root cause was weak LLM prompt + schema design, not template/CSS issues.
 
-**Status:** PLAN_REVIEW
+**Status:** CODE_REVIEW
 
 ## Priority: 1
 
@@ -110,7 +110,7 @@ Commits: `4a385cf`, `7e8cfec`, `3b55d6a`
 - Each format needs appropriate input controls (textarea vs structured list editor)
 - Must round-trip cleanly: display → edit → save → re-render
 
-### Phase 8: KB Serve — Iteration View + Processing UX — PLAN_REVIEW
+### Phase 8: KB Serve — Iteration View + Processing UX — READY
 **Plan:** `phase-8-plan.md`. Three sub-phases:
 
 **Investigation findings (2026-02-09):**
@@ -147,6 +147,16 @@ Test across multiple transcripts, compare to mockups, update other templates.
 - **Open Questions Finalized:** None -- all 3 were resolved by Blake. No new questions requiring human input.
 
 -> Details: `plan-review.md`
+
+## Plan Review -- Phase 8
+- **Gate:** READY (Round 2)
+- **Reviewed:** 2026-02-10
+- **Summary (R1):** NEEDS_WORK -- 1 critical (AC contradicts "no buttons" UX rule), 3 major (task 8A.4 contradicts resolved decision, no tests planned, "retire linkedin_post" is ambiguous).
+- **Summary (R2):** READY -- All 4 R1 issues resolved. 3 carry-forward minors (implementation details, not blocking). Plan is internally consistent, test coverage planned, linkedin_post retirement clearly specified as UI-only filter.
+- **Issues (R2):** 0 critical, 0 major, 3 minor (carry-forward from R1, non-blocking)
+- **Open Questions Finalized:** None -- all resolved. No new questions requiring human input.
+
+-> Details: `plan-review-phase-8.md`
 
 ---
 
@@ -231,6 +241,68 @@ Test across multiple transcripts, compare to mockups, update other templates.
 - [x] P4-AC3: Template switch + Re-render starts render (reRender() sends template)
 - [x] P4-AC4: Thumbnail updates after render (pollVisualGeneration -> renderStagingView)
 - [x] P4-AC5: Template-only switch works without save (reRender accepts ready status)
+
+### Phase 8: KB Serve — Iteration View + Processing UX (Sub-phases A-C)
+- **Status:** COMPLETE
+- **Started:** 2026-02-10
+- **Completed:** 2026-02-10
+- **Commits:** `53b6ca4` (8A), `9f176d1` (8B), `b138a8e` (8C)
+- **Tests:** 19 new tests (7 in test_phase8_iteration_feedback.py, 12 in test_phase8_analyze.py), 0 regressions (39 pre-existing failures unchanged)
+- **Baseline:** 387 passed / 39 failed -> 406 passed / 39 failed
+
+**Sub-Phase 8A: Render Judge Feedback in Iteration View**
+- **Files Modified:**
+  - `kb/serve.py` -- added `strengths`, `rewritten_hook` fields to both versioned and backward-compat iteration response paths
+  - `kb/templates/posting_queue.html` -- added CSS for feedback sections (.feedback-section, .improvement-card, .strengths-list, .strength-item, .rewritten-hook, .score-progression); added feedbackHtml rendering (improvements, strengths, rewritten hook) and scoreProgressionHtml (text-only, color-coded) in renderIterationView()
+  - `kb/tests/test_phase8_iteration_feedback.py` -- 7 new tests: strengths present, full improvement structure, rewritten hook, score_history ordering, empty strengths default, unjudged rounds (scores=None), pre-T023 backward compat
+
+**Sub-Phase 8B: Decimal Filter on Entity List**
+- **Files Modified:**
+  - `kb/templates/posting_queue.html` -- added selectedDecimalFilter state, getFilteredItems()/getUniqueDecimals() helpers, filter dropdown in entity list header, updated renderEntityList/selectEntity/fetchQueue/keyboard nav/updateStatusBar/stageItem/publishItem to use filtered list
+
+**Sub-Phase 8C: Trigger Analysis from Browse UI**
+- **Files Modified:**
+  - `kb/serve.py` -- added `_INTERNAL_ANALYSIS_TYPES` set, `GET /api/analysis-types` (filters internal types), `POST /api/transcript/<id>/analyze` (validation, concurrent check 409, background thread for judge/regular types, processing state tracking), `GET /api/processing`
+  - `kb/templates/browse.html` -- added CSS for analysis picker overlay, picker overlay HTML, JS state/functions (fetchAnalysisTypes, openAnalysisPicker, closeAnalysisPicker, renderAnalysisPicker, confirmAnalysis, pollAnalysisCompletion), keyboard handler (a=open, j/k=navigate, Enter=confirm, Esc=close, f=toggle force), analyzing status indicator in renderDetail()
+  - `kb/tests/test_phase8_analyze.py` -- 12 new tests: analysis-types (user-facing only, has name+description), analyze endpoint (valid 200, invalid type 400, missing transcript 404, invalid ID 400, empty types 400, missing body 400, concurrent 409, sets processing state), processing endpoint (returns state, empty state)
+
+**Deviations from plan:**
+- Task 8C.3 (helper extraction): skipped per plan review note #2 -- `_find_transcript_file` takes action_id format (tid--type) while new endpoint takes transcript_id directly, signatures differ too much
+- Tasks 8C.1 + 8C.5: consolidated per plan review note #1 -- processing state tracking implemented inline with analyze endpoint
+- Test `test_invalid_transcript_id_returns_400`: used `bad;id` URL (semicolon passes Flask routing but fails `^[\w\.\-]+$` regex) instead of `../../etc/passwd` (which never reaches endpoint due to Flask route matching)
+
+### Tasks Completed (Phase 8)
+- [x] Task 8A.1: API returns strengths in iteration response (versioned + backward-compat paths)
+- [x] Task 8A.2: CSS for feedback sections (Catppuccin Mocha themed)
+- [x] Task 8A.3: renderIterationView() renders improvements, strengths, rewritten hook
+- [x] Task 8A.4: Score progression text-only, color-coded, beside round navigator
+- [x] Task 8A.5: 7 tests for iteration feedback
+- [x] Task 8B.1: Decimal filter state + helper functions
+- [x] Task 8B.2: Filter dropdown in entity list header
+- [x] Task 8B.3: All list operations use filtered list
+- [x] Task 8C.1+8C.5: Backend endpoints (analysis-types, analyze, processing) with processing state
+- [x] Task 8C.2: linkedin_post filtered from UI via _INTERNAL_ANALYSIS_TYPES
+- [x] Task 8C.3: SKIPPED (helper extraction, signatures differ)
+- [x] Task 8C.4: Keyboard-triggered analysis picker in browse.html
+
+### Phase 8 Acceptance Criteria
+- [x] 8A-AC1: Improvements render per round (criterion, issue, suggestion)
+- [x] 8A-AC2: Strengths render per round (list of strings)
+- [x] 8A-AC3: Rewritten hook shows when provided, hidden when null
+- [x] 8A-AC4: Score progression text-only, color-coded (red < 3.0, yellow < 4.0, green >= 4.0)
+- [x] 8A-AC5: Unjudged rounds show scores=None (no crash)
+- [x] 8A-AC6: Pre-T023 backward compat (unversioned judge data)
+- [x] 8B-AC1: Decimal filter dropdown in entity list
+- [x] 8B-AC2: Filter persists across polling refreshes
+- [x] 8B-AC3: "All" option shows everything
+- [x] 8B-AC4: Status bar shows filtered/total counts
+- [x] 8C-AC1: GET /api/analysis-types excludes internal types
+- [x] 8C-AC2: POST /api/transcript/<id>/analyze validates and runs in background
+- [x] 8C-AC3: Concurrent analysis returns 409
+- [x] 8C-AC4: Processing state tracked in action-state.json
+- [x] 8C-AC5: Keyboard picker (a key) with j/k/Enter/Esc navigation
+- [x] 8C-AC6: Force mode toggle (f key) for re-analysis
+- [x] 8C-AC7: linkedin_post hidden from analysis types (UI-only filter)
 
 ---
 
