@@ -4,7 +4,7 @@
 
 Fix carousel output quality to match mockups in `kb/carousel_templates/mockups/`. Root cause was weak LLM prompt + schema design, not template/CSS issues.
 
-**Status:** CODE_REVIEW
+**Status:** PLAN_REVIEW
 
 ## Priority: 1
 
@@ -110,7 +110,8 @@ Commits: `4a385cf`, `7e8cfec`, `3b55d6a`
 - Each format needs appropriate input controls (textarea vs structured list editor)
 - Must round-trip cleanly: display → edit → save → re-render
 
-### Phase 8: KB Serve — Iteration View + Processing UX — NOT STARTED (Investigation Complete)
+### Phase 8: KB Serve — Iteration View + Processing UX — PLAN_REVIEW
+**Plan:** `phase-8-plan.md`. Three sub-phases:
 
 **Investigation findings (2026-02-09):**
 
@@ -159,6 +160,14 @@ Test across multiple transcripts, compare to mockups, update other templates.
 - **Summary:** Format-aware branching now consistent across all 3 templates. Test coverage comprehensive via parametrized cross-template tests.
 
 -> Details: `code-review-phase-6.md`
+
+### Phase 7
+- **Gate:** PASS
+- **Reviewed:** 2026-02-10
+- **Issues:** 0 critical, 0 major, 3 minor
+- **Summary:** Solid implementation. Serialization layer, backend save-slides overhaul, and canGenerate/canReRender split all correct. 54 tests passing, zero regressions. Minor issues: unescaped CSS class (pre-existing), empty bullets edge case, double-period in format conversion.
+
+-> Details: `code-review-phase-7.md`
 
 ---
 
