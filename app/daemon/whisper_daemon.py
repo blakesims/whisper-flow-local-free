@@ -9,10 +9,10 @@ This daemon:
 4. Auto-pastes transcription to the active application
 """
 
-import sys
+import json
 import os
 import signal
-import json
+import sys
 import tempfile
 import time
 from enum import Enum
@@ -20,26 +20,29 @@ from pathlib import Path
 
 # Unbuffered output for daemon logging
 sys.stdout = sys.stderr  # Redirect stdout to stderr for immediate output
-os.environ['PYTHONUNBUFFERED'] = '1'
+os.environ["PYTHONUNBUFFERED"] = "1"
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+import pyperclip
+from PySide6.QtCore import QObject, QTimer, Signal, Slot
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import QObject, Signal, Slot, QTimer
 
-from app.core.transcription_service_cpp import WhisperCppService, get_transcription_service
 from app.core.audio_recorder import AudioRecorder
 from app.core.post_processor import get_post_processor
-from app.utils.config_manager import ConfigManager
-from app.daemon.recording_indicator import RecordingIndicator
+from app.core.transcription_service_cpp import (
+    WhisperCppService,
+    get_transcription_service,
+)
 from app.daemon.hotkey_listener import HotkeyListener
-
-import pyperclip
+from app.daemon.recording_indicator import RecordingIndicator
+from app.utils.config_manager import ConfigManager
 
 
 class DaemonState(Enum):
     """State machine for the daemon"""
+
     IDLE = "idle"
     RECORDING = "recording"
     TRANSCRIBING = "transcribing"
@@ -48,14 +51,25 @@ class DaemonState(Enum):
 
 class RecordingMode(Enum):
     """Mode determines output handling after transcription"""
-    NORMAL = "normal"         # Ctrl+F: clipboard + auto-paste
-    ISSUE_CAPTURE = "issue"   # Option+F: capture to file
+
+    NORMAL = "normal"  # Ctrl+F: clipboard + auto-paste
+    DELEGATION = "delegation"  # Option+F: save to cc-triage inbox for routing
 
 
 # Supported audio/video formats for file transcription
 SUPPORTED_AUDIO_FORMATS = (
-    '.wav', '.mp3', '.m4a', '.flac', '.ogg', '.opus', '.webm',
-    '.mp4', '.m4v', '.mov', '.aac', '.wma'
+    ".wav",
+    ".mp3",
+    ".m4a",
+    ".flac",
+    ".ogg",
+    ".opus",
+    ".webm",
+    ".mp4",
+    ".m4v",
+    ".mov",
+    ".aac",
+    ".wma",
 )
 
 
@@ -82,8 +96,10 @@ class WhisperDaemon(QObject):
 
         self._state = DaemonState.IDLE
         self._current_audio_path = None
-        self._is_temp_file = True  # Whether current audio is temp (should be deleted after)
-        self._recording_mode = RecordingMode.NORMAL  # Mode for current recording session
+        self._is_temp_file = (
+            True  # Whether current audio is temp (should be deleted after)
+        )
+        self._recording_mode = RecordingMode.NORMAL
 
         # Initialize config manager
         self.config_manager = ConfigManager()
@@ -107,12 +123,18 @@ class WhisperDaemon(QObject):
         # Initialize hotkey listener
         self.hotkey_listener = HotkeyListener()
         self.hotkey_listener.hotkey_triggered.connect(self._on_hotkey_triggered)
-        self.hotkey_listener.file_transcribe_requested.connect(self._on_file_transcribe_requested)
+        self.hotkey_listener.file_transcribe_requested.connect(
+            self._on_file_transcribe_requested
+        )
         self.hotkey_listener.escape_pressed.connect(self._on_escape_pressed)
-        self.hotkey_listener.issue_capture_requested.connect(self._on_issue_capture_hotkey)
+        self.hotkey_listener.delegation_requested.connect(
+            self._on_delegation_hotkey
+        )
 
         # Directory for cancelled recordings
-        self._cancelled_recordings_dir = os.path.expanduser("~/Documents/WhisperRecordings")
+        self._cancelled_recordings_dir = os.path.expanduser(
+            "~/Documents/WhisperRecordings"
+        )
         os.makedirs(self._cancelled_recordings_dir, exist_ok=True)
 
         # Track cancelled recording for undo functionality
@@ -136,7 +158,7 @@ class WhisperDaemon(QObject):
     def _connect_indicator_signals(self):
         """Connect indicator UI signals"""
         self.indicator.toggle_recording_requested.connect(self._on_hotkey_triggered)
-        self.indicator.issue_capture_requested.connect(self._on_issue_capture_hotkey)
+        self.indicator.delegation_requested.connect(self._on_delegation_hotkey)
         self.indicator.model_change_requested.connect(self._on_model_change_requested)
         self.indicator.post_processing_toggled.connect(self._on_post_processing_toggled)
         self.indicator.input_device_changed.connect(self._on_input_device_changed)
@@ -239,7 +261,7 @@ class WhisperDaemon(QObject):
         self.hotkey_listener.start()
         print("[Daemon] Hotkey listener started:")
         print("[Daemon]   Ctrl+F: Toggle recording (normal mode)")
-        print("[Daemon]   Option+F: Toggle recording (issue capture mode)")
+        print("[Daemon]   Option+F: Toggle recording (delegation mode)")
         print("[Daemon]   Ctrl+Option+F: Transcribe file from clipboard")
         print("[Daemon] Click indicator dot to toggle, right-click for menu")
 
@@ -268,7 +290,7 @@ class WhisperDaemon(QObject):
     def _write_pid_file(self):
         """Write PID to file for daemon management"""
         try:
-            with open(self.PID_FILE, 'w') as f:
+            with open(self.PID_FILE, "w") as f:
                 f.write(str(os.getpid()))
         except Exception as e:
             print(f"[Daemon] Warning: Could not write PID file: {e}")
@@ -299,7 +321,9 @@ class WhisperDaemon(QObject):
             self.indicator.set_current_model(model_name)
 
             # Set config and load
-            self.transcription_service.set_target_model_config(model_name, device, compute_type)
+            self.transcription_service.set_target_model_config(
+                model_name, device, compute_type
+            )
             self.transcription_service._load_model()
 
             if self.transcription_service.model is not None:
@@ -324,6 +348,7 @@ class WhisperDaemon(QObject):
         # This ensures we can restore focus after showing indicator
         try:
             from AppKit import NSWorkspace
+
             self._frontmost_app = NSWorkspace.sharedWorkspace().frontmostApplication()
         except:
             self._frontmost_app = None
@@ -343,19 +368,22 @@ class WhisperDaemon(QObject):
             self._start_recording()
 
     @Slot()
-    def _on_issue_capture_hotkey(self):
-        """Handle Option+F hotkey press - toggle recording (issue capture mode)"""
-        print(f"[Daemon] Issue capture hotkey triggered! Current state: {self.state.value}")
+    def _on_delegation_hotkey(self):
+        """Handle Option+F hotkey press - toggle recording (delegation mode)"""
+        print(
+            f"[Daemon] Delegation hotkey triggered! Current state: {self.state.value}"
+        )
 
         # Save the frontmost app BEFORE we do anything
         try:
             from AppKit import NSWorkspace
+
             self._frontmost_app = NSWorkspace.sharedWorkspace().frontmostApplication()
         except:
             self._frontmost_app = None
 
         if self.state == DaemonState.IDLE:
-            self._recording_mode = RecordingMode.ISSUE_CAPTURE
+            self._recording_mode = RecordingMode.DELEGATION
             self._start_recording()
         elif self.state == DaemonState.RECORDING:
             self._stop_recording()
@@ -364,7 +392,7 @@ class WhisperDaemon(QObject):
         elif self.state == DaemonState.ERROR:
             print("[Daemon] Attempting to recover from error state...")
             self.state = DaemonState.IDLE
-            self._recording_mode = RecordingMode.ISSUE_CAPTURE
+            self._recording_mode = RecordingMode.DELEGATION
             self._start_recording()
 
     @Slot()
@@ -405,6 +433,7 @@ class WhisperDaemon(QObject):
         # Save frontmost app for auto-paste later
         try:
             from AppKit import NSWorkspace
+
             self._frontmost_app = NSWorkspace.sharedWorkspace().frontmostApplication()
         except:
             self._frontmost_app = None
@@ -428,7 +457,9 @@ class WhisperDaemon(QObject):
     @Slot()
     def _on_undo_cancel(self):
         """Handle undo request - transcribe the cancelled recording"""
-        if not self._cancelled_audio_path or not os.path.exists(self._cancelled_audio_path):
+        if not self._cancelled_audio_path or not os.path.exists(
+            self._cancelled_audio_path
+        ):
             print("[Daemon] No cancelled recording to undo")
             self.indicator.show_idle()
             return
@@ -448,7 +479,9 @@ class WhisperDaemon(QObject):
         if self._cancelled_audio_path and os.path.exists(self._cancelled_audio_path):
             try:
                 os.remove(self._cancelled_audio_path)
-                print(f"[Daemon] Cleaned up expired cancelled recording: {self._cancelled_audio_path}")
+                print(
+                    f"[Daemon] Cleaned up expired cancelled recording: {self._cancelled_audio_path}"
+                )
             except Exception as e:
                 print(f"[Daemon] Could not clean up cancelled recording: {e}")
         self._cancelled_audio_path = None
@@ -490,7 +523,7 @@ class WhisperDaemon(QObject):
         # Check if we got a valid audio path
         if audio_path_or_message and os.path.exists(audio_path_or_message):
             # Check if recording was cancelled
-            if getattr(self, '_cancel_recording', False):
+            if getattr(self, "_cancel_recording", False):
                 self._cancel_recording = False
                 # Keep the audio file for potential undo
                 self._cancelled_audio_path = audio_path_or_message
@@ -569,7 +602,7 @@ class WhisperDaemon(QObject):
                 self._current_audio_path,
                 language=language,
                 beam_size=1,  # Fast mode
-                progress_callback=progress_callback
+                progress_callback=progress_callback,
             )
 
             if result and result.get("text"):
@@ -598,8 +631,8 @@ class WhisperDaemon(QObject):
             print(f"[Daemon] Post-processed: '{text[:50]}...'")
 
         # Branch based on recording mode
-        if self._recording_mode == RecordingMode.ISSUE_CAPTURE:
-            self._handle_issue_capture_output(text)
+        if self._recording_mode == RecordingMode.DELEGATION:
+            self._handle_delegation_output(text)
         else:
             self._handle_normal_output(text)
 
@@ -627,12 +660,12 @@ class WhisperDaemon(QObject):
         # Auto-paste using Cmd+V simulation
         self._auto_paste()
 
-    def _handle_issue_capture_output(self, text: str):
-        """Issue capture mode output: save to file, no auto-paste"""
-        print(f"[Daemon] Issue capture mode: '{text[:50]}...'")
+    def _handle_delegation_output(self, text: str):
+        """Delegation mode output: save to cc-triage inbox, no auto-paste"""
+        print(f"[Daemon] Delegation mode: '{text[:50]}...'")
 
-        # Capture to file
-        filepath = self._capture_issue(text)
+        # Save to cc-triage inbox
+        filepath = self._save_delegation(text)
 
         # Also copy to clipboard (useful but don't auto-paste)
         try:
@@ -648,47 +681,51 @@ class WhisperDaemon(QObject):
         self.state = DaemonState.IDLE
 
         if filepath:
-            print(f"[Daemon] Issue captured successfully to: {filepath}")
+            print(f"[Daemon] Delegation saved to: {filepath}")
 
-    def _capture_issue(self, text: str) -> str:
+    def _save_delegation(self, text: str) -> str:
         """
-        Capture issue text to file.
+        Save delegation text to cc-triage inbox.
 
-        Returns the filepath where the issue was saved, or None on error.
+        Returns the filepath where the delegation was saved, or None on error.
 
-        Path is configurable via settings.json key "issue_capture_path".
-        Future: Could integrate with GitHub Issues, Linear, Jira, etc.
+        Path is configurable via settings.json key "delegation_path".
+        cc-triage daemon watches this directory and routes the transcript.
         """
         from datetime import datetime
 
-        # Get capture directory from config (default: ~/Documents/WhisperIssues)
-        capture_dir = self.config_manager.get("issue_capture_path", "~/Documents/WhisperIssues")
+        # Get cc-triage inbox directory from config
+        capture_dir = self.config_manager.get(
+            "delegation_path", "/Users/blake/projects/cc-triage/inbox/"
+        )
         capture_dir = os.path.expanduser(capture_dir)
         os.makedirs(capture_dir, exist_ok=True)
 
         # Create filename with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"issue_{timestamp}.txt"
+        filename = f"delegation_{timestamp}.txt"
         filepath = os.path.join(capture_dir, filename)
 
         try:
-            with open(filepath, 'w') as f:
+            with open(filepath, "w") as f:
                 f.write(text)
-            print(f"[Daemon] Issue saved to: {filepath}")
+            print(f"[Daemon] Delegation saved to: {filepath}")
             return filepath
         except Exception as e:
-            print(f"[Daemon] Error saving issue: {e}")
+            print(f"[Daemon] Error saving delegation: {e}")
             return None
 
     def _auto_paste(self):
         """Simulate Cmd+V to paste at cursor"""
         try:
             # First, restore focus to the original app
-            if hasattr(self, '_frontmost_app') and self._frontmost_app:
+            if hasattr(self, "_frontmost_app") and self._frontmost_app:
                 try:
                     self._frontmost_app.activateWithOptions_(0)
                     time.sleep(0.15)  # Give time for app to become active
-                    print(f"[Daemon] Restored focus to: {self._frontmost_app.localizedName()}")
+                    print(
+                        f"[Daemon] Restored focus to: {self._frontmost_app.localizedName()}"
+                    )
                 except Exception as e:
                     print(f"[Daemon] Could not restore focus: {e}")
 
@@ -697,12 +734,13 @@ class WhisperDaemon(QObject):
 
             # Use pynput to simulate Cmd+V
             from pynput.keyboard import Controller, Key
+
             keyboard = Controller()
 
             # Press Cmd+V
             keyboard.press(Key.cmd)
-            keyboard.press('v')
-            keyboard.release('v')
+            keyboard.press("v")
+            keyboard.release("v")
             keyboard.release(Key.cmd)
 
             print("[Daemon] Auto-paste executed (Cmd+V)")
@@ -741,7 +779,7 @@ class WhisperDaemon(QObject):
         """Check if daemon is already running"""
         if os.path.exists(cls.PID_FILE):
             try:
-                with open(cls.PID_FILE, 'r') as f:
+                with open(cls.PID_FILE, "r") as f:
                     pid = int(f.read().strip())
                 # Check if process is actually running
                 os.kill(pid, 0)  # Doesn't kill, just checks if exists
@@ -756,7 +794,7 @@ class WhisperDaemon(QObject):
         """Get the PID of the running daemon"""
         if os.path.exists(cls.PID_FILE):
             try:
-                with open(cls.PID_FILE, 'r') as f:
+                with open(cls.PID_FILE, "r") as f:
                     return int(f.read().strip())
             except (ValueError, FileNotFoundError):
                 pass
@@ -778,10 +816,13 @@ def run_daemon():
     # Prevent app from appearing in Dock and App Switcher (Alt+Tab) on macOS
     # MUST be set AFTER QApplication is created
     try:
-        from AppKit import NSApplication, NSApp
+        from AppKit import NSApp, NSApplication
+
         # NSApplicationActivationPolicyAccessory = 1 (hidden from dock, but windows still visible)
         NSApp.setActivationPolicy_(1)
-        print("[Daemon] Set activation policy to Accessory (hidden from dock, windows visible)")
+        print(
+            "[Daemon] Set activation policy to Accessory (hidden from dock, windows visible)"
+        )
     except Exception as e:
         print(f"[Daemon] Warning: Could not set activation policy: {e}")
 
@@ -856,10 +897,16 @@ def status_daemon():
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Whisper Daemon - Quick Transcription Service")
-    parser.add_argument("command", nargs="?", default="start",
-                       choices=["start", "stop", "status", "restart"],
-                       help="Command to run (default: start)")
+    parser = argparse.ArgumentParser(
+        description="Whisper Daemon - Quick Transcription Service"
+    )
+    parser.add_argument(
+        "command",
+        nargs="?",
+        default="start",
+        choices=["start", "stop", "status", "restart"],
+        help="Command to run (default: start)",
+    )
 
     args = parser.parse_args()
 

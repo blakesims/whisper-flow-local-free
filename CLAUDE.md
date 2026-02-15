@@ -10,7 +10,7 @@ This is a macOS desktop application for audio recording and transcription using 
 A lightweight background service with a minimal floating indicator. Uses **whisper.cpp** for faster transcription.
 - **Entry point**: `./scripts/whisper-daemon.sh start`
 - **UI**: Small floating pill/dot that expands during recording
-- **Hotkeys**: `Ctrl+F` (toggle recording), `Escape` (cancel)
+- **Hotkeys**: `Ctrl+F` (toggle recording), `Option+F` (delegation mode), `Escape` (cancel)
 - **Features**: Always-on, instant recording, right-click menu for settings
 - **Location**: `app/daemon/` (whisper_daemon.py, recording_indicator.py, hotkey_listener.py)
 

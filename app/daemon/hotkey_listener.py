@@ -26,7 +26,7 @@ class HotkeyListener(QObject):
     hotkey_triggered = Signal()
     file_transcribe_requested = Signal()  # Ctrl+Option+F for file transcription
     escape_pressed = Signal()  # For cancelling recording
-    issue_capture_requested = Signal()  # Option+F for issue capture mode
+    delegation_requested = Signal()  # Option+F for delegation mode
 
     def __init__(self, hotkey: str = "<ctrl>+f", parent=None):
         """
@@ -124,10 +124,10 @@ class HotkeyListener(QObject):
                             print("[Hotkey] Ctrl+F detected! (toggle recording)")
                             self.hotkey_triggered.emit()
                     elif self._option_pressed:
-                        # Option+F: Issue capture mode
+                        # Option+F: Delegation mode
                         self._hotkey_active = True
-                        print("[Hotkey] Option+F detected! (issue capture mode)")
-                        self.issue_capture_requested.emit()
+                        print("[Hotkey] Option+F detected! (delegation mode)")
+                        self.delegation_requested.emit()
 
         except AttributeError:
             # Some keys don't have the 'char' attribute
