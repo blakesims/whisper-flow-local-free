@@ -3,7 +3,7 @@
 ## Task ID
 T029
 
-## Status: EXECUTING_PHASE_2
+## Status: CODE_REVIEW
 
 ## Overview
 After an Opt+F delegation recording, the whisper daemon's floating pill should show a small pip that visually tracks the delegation lifecycle through cc-triage's filesystem signals. The pip appears after delegation is saved, pulses during processing, flashes green on success, and shows red on failure. It coexists with normal recording without interfering.
@@ -144,6 +144,27 @@ After Opt+F delegation, show a subtle pip on the pill that tracks the delegation
   4. Fixed comment: "2s" -> "200ms" for FAILED flash hold
   5. Added `tests/test_delegation_pip.py` — 16 tests covering init, states, timer connections, cross-state transitions, signal emission
 - **Verified:** FAILED state does NOT emit `finished`. FAILED->COMPLETE transition has exactly 1 handler (no `_settle_tick` interference). All 16 tests pass.
+
+### Phase 2: Pill Layout Integration
+- **Status:** COMPLETE
+- **Started:** 2026-02-15
+- **Completed:** 2026-02-15
+- **Commits:** `3cf87df`
+- **Files Modified:**
+  - `app/daemon/recording_indicator.py` — Added pip container layout, _pip_width_extra(), add/remove_delegation_pip(), _remove_failed_pips(), _refresh_pill_size(); adjusted all 4 state setters for dynamic width; shifted idle cyan dot when pips present
+  - `tests/test_pip_layout.py` — 19 new tests covering container, add/remove, sizing, cleanup, refresh
+
+### Tasks Completed
+- [x] Task 2.1: Added _pip_layout (QHBoxLayout, 3px spacing) and _delegation_pips list to _setup_ui
+- [x] Task 2.2: Idle grows 36->44px+ with pips; recording/transcribing/cancelled add pip_extra to min/max width
+- [x] Task 2.3: add_delegation_pip() returns pip with finished auto-connect; remove_delegation_pip() cleans up widget
+- [x] Task 2.4: COMPLETE pips auto-remove via finished signal; FAILED pips removed on recording start via _remove_failed_pips()
+
+### Acceptance Criteria
+- [x] AC1: Pip appears right of cyan dot in idle — verified: idle dot shifts to x=18, pip in layout to the right
+- [x] AC2: Pip appears right of waveform during recording — verified: pip_layout after waveform in QHBoxLayout
+- [x] AC3: Multiple pips stack horizontally with 3px spacing — verified: test_add_multiple_pips (3 pips, layout.count()==3)
+- [x] AC4: Pill width adjusts when pips added/removed — verified: test_idle_shrinks_back_after_pip_removed, test_idle_with_two_pips_wider_than_one
 
 ## Code Review Log
 
