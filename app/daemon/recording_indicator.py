@@ -576,6 +576,13 @@ class RecordingIndicator(QWidget):
         self.undo_button.hide()
         self._layout.addWidget(self.undo_button)
 
+        # Pip container — holds 0-N DelegationPip widgets, right-aligned
+        self._pip_layout = QHBoxLayout()
+        self._pip_layout.setContentsMargins(0, 0, 0, 0)
+        self._pip_layout.setSpacing(3)
+        self._layout.addLayout(self._pip_layout)
+        self._delegation_pips = []  # list of active DelegationPip widgets
+
         self.setLayout(self._layout)
 
     def _load_position(self):
@@ -618,6 +625,18 @@ class RecordingIndicator(QWidget):
             'indicator_y': self.y()
         })
 
+    def _pip_width_extra(self) -> int:
+        """Calculate extra width needed for active delegation pips.
+
+        Each pip is 11px wide (7px dot + 4px margin), with 3px spacing between pips.
+        Returns 0 when no pips are present.
+        """
+        n = len(self._delegation_pips)
+        if n == 0:
+            return 0
+        # 11px per pip + 3px spacing between + 4px left pad from main content
+        return 4 + (n * 11) + ((n - 1) * 3)
+
     def _set_idle_state(self):
         """Set to collapsed idle state - small pill, no animation"""
         self._state = self.STATE_IDLE
@@ -631,10 +650,13 @@ class RecordingIndicator(QWidget):
         self.label.hide()
         self.undo_button.hide()
 
-        # Small pill size (no inner elements shown)
+        # Small pill size — grows from 36px to 44px+ when pips present
+        pip_extra = self._pip_width_extra()
+        base_width = 36 if pip_extra == 0 else 44
+        width = base_width + pip_extra
         self.setFixedHeight(20)
-        self.setMinimumWidth(36)
-        self.setMaximumWidth(36)
+        self.setMinimumWidth(width)
+        self.setMaximumWidth(width)
         self.adjustSize()
 
         # Follow cursor to active screen even in idle
@@ -645,6 +667,9 @@ class RecordingIndicator(QWidget):
         """Set to expanded recording state"""
         self._state = self.STATE_RECORDING
         play_sound(SOUND_TOGGLE)
+
+        # Clean up FAILED delegation pips on new recording start
+        self._remove_failed_pips()
 
         # Show recording elements
         self.spinner.hide()
@@ -663,10 +688,11 @@ class RecordingIndicator(QWidget):
             waveform_color = COLORS['blue']
         self.waveform.set_color(waveform_color)
 
-        # Expand
+        # Expand — add pip area width if pips present
+        pip_extra = self._pip_width_extra()
         self.setFixedHeight(28)
-        self.setMinimumWidth(130)
-        self.setMaximumWidth(250)
+        self.setMinimumWidth(130 + pip_extra)
+        self.setMaximumWidth(250 + pip_extra)
         self.adjustSize()
 
         # Reposition for new size
@@ -694,10 +720,11 @@ class RecordingIndicator(QWidget):
         self.label.setStyleSheet(f"color: {COLORS['blue'].name()};")
         self.label.show()
 
-        # Compact size for transcribing
+        # Compact size for transcribing — add pip area if present
+        pip_extra = self._pip_width_extra()
         self.setFixedHeight(24)
-        self.setMinimumWidth(60)
-        self.setMaximumWidth(100)
+        self.setMinimumWidth(60 + pip_extra)
+        self.setMaximumWidth(100 + pip_extra)
         self.adjustSize()
 
         # Reposition for new size
@@ -725,10 +752,11 @@ class RecordingIndicator(QWidget):
         self.label.show()
         self.undo_button.show()
 
-        # Expand for undo button
+        # Expand for undo button — add pip area if present
+        pip_extra = self._pip_width_extra()
         self.setFixedHeight(28)
-        self.setMinimumWidth(160)
-        self.setMaximumWidth(200)
+        self.setMinimumWidth(160 + pip_extra)
+        self.setMaximumWidth(200 + pip_extra)
         self.adjustSize()
 
         # Reposition for new size
@@ -854,6 +882,60 @@ class RecordingIndicator(QWidget):
         self._input_devices = devices
         self._current_input_device = current
 
+    # === Delegation pip management ===
+
+    def add_delegation_pip(self) -> DelegationPip:
+        """Create and add a new DelegationPip to the pill.
+
+        Returns the pip so the caller can later update its state.
+        The pip starts in SENT state and auto-removes on COMPLETE fade-out.
+        """
+        pip = DelegationPip(parent=self)
+        pip.finished.connect(lambda: self.remove_delegation_pip(pip))
+        self._delegation_pips.append(pip)
+        self._pip_layout.addWidget(pip)
+        pip.show()
+        self._refresh_pill_size()
+        return pip
+
+    def remove_delegation_pip(self, pip: DelegationPip):
+        """Remove a specific pip from the pill and clean up."""
+        if pip in self._delegation_pips:
+            self._delegation_pips.remove(pip)
+            self._pip_layout.removeWidget(pip)
+            pip.setParent(None)
+            pip.deleteLater()
+            self._refresh_pill_size()
+
+    def _remove_failed_pips(self):
+        """Remove all FAILED pips — called on next recording start."""
+        failed = [p for p in self._delegation_pips if p.state == DelegationPip.STATE_FAILED]
+        for pip in failed:
+            self.remove_delegation_pip(pip)
+
+    def _refresh_pill_size(self):
+        """Recalculate pill width after pip add/remove, respecting current state."""
+        if self._state == self.STATE_IDLE:
+            pip_extra = self._pip_width_extra()
+            base_width = 36 if pip_extra == 0 else 44
+            width = base_width + pip_extra
+            self.setMinimumWidth(width)
+            self.setMaximumWidth(width)
+        elif self._state == self.STATE_RECORDING:
+            pip_extra = self._pip_width_extra()
+            self.setMinimumWidth(130 + pip_extra)
+            self.setMaximumWidth(250 + pip_extra)
+        elif self._state == self.STATE_TRANSCRIBING:
+            pip_extra = self._pip_width_extra()
+            self.setMinimumWidth(60 + pip_extra)
+            self.setMaximumWidth(100 + pip_extra)
+        elif self._state == self.STATE_CANCELLED:
+            pip_extra = self._pip_width_extra()
+            self.setMinimumWidth(160 + pip_extra)
+            self.setMaximumWidth(200 + pip_extra)
+        self.adjustSize()
+        self.update()
+
     # === Event handlers ===
 
     def _ensure_visible(self):
@@ -912,13 +994,18 @@ class RecordingIndicator(QWidget):
         radius = rect.height() // 2
         painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), radius, radius)
 
-        # For idle state, draw a small centered dot
+        # For idle state, draw a small dot (centered when no pips, left-biased with pips)
         if self._state == self.STATE_IDLE:
             dot_color = QColor(COLORS['cyan'])
             dot_color.setAlphaF(0.7)
             painter.setBrush(QBrush(dot_color))
             painter.setPen(Qt.NoPen)
-            center = rect.center()
+            if self._delegation_pips:
+                # Shift dot to left portion so pips appear to the right
+                dot_x = 18  # ~center of the 36px base area
+                center = QPoint(dot_x, rect.center().y())
+            else:
+                center = rect.center()
             painter.drawEllipse(center, 4, 4)
 
     def enterEvent(self, event):
