@@ -184,5 +184,22 @@ After Opt+F delegation, show a subtle pip on the pill that tracks the delegation
 
 -> Details: `code-review-phase-1-r2.md`
 
+### Phase 2
+- **Gate:** REVISE
+- **Reviewed:** 2026-02-15
+- **Issues:** 0 critical, 2 major, 2 minor
+- **Summary:** Core layout solid but pip timers not stopped on removal (ghost callbacks) and idle cyan dot overlaps layout-positioned pips. Two fixes required.
+
+-> Details: `code-review-phase-2.md`
+
+### REVISE (from code-review-phase-2.md)
+- **Commit:** `23e528a`
+- **Fixes applied:**
+  1. `remove_delegation_pip()` now calls `pip._stop_all_timers()` before `deleteLater()` -- prevents ghost timer callbacks from PROCESSING pips
+  2. Added `_idle_pip_spacer` (16px QWidget) before `_pip_layout` in `_setup_ui` -- shown only in idle state with pips, pushes pips right of the manually-painted cyan dot (center x=18, radius 4)
+  3. All 4 state setters (`_set_idle_state`, `_set_recording_state`, `_set_transcribing_state`, `_set_cancelled_state`) and `_refresh_pill_size` manage spacer visibility
+  4. Added 6 new tests: `TestTimerCleanupOnRemoval` (2 tests) and `TestIdlePipSpacer` (4 tests)
+- **Verified:** All 41 tests pass (25 layout + 16 pip). PROCESSING pip's `_pulse_timer.isActive()` is `False` after removal. Spacer is shown/hidden correctly per state.
+
 ## Notes & Updates
 - 2026-02-15: Plan created. Delegation rename (issue_capture → delegation) already applied in this session.
