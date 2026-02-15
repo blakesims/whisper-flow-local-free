@@ -85,17 +85,21 @@ After Opt+F delegation, show a subtle pip on the pill that tracks the delegation
 - **Dependencies:** Phase 2
 
 #### Phase 4: Wiring & Polish
-- **Objective:** Connect all components and test end-to-end
+- **Objective:** Connect all components, apply advisory fixes from Phase 3 review, and test end-to-end
 - **Tasks:**
-  - [ ] Task 4.1: Wire `_handle_delegation_output` to create tracker entry + pip on save
-  - [ ] Task 4.2: Wire DelegationTracker signals → RecordingIndicator pip state updates
-  - [ ] Task 4.3: Verify composite states: normal recording while delegation processing, new delegation while one pending
-  - [ ] Task 4.4: Add log messages for all state transitions for debugging
+  - [ ] Task 4.1: Wire `_handle_delegation_output` to create tracker entry + pip on save — ensure `track()` is called AFTER `_save_delegation()` returns (not before file write) to avoid false PROCESSING race condition
+  - [ ] Task 4.2: Wire DelegationTracker signals → RecordingIndicator pip state updates (map state strings to pip set_state calls)
+  - [ ] Task 4.3: Wrap per-delegation `_check_state` call in `_poll` loop with try/except to prevent one filesystem error from killing polling for all delegations
+  - [ ] Task 4.4: Move `import glob` from `_check_state` body to top-level imports in `whisper_daemon.py`
+  - [ ] Task 4.5: Verify composite states: normal recording while delegation processing, new delegation while one pending
+  - [ ] Task 4.6: Add log messages for all state transitions for debugging
 - **Acceptance Criteria:**
   - [ ] AC1: Full Opt+F → pip appears → pip pulses → pip flashes green/fades flow works
   - [ ] AC2: Ctrl+F normal recording doesn't interfere with active delegation pip
   - [ ] AC3: Multiple Opt+F delegations show multiple pips
   - [ ] AC4: Daemon logs show delegation state transitions clearly
+  - [ ] AC5: `track()` is called after file write completes (verified by code inspection of wiring in `_handle_delegation_output`)
+  - [ ] AC6: `_poll` loop handles per-delegation exceptions gracefully (try/except with log, continues to next delegation)
 - **Files:** `app/daemon/whisper_daemon.py` — wiring code
 - **Dependencies:** Phase 3
 
@@ -166,6 +170,29 @@ After Opt+F delegation, show a subtle pip on the pill that tracks the delegation
 - [x] AC3: Multiple pips stack horizontally with 3px spacing — verified: test_add_multiple_pips (3 pips, layout.count()==3)
 - [x] AC4: Pill width adjusts when pips added/removed — verified: test_idle_shrinks_back_after_pip_removed, test_idle_with_two_pips_wider_than_one
 
+### Phase 3: Filesystem Polling & State Machine
+- **Status:** COMPLETE
+- **Started:** 2026-02-15
+- **Completed:** 2026-02-15
+- **Commits:** `b108fd4`
+- **Files Modified:**
+  - `app/daemon/whisper_daemon.py` — Added `DelegationState` enum and `DelegationTracker` class (QObject with QTimer polling, cc-triage config reading, state machine, signal emission, auto-cleanup)
+  - `tests/test_delegation_tracker.py` — 26 new tests covering init, dir resolution, track(), state transitions, poll integration, cleanup, multiple concurrent delegations
+  - `~/Library/Application Support/WhisperTranscribeUI/settings.json` — Added `cc_triage_root` key
+
+### Tasks Completed
+- [x] Task 3.1: Created `DelegationTracker` class in `whisper_daemon.py` — QObject with QTimer for polling
+- [x] Task 3.2: Track by filename, derive report path (`triage_<stem>.json`) and failed pattern (`<stem>_*`) from cc-triage config
+- [x] Task 3.3: Polling via QTimer (2s) with state checks: inbox=SENT, gone=PROCESSING, report=COMPLETE, failed=FAILED
+- [x] Task 3.4: `delegation_state_changed = Signal(str, str)` emitted on all transitions
+- [x] Task 3.5: Auto-cleanup via QTimer.singleShot (5s COMPLETE, 1s FAILED), polling stops when empty
+
+### Acceptance Criteria
+- [x] AC1: State transitions detected within 2s polling interval — verified by test_poll_emits_transition_signal
+- [x] AC2: Polling stops when no active delegations — verified by test_poll_stops_when_no_active_delegations, test_cleanup_stops_polling_when_last_removed
+- [x] AC3: Multiple concurrent delegations tracked independently — verified by test_two_delegations_independent_states, test_three_delegations_different_terminal_states
+- [x] AC4: Stale delegations stay SENT — verified by test_stale_delegation_stays_sent (file in inbox, no false positive)
+
 ## Code Review Log
 
 ### Phase 1 (Initial)
@@ -200,37 +227,39 @@ After Opt+F delegation, show a subtle pip on the pill that tracks the delegation
 
 -> Details: `code-review-phase-2-r2.md`
 
-### REVISE (from code-review-phase-2.md)
-- **Commit:** `23e528a`
-- **Fixes applied:**
-  1. `remove_delegation_pip()` now calls `pip._stop_all_timers()` before `deleteLater()` -- prevents ghost timer callbacks from PROCESSING pips
-  2. Added `_idle_pip_spacer` (16px QWidget) before `_pip_layout` in `_setup_ui` -- shown only in idle state with pips, pushes pips right of the manually-painted cyan dot (center x=18, radius 4)
-  3. All 4 state setters (`_set_idle_state`, `_set_recording_state`, `_set_transcribing_state`, `_set_cancelled_state`) and `_refresh_pill_size` manage spacer visibility
-  4. Added 6 new tests: `TestTimerCleanupOnRemoval` (2 tests) and `TestIdlePipSpacer` (4 tests)
-- **Verified:** All 41 tests pass (25 layout + 16 pip). PROCESSING pip's `_pulse_timer.isActive()` is `False` after removal. Spacer is shown/hidden correctly per state.
+### Phase 3
+- **Gate:** PASS
+- **Reviewed:** 2026-02-15
+- **Issues:** 0 critical, 2 major, 3 minor
+- **Summary:** Solid state machine. Terminal-state-first checking, glob-based failed detection, lazy dir resolution all correct. Race condition on track-before-write is low risk given synchronous call order but should be documented. No error handling in _poll filesystem ops could silently kill all tracking on PermissionError. Passing with advisory notes for Phase 4.
 
-### Phase 3: Filesystem Polling & State Machine
+-> Details: `code-review-phase-3.md`
+
+### Phase 4: Wiring & Polish
 - **Status:** COMPLETE
 - **Started:** 2026-02-15
 - **Completed:** 2026-02-15
-- **Commits:** `b108fd4`
+- **Commits:** `324a895`
 - **Files Modified:**
-  - `app/daemon/whisper_daemon.py` — Added `DelegationState` enum and `DelegationTracker` class (QObject with QTimer polling, cc-triage config reading, state machine, signal emission, auto-cleanup)
-  - `tests/test_delegation_tracker.py` — 26 new tests covering init, dir resolution, track(), state transitions, poll integration, cleanup, multiple concurrent delegations
-  - `~/Library/Application Support/WhisperTranscribeUI/settings.json` — Added `cc_triage_root` key
+  - `app/daemon/whisper_daemon.py` — Added `import glob` at top level (removed from `_check_state`), wrapped per-delegation `_check_state` in try/except in `_poll`, added `DelegationTracker` instantiation and `_delegation_pips` dict in `WhisperDaemon.__init__`, wired `_handle_delegation_output` to create pip + call `tracker.track()` after file write, added `_on_delegation_state_changed` handler mapping delegation_id to pip `set_state()`
+  - `tests/test_delegation_wiring.py` — 13 new tests covering glob import, poll exception handling, track-after-write ordering, state-changed handler (all states + unknown id), composite states
 
 ### Tasks Completed
-- [x] Task 3.1: Created `DelegationTracker` class in `whisper_daemon.py` — QObject with QTimer for polling
-- [x] Task 3.2: Track by filename, derive report path (`triage_<stem>.json`) and failed pattern (`<stem>_*`) from cc-triage config
-- [x] Task 3.3: Polling via QTimer (2s) with state checks: inbox=SENT, gone=PROCESSING, report=COMPLETE, failed=FAILED
-- [x] Task 3.4: `delegation_state_changed = Signal(str, str)` emitted on all transitions
-- [x] Task 3.5: Auto-cleanup via QTimer.singleShot (5s COMPLETE, 1s FAILED), polling stops when empty
+- [x] Task 4.1: Wired `_handle_delegation_output` — `tracker.track()` called AFTER `_save_delegation()` returns filepath
+- [x] Task 4.2: Wired `delegation_state_changed` signal to `_on_delegation_state_changed` handler that maps delegation_id to pip and calls `set_state()`
+- [x] Task 4.3: Wrapped per-delegation `_check_state` in try/except with logging in `_poll` loop
+- [x] Task 4.4: Moved `import glob` from `_check_state` body to module top-level imports
+- [x] Task 4.5: Composite states verified by tests (multiple pips, track-after-write)
+- [x] Task 4.6: Log messages present in all state transitions (tracker, daemon handler, cleanup)
 
 ### Acceptance Criteria
-- [x] AC1: State transitions detected within 2s polling interval — verified by test_poll_emits_transition_signal
-- [x] AC2: Polling stops when no active delegations — verified by test_poll_stops_when_no_active_delegations, test_cleanup_stops_polling_when_last_removed
-- [x] AC3: Multiple concurrent delegations tracked independently — verified by test_two_delegations_independent_states, test_three_delegations_different_terminal_states
-- [x] AC4: Stale delegations stay SENT — verified by test_stale_delegation_stays_sent (file in inbox, no false positive)
+- [x] AC1: Full Opt+F flow works — `_handle_delegation_output` creates pip, calls track, tracker polls and emits state changes, handler updates pip
+- [x] AC2: Normal recording does not interfere — delegation pips stored separately in `_delegation_pips` dict, no coupling to recording state
+- [x] AC3: Multiple delegations — each creates separate pip entry, verified by `test_multiple_delegations_create_multiple_pips`
+- [x] AC4: Daemon logs show transitions — print statements in `_on_delegation_state_changed`, `DelegationTracker._poll`, `track()`, `_cleanup()`
+- [x] AC5: `track()` called after file write — verified by `test_handle_delegation_output_calls_track_after_save` (call_order = ["save", "track"])
+- [x] AC6: `_poll` handles per-delegation exceptions — verified by `test_poll_continues_after_single_delegation_error` (PermissionError on d1, d2 still checked)
 
 ## Notes & Updates
 - 2026-02-15: Plan created. Delegation rename (issue_capture → delegation) already applied in this session.
+- 2026-02-15: Phase review (3→4): incorporated two advisory majors from Phase 3 code review into Phase 4 tasks. Added Task 4.3 (try/except in _poll), Task 4.4 (move glob import), AC5 (track-after-write verification), AC6 (exception handling verification). Reworded Task 4.1 to explicitly document track-after-write ordering requirement.
