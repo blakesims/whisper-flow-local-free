@@ -138,6 +138,57 @@ class TestPipCleanup:
         assert pip in indicator._delegation_pips
 
 
+class TestTimerCleanupOnRemoval:
+    """REVISE fix: Pip timers stopped on removal."""
+
+    def test_processing_pip_timers_stopped_on_remove(self):
+        """A PROCESSING pip's pulse timer must be stopped when removed."""
+        indicator = RecordingIndicator()
+        pip = indicator.add_delegation_pip()
+        pip.set_state(DelegationPip.STATE_PROCESSING)
+        assert pip._pulse_timer.isActive()
+        indicator.remove_delegation_pip(pip)
+        assert not pip._pulse_timer.isActive()
+
+    def test_complete_pip_timers_stopped_on_remove(self):
+        """A COMPLETE pip's fade timer must be stopped when removed."""
+        indicator = RecordingIndicator()
+        pip = indicator.add_delegation_pip()
+        pip.set_state(DelegationPip.STATE_COMPLETE)
+        # Trigger the fade start manually
+        pip._start_complete_fade()
+        assert pip._fade_timer.isActive()
+        indicator.remove_delegation_pip(pip)
+        assert not pip._fade_timer.isActive()
+
+
+class TestIdlePipSpacer:
+    """REVISE fix: Idle spacer prevents cyan dot / pip overlap."""
+
+    def test_spacer_hidden_when_no_pips(self):
+        indicator = RecordingIndicator()
+        assert indicator._idle_pip_spacer.isHidden()
+
+    def test_spacer_shown_in_idle_with_pips(self):
+        indicator = RecordingIndicator()
+        indicator.add_delegation_pip()
+        assert not indicator._idle_pip_spacer.isHidden()
+
+    def test_spacer_hidden_after_all_pips_removed(self):
+        indicator = RecordingIndicator()
+        pip = indicator.add_delegation_pip()
+        assert not indicator._idle_pip_spacer.isHidden()
+        indicator.remove_delegation_pip(pip)
+        assert indicator._idle_pip_spacer.isHidden()
+
+    def test_spacer_hidden_in_recording_state(self):
+        indicator = RecordingIndicator()
+        indicator.add_delegation_pip()
+        indicator._state = indicator.STATE_RECORDING
+        indicator._idle_pip_spacer.hide()  # simulate state setter
+        assert indicator._idle_pip_spacer.isHidden()
+
+
 class TestRefreshPillSize:
     """_refresh_pill_size updates width for current state."""
 

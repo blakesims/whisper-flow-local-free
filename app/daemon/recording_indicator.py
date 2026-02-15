@@ -576,6 +576,12 @@ class RecordingIndicator(QWidget):
         self.undo_button.hide()
         self._layout.addWidget(self.undo_button)
 
+        # Idle spacer — pushes pips right of the manually-painted cyan dot in idle state
+        self._idle_pip_spacer = QWidget()
+        self._idle_pip_spacer.setFixedSize(16, 1)  # 16px to clear cyan dot (center x=18, radius 4)
+        self._idle_pip_spacer.hide()
+        self._layout.addWidget(self._idle_pip_spacer)
+
         # Pip container — holds 0-N DelegationPip widgets, right-aligned
         self._pip_layout = QHBoxLayout()
         self._pip_layout.setContentsMargins(0, 0, 0, 0)
@@ -650,6 +656,12 @@ class RecordingIndicator(QWidget):
         self.label.hide()
         self.undo_button.hide()
 
+        # Show idle spacer when pips present to push them right of painted cyan dot
+        if self._delegation_pips:
+            self._idle_pip_spacer.show()
+        else:
+            self._idle_pip_spacer.hide()
+
         # Small pill size — grows from 36px to 44px+ when pips present
         pip_extra = self._pip_width_extra()
         base_width = 36 if pip_extra == 0 else 44
@@ -672,6 +684,7 @@ class RecordingIndicator(QWidget):
         self._remove_failed_pips()
 
         # Show recording elements
+        self._idle_pip_spacer.hide()
         self.spinner.hide()
         self.spinner.stop_spinning()
         self.label.hide()
@@ -709,6 +722,7 @@ class RecordingIndicator(QWidget):
         play_sound(SOUND_TOGGLE)
 
         # Hide other elements
+        self._idle_pip_spacer.hide()
         self.recording_dot.hide()
         self.recording_dot.stop_pulsing()
         self.waveform.hide()
@@ -739,6 +753,7 @@ class RecordingIndicator(QWidget):
         play_sound(SOUND_CANCEL)
 
         # Hide other elements
+        self._idle_pip_spacer.hide()
         self.recording_dot.hide()
         self.recording_dot.stop_pulsing()
         self.spinner.hide()
@@ -901,6 +916,7 @@ class RecordingIndicator(QWidget):
     def remove_delegation_pip(self, pip: DelegationPip):
         """Remove a specific pip from the pill and clean up."""
         if pip in self._delegation_pips:
+            pip._stop_all_timers()
             self._delegation_pips.remove(pip)
             self._pip_layout.removeWidget(pip)
             pip.setParent(None)
@@ -921,6 +937,11 @@ class RecordingIndicator(QWidget):
             width = base_width + pip_extra
             self.setMinimumWidth(width)
             self.setMaximumWidth(width)
+            # Toggle idle spacer to keep pips right of painted cyan dot
+            if self._delegation_pips:
+                self._idle_pip_spacer.show()
+            else:
+                self._idle_pip_spacer.hide()
         elif self._state == self.STATE_RECORDING:
             pip_extra = self._pip_width_extra()
             self.setMinimumWidth(130 + pip_extra)
