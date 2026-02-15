@@ -43,7 +43,8 @@ COLORS = {
     'cyan': QColor(125, 207, 255),           # #7dcfff
     'purple': QColor(187, 154, 247),         # #bb9af7
     'green': QColor(158, 206, 106),          # #9ece6a
-    'orange': QColor(255, 158, 100),         # #ff9e64 - issue capture default
+    'red': QColor(247, 118, 142),             # #f7768e
+    'orange': QColor(255, 158, 100),         # #ff9e64 - delegation mode default
     'text': QColor(192, 202, 245),           # #c0caf5
     'text_dim': QColor(86, 95, 137),         # #565f89
     'border': QColor(41, 46, 66, 180),       # subtle border
@@ -272,6 +273,163 @@ class SpinnerWidget(QWidget):
             painter.drawLine(0, -radius, 0, -radius - 2)
 
 
+class DelegationPip(QWidget):
+    """A tiny status pip that tracks a delegation through cc-triage processing.
+
+    States:
+    - SENT: Solid orange — file saved to cc-triage inbox
+    - PROCESSING: Orange pulse — cc-triage picked it up
+    - COMPLETE: Green flash, fades out over 3s
+    - FAILED: Red flash, settles at dim opacity
+    """
+
+    # Emitted when COMPLETE fade-out finishes — parent should remove this pip
+    finished = Signal()
+
+    STATE_SENT = "sent"
+    STATE_PROCESSING = "processing"
+    STATE_COMPLETE = "complete"
+    STATE_FAILED = "failed"
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._pip_size = 7
+        self.setFixedSize(self._pip_size + 4, self._pip_size + 4)
+
+        self._state = self.STATE_SENT
+        self._opacity = 0.85
+        self._color = QColor(COLORS['orange'])
+
+        # Pulse animation timer (PROCESSING state)
+        self._pulse_timer = QTimer(self)
+        self._pulse_timer.timeout.connect(self._pulse_tick)
+        self._pulse_direction = -1
+
+        # Fade-out timer (COMPLETE/FAILED states — handlers connected dynamically)
+        self._fade_timer = QTimer(self)
+
+        # Flash timer (COMPLETE/FAILED initial flash)
+        self._flash_timer = QTimer(self)
+        self._flash_timer.setSingleShot(True)
+
+    def set_state(self, state: str):
+        """Transition to a new visual state."""
+        self._state = state
+        self._stop_all_timers()
+
+        if state == self.STATE_SENT:
+            self._color = QColor(COLORS['orange'])
+            self._opacity = 0.85
+            self.update()
+
+        elif state == self.STATE_PROCESSING:
+            self._color = QColor(COLORS['orange'])
+            self._opacity = 1.0
+            self._pulse_direction = -1
+            self._pulse_timer.start(40)
+
+        elif state == self.STATE_COMPLETE:
+            # Flash green at full opacity, then fade out over 3s
+            self._color = QColor(COLORS['green'])
+            self._opacity = 1.0
+            self.update()
+            # Start fade after brief flash hold (300ms)
+            self._flash_timer.timeout.connect(self._start_complete_fade)
+            self._flash_timer.start(300)
+
+        elif state == self.STATE_FAILED:
+            # Flash red at full opacity, then settle to dim
+            self._color = QColor(COLORS['red'])
+            self._opacity = 1.0
+            self.update()
+            # Settle to dim after brief flash (200ms)
+            self._flash_timer.timeout.connect(self._start_failed_settle)
+            self._flash_timer.start(200)
+
+    def _stop_all_timers(self):
+        """Stop all animation timers and disconnect dynamic signals."""
+        self._pulse_timer.stop()
+        self._fade_timer.stop()
+        try:
+            self._fade_timer.timeout.disconnect()
+        except Exception:
+            pass
+        try:
+            self._flash_timer.timeout.disconnect()
+        except Exception:
+            pass
+        self._flash_timer.stop()
+
+    def _pulse_tick(self):
+        """Animate PROCESSING pulse — matches PulsingDot timing."""
+        self._opacity += self._pulse_direction * 0.04
+        if self._opacity <= 0.4:
+            self._pulse_direction = 1
+            self._opacity = 0.4
+        elif self._opacity >= 1.0:
+            self._pulse_direction = -1
+            self._opacity = 1.0
+        self.update()
+
+    def _start_complete_fade(self):
+        """Begin the 3-second fade-out for COMPLETE state."""
+        # Fade from 1.0 to 0.0 over 3s at 40ms intervals = 75 ticks
+        # Decrement per tick: 1.0 / 75 ≈ 0.013
+        try:
+            self._fade_timer.timeout.disconnect()
+        except Exception:
+            pass
+        self._fade_timer.timeout.connect(self._fade_tick)
+        self._fade_timer.start(40)
+
+    def _fade_tick(self):
+        """Animate COMPLETE fade-out."""
+        self._opacity -= 0.013
+        if self._opacity <= 0.0:
+            self._opacity = 0.0
+            self._fade_timer.stop()
+            self.update()
+            self.finished.emit()
+            return
+        self.update()
+
+    def _start_failed_settle(self):
+        """Begin settling to dim opacity for FAILED state."""
+        # Quick settle from 1.0 to 0.35 over ~0.8s (20 ticks at 40ms)
+        try:
+            self._fade_timer.timeout.disconnect()
+        except Exception:
+            pass
+        self._fade_timer.timeout.connect(self._settle_tick)
+        self._fade_timer.start(40)
+
+    def _settle_tick(self):
+        """Animate FAILED settle to dim."""
+        self._opacity -= 0.033  # ~20 ticks from 1.0 to 0.35
+        if self._opacity <= 0.35:
+            self._opacity = 0.35
+            self._fade_timer.stop()
+        self.update()
+
+    def paintEvent(self, event):
+        """Paint the pip as a small colored circle."""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        center = self.rect().center()
+        radius = self._pip_size // 2
+
+        color = QColor(self._color)
+        color.setAlphaF(self._opacity)
+        painter.setBrush(QBrush(color))
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(center, radius, radius)
+
+    @property
+    def state(self) -> str:
+        return self._state
+
+
 class RecordingIndicator(QWidget):
     """
     Always-present floating indicator widget.
@@ -289,7 +447,7 @@ class RecordingIndicator(QWidget):
 
     # Signals for daemon communication
     toggle_recording_requested = Signal()
-    issue_capture_requested = Signal()  # Start recording in issue capture mode
+    delegation_requested = Signal()  # Start recording in delegation mode
     model_change_requested = Signal(str)
     post_processing_toggled = Signal(bool)  # True = enabled
     input_device_changed = Signal(object)  # device index or None for default
@@ -312,7 +470,7 @@ class RecordingIndicator(QWidget):
         self._llm_model = ""  # LLM model name for post-processing
         self._input_devices = []  # List of (index, name) tuples
         self._current_input_device = None  # None = system default
-        self._recording_mode = "normal"  # "normal" or "issue" - affects waveform color
+        self._recording_mode = "normal"  # "normal" or "delegation" - affects waveform color
 
         # Window flags for always-on-top, frameless, no focus stealing
         # Using SplashScreen type for overlay-style behavior on macOS
@@ -499,8 +657,8 @@ class RecordingIndicator(QWidget):
         self.waveform.show()
 
         # Set waveform color based on recording mode
-        if self._recording_mode == "issue":
-            waveform_color = self._get_issue_capture_color()
+        if self._recording_mode == "delegation":
+            waveform_color = self._get_delegation_color()
         else:
             waveform_color = COLORS['blue']
         self.waveform.set_color(waveform_color)
@@ -623,16 +781,16 @@ class RecordingIndicator(QWidget):
         """Called by daemon to show recording state
 
         Args:
-            mode: Recording mode - "normal" (blue) or "issue" (orange/configurable)
+            mode: Recording mode - "normal" (blue) or "delegation" (orange/configurable)
         """
         self._recording_mode = mode
         self._set_recording_state()
         self._ensure_visible()
 
-    def _get_issue_capture_color(self) -> QColor:
-        """Get the issue-capture waveform color from settings or default"""
+    def _get_delegation_color(self) -> QColor:
+        """Get the delegation mode waveform color from settings or default"""
         settings = load_settings()
-        color_hex = settings.get('issue_capture_waveform_color', '#ff9e64')
+        color_hex = settings.get('delegation_waveform_color', '#ff9e64')
         return QColor(color_hex)
 
     def show_transcribing(self, progress: int = 0):
@@ -847,9 +1005,9 @@ class RecordingIndicator(QWidget):
             action_record = menu.addAction("Start Recording")
             action_record.triggered.connect(self.toggle_recording_requested.emit)
 
-            # Issue capture option (only when idle)
-            action_issue = menu.addAction("Start Issue Capture")
-            action_issue.triggered.connect(self.issue_capture_requested.emit)
+            # Delegation option (only when idle)
+            action_delegate = menu.addAction("Start Delegation")
+            action_delegate.triggered.connect(self.delegation_requested.emit)
 
         menu.addSeparator()
 
