@@ -73,6 +73,194 @@ SUPPORTED_AUDIO_FORMATS = (
 )
 
 
+class DelegationState(Enum):
+    """State machine for delegation lifecycle tracking"""
+
+    SENT = "sent"  # File in inbox, waiting for cc-triage
+    PROCESSING = "processing"  # File picked up (gone from inbox)
+    COMPLETE = "complete"  # Report exists in reports dir
+    FAILED = "failed"  # File moved to failed dir
+
+
+class DelegationTracker(QObject):
+    """
+    Polls cc-triage filesystem to track delegation lifecycle.
+
+    Reads cc-triage's own config/config.json for directory paths.
+    Emits signals on state transitions for UI pip updates.
+    Auto-starts/stops polling based on active delegation count.
+    """
+
+    delegation_state_changed = Signal(str, str)  # (delegation_id, new_state)
+
+    POLL_INTERVAL_MS = 2000  # 2 seconds
+    COMPLETE_CLEANUP_DELAY_MS = 5000  # 5s after COMPLETE before stop tracking
+    FAILED_CLEANUP_DELAY_MS = 1000  # ~1s after FAILED before stop tracking
+
+    def __init__(self, config_manager, parent=None):
+        super().__init__(parent)
+
+        self._config_manager = config_manager
+        # {delegation_id: DelegationState}
+        self._active: dict[str, DelegationState] = {}
+
+        # Resolved cc-triage directories (lazily loaded)
+        self._inbox_dir: str | None = None
+        self._reports_dir: str | None = None
+        self._failed_dir: str | None = None
+        self._dirs_resolved = False
+
+        # Polling timer
+        self._poll_timer = QTimer(self)
+        self._poll_timer.timeout.connect(self._poll)
+
+    def _resolve_dirs(self) -> bool:
+        """
+        Resolve cc-triage directories from its config.json.
+
+        Returns True if directories were resolved successfully.
+        """
+        cc_triage_root = self._config_manager.get("cc_triage_root", None)
+        if not cc_triage_root:
+            print("[DelegationTracker] No cc_triage_root configured")
+            return False
+
+        cc_triage_root = os.path.expanduser(cc_triage_root)
+        config_path = os.path.join(cc_triage_root, "config", "config.json")
+
+        try:
+            with open(config_path, "r") as f:
+                cc_config = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            print(f"[DelegationTracker] Cannot read cc-triage config: {e}")
+            return False
+
+        # Resolve relative paths against cc_triage_root
+        inbox_rel = cc_config.get("inbox_path", "./inbox")
+        reports_rel = cc_config.get("reports_path", "./reports")
+        failed_rel = cc_config.get("failed_path", "./failed")
+
+        self._inbox_dir = os.path.normpath(os.path.join(cc_triage_root, inbox_rel))
+        self._reports_dir = os.path.normpath(os.path.join(cc_triage_root, reports_rel))
+        self._failed_dir = os.path.normpath(os.path.join(cc_triage_root, failed_rel))
+        self._dirs_resolved = True
+
+        print(f"[DelegationTracker] Resolved dirs: inbox={self._inbox_dir}, reports={self._reports_dir}, failed={self._failed_dir}")
+        return True
+
+    def track(self, delegation_id: str):
+        """
+        Start tracking a delegation by its filename (e.g. 'delegation_20260215_171033.txt').
+
+        Immediately sets state to SENT and starts polling if not already running.
+        """
+        if not self._dirs_resolved:
+            if not self._resolve_dirs():
+                print(f"[DelegationTracker] Cannot track {delegation_id}: dirs not resolved")
+                return
+
+        self._active[delegation_id] = DelegationState.SENT
+        self.delegation_state_changed.emit(delegation_id, DelegationState.SENT.value)
+        print(f"[DelegationTracker] Tracking: {delegation_id} -> SENT")
+
+        # Start polling if not already running
+        if not self._poll_timer.isActive():
+            self._poll_timer.start(self.POLL_INTERVAL_MS)
+            print("[DelegationTracker] Polling started")
+
+    def _poll(self):
+        """Check filesystem for state transitions on all active delegations."""
+        if not self._active:
+            self._poll_timer.stop()
+            print("[DelegationTracker] No active delegations, polling stopped")
+            return
+
+        for delegation_id in list(self._active.keys()):
+            current_state = self._active[delegation_id]
+            new_state = self._check_state(delegation_id, current_state)
+
+            if new_state and new_state != current_state:
+                self._active[delegation_id] = new_state
+                self.delegation_state_changed.emit(delegation_id, new_state.value)
+                print(f"[DelegationTracker] {delegation_id}: {current_state.value} -> {new_state.value}")
+
+                # Schedule cleanup for terminal states
+                if new_state == DelegationState.COMPLETE:
+                    QTimer.singleShot(
+                        self.COMPLETE_CLEANUP_DELAY_MS,
+                        lambda did=delegation_id: self._cleanup(did),
+                    )
+                elif new_state == DelegationState.FAILED:
+                    QTimer.singleShot(
+                        self.FAILED_CLEANUP_DELAY_MS,
+                        lambda did=delegation_id: self._cleanup(did),
+                    )
+
+    def _check_state(self, delegation_id: str, current: DelegationState) -> DelegationState | None:
+        """
+        Determine current filesystem state for a delegation.
+
+        State machine:
+        - SENT: file exists in inbox
+        - PROCESSING: file gone from inbox (picked up by cc-triage)
+        - COMPLETE: report file exists in reports dir
+        - FAILED: file exists in failed dir (glob pattern for timestamp suffix)
+
+        Returns new state or None if no change.
+        """
+        import glob
+
+        stem = os.path.splitext(delegation_id)[0]  # e.g. 'delegation_20260215_171033'
+        inbox_path = os.path.join(self._inbox_dir, delegation_id)
+        report_path = os.path.join(self._reports_dir, f"triage_{stem}.json")
+        failed_pattern = os.path.join(self._failed_dir, f"{stem}_*")
+
+        # Check terminal states first (report or failed)
+        if os.path.exists(report_path):
+            if current != DelegationState.COMPLETE:
+                return DelegationState.COMPLETE
+            return None
+
+        if glob.glob(failed_pattern):
+            if current != DelegationState.FAILED:
+                return DelegationState.FAILED
+            return None
+
+        # Check if file still in inbox
+        if os.path.exists(inbox_path):
+            # File still in inbox -> SENT
+            if current != DelegationState.SENT:
+                return DelegationState.SENT
+            return None
+
+        # File gone from inbox, no report/failed yet -> PROCESSING
+        if current == DelegationState.SENT:
+            return DelegationState.PROCESSING
+
+        return None
+
+    def _cleanup(self, delegation_id: str):
+        """Stop tracking a delegation after terminal state + delay."""
+        if delegation_id in self._active:
+            del self._active[delegation_id]
+            print(f"[DelegationTracker] Stopped tracking: {delegation_id}")
+
+            # Stop polling if no more active delegations
+            if not self._active and self._poll_timer.isActive():
+                self._poll_timer.stop()
+                print("[DelegationTracker] No active delegations, polling stopped")
+
+    @property
+    def active_count(self) -> int:
+        """Number of actively tracked delegations."""
+        return len(self._active)
+
+    @property
+    def is_polling(self) -> bool:
+        """Whether the poll timer is currently active."""
+        return self._poll_timer.isActive()
+
+
 class WhisperDaemon(QObject):
     """
     Main daemon class that orchestrates:
