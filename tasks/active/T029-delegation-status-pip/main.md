@@ -192,6 +192,14 @@ After Opt+F delegation, show a subtle pip on the pill that tracks the delegation
 
 -> Details: `code-review-phase-2.md`
 
+### Phase 2 (Re-review)
+- **Gate:** PASS
+- **Reviewed:** 2026-02-15
+- **Issues:** 0 critical, 0 major, 1 minor
+- **Summary:** Both REVISE items fixed correctly. Timer cleanup verified. Spacer geometry confirmed (pip at x=30, dot ends at x=22). All 41 tests pass. Advancing to Phase 3.
+
+-> Details: `code-review-phase-2-r2.md`
+
 ### REVISE (from code-review-phase-2.md)
 - **Commit:** `23e528a`
 - **Fixes applied:**
@@ -200,6 +208,29 @@ After Opt+F delegation, show a subtle pip on the pill that tracks the delegation
   3. All 4 state setters (`_set_idle_state`, `_set_recording_state`, `_set_transcribing_state`, `_set_cancelled_state`) and `_refresh_pill_size` manage spacer visibility
   4. Added 6 new tests: `TestTimerCleanupOnRemoval` (2 tests) and `TestIdlePipSpacer` (4 tests)
 - **Verified:** All 41 tests pass (25 layout + 16 pip). PROCESSING pip's `_pulse_timer.isActive()` is `False` after removal. Spacer is shown/hidden correctly per state.
+
+### Phase 3: Filesystem Polling & State Machine
+- **Status:** COMPLETE
+- **Started:** 2026-02-15
+- **Completed:** 2026-02-15
+- **Commits:** `b108fd4`
+- **Files Modified:**
+  - `app/daemon/whisper_daemon.py` — Added `DelegationState` enum and `DelegationTracker` class (QObject with QTimer polling, cc-triage config reading, state machine, signal emission, auto-cleanup)
+  - `tests/test_delegation_tracker.py` — 26 new tests covering init, dir resolution, track(), state transitions, poll integration, cleanup, multiple concurrent delegations
+  - `~/Library/Application Support/WhisperTranscribeUI/settings.json` — Added `cc_triage_root` key
+
+### Tasks Completed
+- [x] Task 3.1: Created `DelegationTracker` class in `whisper_daemon.py` — QObject with QTimer for polling
+- [x] Task 3.2: Track by filename, derive report path (`triage_<stem>.json`) and failed pattern (`<stem>_*`) from cc-triage config
+- [x] Task 3.3: Polling via QTimer (2s) with state checks: inbox=SENT, gone=PROCESSING, report=COMPLETE, failed=FAILED
+- [x] Task 3.4: `delegation_state_changed = Signal(str, str)` emitted on all transitions
+- [x] Task 3.5: Auto-cleanup via QTimer.singleShot (5s COMPLETE, 1s FAILED), polling stops when empty
+
+### Acceptance Criteria
+- [x] AC1: State transitions detected within 2s polling interval — verified by test_poll_emits_transition_signal
+- [x] AC2: Polling stops when no active delegations — verified by test_poll_stops_when_no_active_delegations, test_cleanup_stops_polling_when_last_removed
+- [x] AC3: Multiple concurrent delegations tracked independently — verified by test_two_delegations_independent_states, test_three_delegations_different_terminal_states
+- [x] AC4: Stale delegations stay SENT — verified by test_stale_delegation_stays_sent (file in inbox, no false positive)
 
 ## Notes & Updates
 - 2026-02-15: Plan created. Delegation rename (issue_capture → delegation) already applied in this session.
