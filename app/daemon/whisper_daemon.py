@@ -9,6 +9,7 @@ This daemon:
 4. Auto-pastes transcription to the active application
 """
 
+import glob
 import json
 import os
 import signal
@@ -176,25 +177,28 @@ class DelegationTracker(QObject):
             return
 
         for delegation_id in list(self._active.keys()):
-            current_state = self._active[delegation_id]
-            new_state = self._check_state(delegation_id, current_state)
+            try:
+                current_state = self._active[delegation_id]
+                new_state = self._check_state(delegation_id, current_state)
 
-            if new_state and new_state != current_state:
-                self._active[delegation_id] = new_state
-                self.delegation_state_changed.emit(delegation_id, new_state.value)
-                print(f"[DelegationTracker] {delegation_id}: {current_state.value} -> {new_state.value}")
+                if new_state and new_state != current_state:
+                    self._active[delegation_id] = new_state
+                    self.delegation_state_changed.emit(delegation_id, new_state.value)
+                    print(f"[DelegationTracker] {delegation_id}: {current_state.value} -> {new_state.value}")
 
-                # Schedule cleanup for terminal states
-                if new_state == DelegationState.COMPLETE:
-                    QTimer.singleShot(
-                        self.COMPLETE_CLEANUP_DELAY_MS,
-                        lambda did=delegation_id: self._cleanup(did),
-                    )
-                elif new_state == DelegationState.FAILED:
-                    QTimer.singleShot(
-                        self.FAILED_CLEANUP_DELAY_MS,
-                        lambda did=delegation_id: self._cleanup(did),
-                    )
+                    # Schedule cleanup for terminal states
+                    if new_state == DelegationState.COMPLETE:
+                        QTimer.singleShot(
+                            self.COMPLETE_CLEANUP_DELAY_MS,
+                            lambda did=delegation_id: self._cleanup(did),
+                        )
+                    elif new_state == DelegationState.FAILED:
+                        QTimer.singleShot(
+                            self.FAILED_CLEANUP_DELAY_MS,
+                            lambda did=delegation_id: self._cleanup(did),
+                        )
+            except Exception as e:
+                print(f"[DelegationTracker] Error checking state for {delegation_id}: {e}")
 
     def _check_state(self, delegation_id: str, current: DelegationState) -> DelegationState | None:
         """
@@ -208,8 +212,6 @@ class DelegationTracker(QObject):
 
         Returns new state or None if no change.
         """
-        import glob
-
         stem = os.path.splitext(delegation_id)[0]  # e.g. 'delegation_20260215_171033'
         inbox_path = os.path.join(self._inbox_dir, delegation_id)
         report_path = os.path.join(self._reports_dir, f"triage_{stem}.json")
@@ -318,6 +320,14 @@ class WhisperDaemon(QObject):
         self.hotkey_listener.delegation_requested.connect(
             self._on_delegation_hotkey
         )
+
+        # Initialize delegation tracker for pip status updates
+        self.delegation_tracker = DelegationTracker(self.config_manager)
+        self.delegation_tracker.delegation_state_changed.connect(
+            self._on_delegation_state_changed
+        )
+        # Map delegation_id -> DelegationPip widget
+        self._delegation_pips: dict = {}
 
         # Directory for cancelled recordings
         self._cancelled_recordings_dir = os.path.expanduser(
@@ -855,6 +865,14 @@ class WhisperDaemon(QObject):
         # Save to cc-triage inbox
         filepath = self._save_delegation(text)
 
+        # Track delegation AFTER file write completes (race condition guard)
+        if filepath:
+            filename = os.path.basename(filepath)
+            pip = self.indicator.add_delegation_pip()
+            self._delegation_pips[filename] = pip
+            self.delegation_tracker.track(filename)
+            print(f"[Daemon] Delegation tracked: {filename}")
+
         # Also copy to clipboard (useful but don't auto-paste)
         try:
             pyperclip.copy(text)
@@ -902,6 +920,21 @@ class WhisperDaemon(QObject):
         except Exception as e:
             print(f"[Daemon] Error saving delegation: {e}")
             return None
+
+    @Slot(str, str)
+    def _on_delegation_state_changed(self, delegation_id: str, new_state: str):
+        """Handle delegation state change — update the corresponding pip."""
+        pip = self._delegation_pips.get(delegation_id)
+        if not pip:
+            print(f"[Daemon] No pip found for delegation {delegation_id}, ignoring state {new_state}")
+            return
+
+        print(f"[Daemon] Delegation pip update: {delegation_id} -> {new_state}")
+        pip.set_state(new_state)
+
+        # Clean up pip reference on terminal states (pip auto-removes via finished signal)
+        if new_state in ("complete", "failed"):
+            self._delegation_pips.pop(delegation_id, None)
 
     def _auto_paste(self):
         """Simulate Cmd+V to paste at cursor"""
