@@ -1,3 +1,15 @@
+---
+task_id: T024
+title: Carousel Template Redesign
+repo: whisper-transcribe-ui
+phases:
+  - Mockup Ideation
+  - Title Page Template + Config Schema
+  - Content Slide Template
+  - Mermaid SVG + Rendering Quality
+  - Polish + Template Variants
+---
+
 # Task: Carousel Template Redesign
 
 ## Task ID
