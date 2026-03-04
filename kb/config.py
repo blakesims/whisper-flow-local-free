@@ -10,7 +10,6 @@ import os
 import warnings
 from pathlib import Path
 
-
 # Config file location
 CONFIG_FILE = Path.home() / ".config" / "kb" / "config.yaml"
 
@@ -23,7 +22,7 @@ DEFAULTS = {
     },
     "defaults": {
         "whisper_model": "medium",
-        "gemini_model": "gemini-3-pro-preview",
+        "gemini_model": "gemini-3.1-pro-preview",
         "decimal": "50.01.01",
     },
     "zoom": {
@@ -114,7 +113,7 @@ DEFAULTS = {
             "tags": ["skool"],
             "sources": ["file", "volume"],
         },
-    }
+    },
 }
 
 
@@ -137,6 +136,7 @@ def load_config() -> dict:
     if CONFIG_FILE.exists():
         try:
             import yaml
+
             with open(CONFIG_FILE) as f:
                 file_config = yaml.safe_load(f) or {}
 
@@ -153,7 +153,7 @@ def load_config() -> dict:
                 if "action_mapping" in file_config["serve"]:
                     config["serve"]["action_mapping"] = {
                         **DEFAULTS["serve"]["action_mapping"],
-                        **file_config["serve"]["action_mapping"]
+                        **file_config["serve"]["action_mapping"],
                     }
             if "inbox" in file_config:
                 config["inbox"] = {**DEFAULTS["inbox"], **file_config["inbox"]}
@@ -161,7 +161,7 @@ def load_config() -> dict:
                 if "decimal_defaults" in file_config["inbox"]:
                     config["inbox"]["decimal_defaults"] = {
                         **DEFAULTS["inbox"]["decimal_defaults"],
-                        **file_config["inbox"]["decimal_defaults"]
+                        **file_config["inbox"]["decimal_defaults"],
                     }
             if "presets" in file_config:
                 # Deep merge presets - user can override or add new presets
@@ -171,7 +171,10 @@ def load_config() -> dict:
             if "video_target" in file_config:
                 config["video_target"] = file_config["video_target"]
             if "remote_mounts" in file_config:
-                config["remote_mounts"] = {**DEFAULTS.get("remote_mounts", {}), **file_config["remote_mounts"]}
+                config["remote_mounts"] = {
+                    **DEFAULTS.get("remote_mounts", {}),
+                    **file_config["remote_mounts"],
+                }
         except Exception as e:
             warnings.warn(f"Could not load config: {e}")
 
@@ -202,7 +205,11 @@ def get_paths(config: dict) -> dict:
         "config_dir": kb_output / "config",
         "volume_sync": Path(paths.get("volume_sync", DEFAULTS["paths"]["volume_sync"])),
         "cap_app": cap_app,
-        "cap_recordings": Path.home() / "Library" / "Application Support" / cap_app / "recordings",
+        "cap_recordings": Path.home()
+        / "Library"
+        / "Application Support"
+        / cap_app
+        / "recordings",
     }
 
 

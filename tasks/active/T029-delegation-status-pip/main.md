@@ -3,7 +3,7 @@
 ## Task ID
 T029
 
-## Status: CODE_REVIEW
+## Status: COMPLETE
 
 ## Overview
 After an Opt+F delegation recording, the whisper daemon's floating pill should show a small pip that visually tracks the delegation lifecycle through cc-triage's filesystem signals. The pip appears after delegation is saved, pulses during processing, flashes green on success, and shows red on failure. It coexists with normal recording without interfering.
@@ -235,14 +235,22 @@ After Opt+F delegation, show a subtle pip on the pill that tracks the delegation
 
 -> Details: `code-review-phase-3.md`
 
+### Phase 4
+- **Gate:** PASS
+- **Reviewed:** 2026-02-15
+- **Issues:** 0 critical, 0 major, 3 minor
+- **Summary:** All six ACs verified. Advisory items from Phase 3 properly addressed. Track-after-write ordering correct. Signal wiring synchronous and race-free. 13 new tests meaningful. 80/80 pass. No regressions.
+
+-> Details: `code-review-phase-4.md`
+
 ### Phase 4: Wiring & Polish
 - **Status:** COMPLETE
 - **Started:** 2026-02-15
 - **Completed:** 2026-02-15
 - **Commits:** `324a895`
 - **Files Modified:**
-  - `app/daemon/whisper_daemon.py` — Added `import glob` at top level (removed from `_check_state`), wrapped per-delegation `_check_state` in try/except in `_poll`, added `DelegationTracker` instantiation and `_delegation_pips` dict in `WhisperDaemon.__init__`, wired `_handle_delegation_output` to create pip + call `tracker.track()` after file write, added `_on_delegation_state_changed` handler mapping delegation_id to pip `set_state()`
-  - `tests/test_delegation_wiring.py` — 13 new tests covering glob import, poll exception handling, track-after-write ordering, state-changed handler (all states + unknown id), composite states
+  - `app/daemon/whisper_daemon.py` -- Added `import glob` at top level (removed from `_check_state`), wrapped per-delegation `_check_state` in try/except in `_poll`, added `DelegationTracker` instantiation and `_delegation_pips` dict in `WhisperDaemon.__init__`, wired `_handle_delegation_output` to create pip + call `tracker.track()` after file write, added `_on_delegation_state_changed` handler mapping delegation_id to pip `set_state()`
+  - `tests/test_delegation_wiring.py` -- 13 new tests covering glob import, poll exception handling, track-after-write ordering, state-changed handler (all states + unknown id), composite states
 
 ### Tasks Completed
 - [x] Task 4.1: Wired `_handle_delegation_output` — `tracker.track()` called AFTER `_save_delegation()` returns filepath
@@ -259,6 +267,11 @@ After Opt+F delegation, show a subtle pip on the pill that tracks the delegation
 - [x] AC4: Daemon logs show transitions — print statements in `_on_delegation_state_changed`, `DelegationTracker._poll`, `track()`, `_cleanup()`
 - [x] AC5: `track()` called after file write — verified by `test_handle_delegation_output_calls_track_after_save` (call_order = ["save", "track"])
 - [x] AC6: `_poll` handles per-delegation exceptions — verified by `test_poll_continues_after_single_delegation_error` (PermissionError on d1, d2 still checked)
+
+## Completion
+- **Completed:** 2026-02-15
+- **Summary:** Delegation status pip fully implemented across 4 phases. DelegationPip widget with 4 visual states, pill layout integration with dynamic sizing, DelegationTracker filesystem polling state machine, and full daemon wiring. 80 tests total (16 pip, 19 layout, 26 tracker, 13 wiring, 6 existing). Two REVISE cycles caught real bugs (signal accumulation, timer cleanup on removal).
+- **Learnings:** Advisory issues from code review can be cleanly carried forward as explicit ACs. `types.SimpleNamespace` with `__get__` is effective for testing individual methods of heavyweight QObject classes.
 
 ## Notes & Updates
 - 2026-02-15: Plan created. Delegation rename (issue_capture → delegation) already applied in this session.

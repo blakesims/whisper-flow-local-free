@@ -6,30 +6,39 @@ Interactive menu for KB workflow tools.
 Run with: kb (or python -m kb)
 """
 
-import sys
 import os
+import sys
 from pathlib import Path
+
 import questionary
+from questionary import Style
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from questionary import Style
 
 console = Console()
 
-custom_style = Style([
-    ('qmark', 'fg:cyan bold'),
-    ('question', 'fg:white bold'),
-    ('answer', 'fg:green bold'),
-    ('pointer', 'fg:cyan bold'),
-    ('highlighted', 'fg:cyan bold'),
-    ('selected', 'fg:green'),
-])
+custom_style = Style(
+    [
+        ("qmark", "fg:cyan bold"),
+        ("question", "fg:white bold"),
+        ("answer", "fg:green bold"),
+        ("pointer", "fg:cyan bold"),
+        ("highlighted", "fg:cyan bold"),
+        ("selected", "fg:green"),
+    ]
+)
 
 from kb.config import (
-    load_config, get_paths, expand_path,
-    DEFAULTS, CONFIG_FILE,
-    KB_ROOT, CONFIG_DIR, VOLUME_SYNC_PATH, CAP_RECORDINGS_DIR,
+    CAP_RECORDINGS_DIR,
+    CONFIG_DIR,
+    CONFIG_FILE,
+    DEFAULTS,
+    KB_ROOT,
+    VOLUME_SYNC_PATH,
+    expand_path,
+    get_paths,
+    load_config,
 )
 
 COMMANDS = {
@@ -110,11 +119,15 @@ def show_config():
         # Check if it's a symlink
         if CONFIG_FILE.is_symlink():
             target = CONFIG_FILE.resolve()
-            console.print(f"  {shorten_path(CONFIG_FILE)} [dim]→[/dim] {shorten_path(target)}  [green]linked[/green]")
+            console.print(
+                f"  {shorten_path(CONFIG_FILE)} [dim]→[/dim] {shorten_path(target)}  [green]linked[/green]"
+            )
         else:
             console.print(f"  {shorten_path(CONFIG_FILE)}  [green]exists[/green]")
     else:
-        console.print(f"  {shorten_path(CONFIG_FILE)}  [yellow]not found (using defaults)[/yellow]")
+        console.print(
+            f"  {shorten_path(CONFIG_FILE)}  [yellow]not found (using defaults)[/yellow]"
+        )
 
     # Paths section
     console.print("\n[bold cyan]Paths[/bold cyan]")
@@ -127,17 +140,29 @@ def show_config():
     paths_table.add_row(
         "KB Output",
         shorten_path(paths["kb_output"]),
-        "[green]exists[/green]" if paths["kb_output"].exists() else "[red]missing[/red]"
+        (
+            "[green]exists[/green]"
+            if paths["kb_output"].exists()
+            else "[red]missing[/red]"
+        ),
     )
     paths_table.add_row(
         "Volume Sync",
         str(paths["volume_sync"]),
-        "[green]mounted[/green]" if paths["volume_sync"].exists() else "[dim]not mounted[/dim]"
+        (
+            "[green]mounted[/green]"
+            if paths["volume_sync"].exists()
+            else "[dim]not mounted[/dim]"
+        ),
     )
     paths_table.add_row(
         "Cap App",
         paths["cap_app"],
-        "[green]exists[/green]" if paths["cap_recordings"].exists() else "[dim]not found[/dim]"
+        (
+            "[green]exists[/green]"
+            if paths["cap_recordings"].exists()
+            else "[dim]not found[/dim]"
+        ),
     )
     console.print(paths_table)
 
@@ -148,7 +173,9 @@ def show_config():
     defaults_table.add_column("Label", style="dim")
     defaults_table.add_column("Value")
     defaults_table.add_row("Whisper Model", defaults.get("whisper_model", "medium"))
-    defaults_table.add_row("Gemini Model", defaults.get("gemini_model", "gemini-3-pro-preview"))
+    defaults_table.add_row(
+        "Gemini Model", defaults.get("gemini_model", "gemini-3.1-pro-preview")
+    )
     defaults_table.add_row("Decimal", defaults.get("decimal", "50.01.01"))
     console.print(defaults_table)
 
@@ -166,7 +193,9 @@ def show_config():
         analysis_types = [f.stem for f in analysis_dir.glob("*.json")]
 
     # Registry section
-    console.print("\n[bold cyan]Registry[/bold cyan]  [dim](config/registry.json)[/dim]")
+    console.print(
+        "\n[bold cyan]Registry[/bold cyan]  [dim](config/registry.json)[/dim]"
+    )
 
     decimals = registry.get("decimals", {})
     tags = registry.get("tags", [])
@@ -182,7 +211,9 @@ def show_config():
     console.print(reg_table)
 
     # Presets section
-    console.print("\n[bold cyan]Presets[/bold cyan]  [dim](quick input for common workflows)[/dim]")
+    console.print(
+        "\n[bold cyan]Presets[/bold cyan]  [dim](quick input for common workflows)[/dim]"
+    )
     presets = config.get("presets", {})
     if presets:
         # Group by source
@@ -195,8 +226,10 @@ def show_config():
 
         for source in sorted(by_source.keys()):
             source_presets = by_source[source]
-            preset_names = [f"[green]{preset.get('label', key)}[/green] ({preset.get('decimal', '')})"
-                          for key, preset in source_presets]
+            preset_names = [
+                f"[green]{preset.get('label', key)}[/green] ({preset.get('decimal', '')})"
+                for key, preset in source_presets
+            ]
             console.print(f"  [cyan]{source}:[/cyan] {', '.join(preset_names)}")
     else:
         console.print("  [yellow]No presets configured[/yellow]")
@@ -209,25 +242,34 @@ def show_config():
         console.print(f"  {', '.join(ignore_list)}")
 
     # Analysis types section
-    console.print("\n[bold cyan]Analysis Prompts[/bold cyan]  [dim](config/analysis_types/)[/dim]")
+    console.print(
+        "\n[bold cyan]Analysis Prompts[/bold cyan]  [dim](config/analysis_types/)[/dim]"
+    )
     if analysis_types:
-        console.print(f"  {len(analysis_types)} types: [green]{', '.join(sorted(analysis_types))}[/green]")
+        console.print(
+            f"  {len(analysis_types)} types: [green]{', '.join(sorted(analysis_types))}[/green]"
+        )
     else:
         console.print("  [yellow]No analysis types configured[/yellow]")
 
     # Missing analyses quick status
     try:
         from kb.analyze import scan_missing_by_decimal
+
         missing_by_decimal = scan_missing_by_decimal()
         if missing_by_decimal:
             total_transcripts = sum(len(ts) for ts in missing_by_decimal.values())
             total_decimals = len(missing_by_decimal)
             console.print(f"\n[bold cyan]Missing Analyses[/bold cyan]")
-            console.print(f"  [yellow]{total_transcripts} transcript(s) missing default analyses across {total_decimals} decimal(s)[/yellow]")
+            console.print(
+                f"  [yellow]{total_transcripts} transcript(s) missing default analyses across {total_decimals} decimal(s)[/yellow]"
+            )
             console.print(f"  [dim]Run 'kb missing' for details[/dim]")
         else:
             console.print(f"\n[bold cyan]Missing Analyses[/bold cyan]")
-            console.print(f"  [green]✓ All transcripts have their default analyses[/green]")
+            console.print(
+                f"  [green]✓ All transcripts have their default analyses[/green]"
+            )
     except Exception:
         # Don't break config display if scan fails
         pass
@@ -264,13 +306,17 @@ def show_config():
 
         if edit_choice == "edit":
             import subprocess
-            config_path = CONFIG_FILE.resolve() if CONFIG_FILE.is_symlink() else CONFIG_FILE
+
+            config_path = (
+                CONFIG_FILE.resolve() if CONFIG_FILE.is_symlink() else CONFIG_FILE
+            )
 
             # Ensure config file exists with starter template
             if not config_path.exists():
                 config_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(config_path, 'w') as f:
-                    f.write("""# KB Workflow Configuration
+                with open(config_path, "w") as f:
+                    f.write(
+                        """# KB Workflow Configuration
 # See defaults in kb/config.py
 
 # Uncomment and modify to customize:
@@ -286,7 +332,8 @@ def show_config():
 #   ignore_participants:
 #     - "Fireflies"
 #     - "Otter"
-""")
+"""
+                    )
 
             console.print(f"[dim]Opening {shorten_path(config_path)}...[/dim]")
             subprocess.run([editor, str(config_path)])
@@ -296,6 +343,7 @@ def show_config():
 def manage_decimals():
     """Interactive decimal category management."""
     import json
+
     from kb.core import load_registry
 
     registry = load_registry()
@@ -320,7 +368,9 @@ def manage_decimals():
             info = decimals[decimal_code]
             name = info.get("name", "") if isinstance(info, dict) else info
             description = info.get("description", "") if isinstance(info, dict) else ""
-            analyses = info.get("default_analyses", []) if isinstance(info, dict) else []
+            analyses = (
+                info.get("default_analyses", []) if isinstance(info, dict) else []
+            )
 
             # Truncate description if too long
             if len(description) > 40:
@@ -359,10 +409,11 @@ def manage_decimals():
 
 def add_decimal():
     """Interactive flow to add a new decimal category."""
-    import re
     import json
-    from kb.core import load_registry, save_registry
+    import re
+
     from kb.analyze import list_analysis_types
+    from kb.core import load_registry, save_registry
 
     console.print(Panel("[bold]Add New Decimal Category[/bold]", border_style="cyan"))
 
@@ -375,7 +426,7 @@ def add_decimal():
         questionary.Choice(
             title=f"{t['name']}: {t['description'][:50]}{'...' if len(t['description']) > 50 else ''}",
             value=t["name"],
-            checked=False
+            checked=False,
         )
         for t in analysis_types
     ]
@@ -384,14 +435,16 @@ def add_decimal():
     def validate_decimal(text: str) -> bool | str:
         if not text:
             return "Decimal code is required"
-        if not re.match(r'^\d+(\.\d+)*$', text):
+        if not re.match(r"^\d+(\.\d+)*$", text):
             return "Invalid format. Use digits separated by dots (e.g., 50.01.01)"
         if text in decimals:
             return f"Decimal '{text}' already exists"
         return True
 
     # Prompt for decimal code
-    console.print("\n[dim]Format: digits separated by dots (e.g., 50.01.01, 60.02)[/dim]\n")
+    console.print(
+        "\n[dim]Format: digits separated by dots (e.g., 50.01.01, 60.02)[/dim]\n"
+    )
 
     decimal_code = questionary.text(
         "Decimal code:",
@@ -454,7 +507,9 @@ def add_decimal():
     if description:
         console.print(f"  Description: [dim]{description}[/dim]")
     if default_analyses:
-        console.print(f"  Default analyses: [green]{', '.join(default_analyses)}[/green]")
+        console.print(
+            f"  Default analyses: [green]{', '.join(default_analyses)}[/green]"
+        )
     else:
         console.print("  Default analyses: [dim]none[/dim]")
 
@@ -479,16 +534,21 @@ def add_decimal():
     }
 
     if save_registry(registry):
-        console.print(f"\n[green]✓ Decimal '{decimal_code}' added successfully![/green]\n")
+        console.print(
+            f"\n[green]✓ Decimal '{decimal_code}' added successfully![/green]\n"
+        )
     else:
-        console.print(f"\n[red]✗ Failed to save decimal. Check file permissions.[/red]\n")
+        console.print(
+            f"\n[red]✗ Failed to save decimal. Check file permissions.[/red]\n"
+        )
 
 
 def edit_decimal():
     """Interactive flow to edit an existing decimal category."""
     import json
-    from kb.core import load_registry, save_registry
+
     from kb.analyze import list_analysis_types
+    from kb.core import load_registry, save_registry
 
     registry = load_registry()
     decimals = registry.get("decimals", {})
@@ -504,7 +564,7 @@ def edit_decimal():
     decimal_choices = [
         questionary.Choice(
             title=f"{code}: {info.get('name', info) if isinstance(info, dict) else info}",
-            value=code
+            value=code,
         )
         for code, info in sorted(decimals.items())
     ]
@@ -535,7 +595,9 @@ def edit_decimal():
     console.print(f"  Decimal: [cyan]{decimal_code}[/cyan]")
     console.print(f"  Name: {current_name}")
     console.print(f"  Description: [dim]{current_description or '(none)'}[/dim]")
-    console.print(f"  Default analyses: [green]{', '.join(current_analyses) if current_analyses else '(none)'}[/green]")
+    console.print(
+        f"  Default analyses: [green]{', '.join(current_analyses) if current_analyses else '(none)'}[/green]"
+    )
 
     # Submenu for what to edit
     edit_action = questionary.select(
@@ -564,7 +626,7 @@ def edit_decimal():
         questionary.Choice(
             title=f"{t['name']}: {t['description'][:50]}{'...' if len(t['description']) > 50 else ''}",
             value=t["name"],
-            checked=(t["name"] in current_analyses)
+            checked=(t["name"] in current_analyses),
         )
         for t in analysis_types
     ]
@@ -613,9 +675,11 @@ def edit_decimal():
             console.print("[yellow]No analysis types available.[/yellow]")
 
     # Check if anything changed
-    changed = (new_name != current_name or
-               new_description != current_description or
-               set(new_analyses) != set(current_analyses))
+    changed = (
+        new_name != current_name
+        or new_description != current_description
+        or set(new_analyses) != set(current_analyses)
+    )
 
     if not changed:
         console.print("\n[dim]No changes made.[/dim]\n")
@@ -628,11 +692,15 @@ def edit_decimal():
     if new_description != current_description:
         old_desc = current_description or "(none)"
         new_desc = new_description or "(none)"
-        console.print(f"  Description: [dim]{old_desc}[/dim] → [green]{new_desc}[/green]")
+        console.print(
+            f"  Description: [dim]{old_desc}[/dim] → [green]{new_desc}[/green]"
+        )
     if set(new_analyses) != set(current_analyses):
         old_analyses = ", ".join(current_analyses) if current_analyses else "(none)"
         new_analyses_str = ", ".join(new_analyses) if new_analyses else "(none)"
-        console.print(f"  Analyses: [dim]{old_analyses}[/dim] → [green]{new_analyses_str}[/green]")
+        console.print(
+            f"  Analyses: [dim]{old_analyses}[/dim] → [green]{new_analyses_str}[/green]"
+        )
 
     confirm = questionary.confirm(
         "\nSave changes?",
@@ -652,9 +720,13 @@ def edit_decimal():
     }
 
     if save_registry(registry):
-        console.print(f"\n[green]✓ Decimal '{decimal_code}' updated successfully![/green]\n")
+        console.print(
+            f"\n[green]✓ Decimal '{decimal_code}' updated successfully![/green]\n"
+        )
     else:
-        console.print(f"\n[red]✗ Failed to save changes. Check file permissions.[/red]\n")
+        console.print(
+            f"\n[red]✗ Failed to save changes. Check file permissions.[/red]\n"
+        )
 
 
 def delete_decimal(decimal_code: str, registry: dict):
@@ -663,8 +735,12 @@ def delete_decimal(decimal_code: str, registry: dict):
 
     # Check if any transcripts use this decimal
     # We could scan the transcripts directory, but for now we'll just warn
-    console.print(f"\n[yellow]Warning:[/yellow] Deleting decimal [cyan]{decimal_code}[/cyan]")
-    console.print("[dim]Existing transcripts using this decimal will not be affected,[/dim]")
+    console.print(
+        f"\n[yellow]Warning:[/yellow] Deleting decimal [cyan]{decimal_code}[/cyan]"
+    )
+    console.print(
+        "[dim]Existing transcripts using this decimal will not be affected,[/dim]"
+    )
     console.print("[dim]but new transcripts won't be able to use it.[/dim]\n")
 
     confirm = questionary.confirm(
@@ -707,7 +783,9 @@ def view_analysis_types():
     if not analysis_dir.exists():
         console.print(f"\n[yellow]Analysis types directory not found:[/yellow]")
         console.print(f"[dim]{shorten_path(analysis_dir)}/[/dim]\n")
-        console.print("[dim]Create JSON files in this directory to define analysis types.[/dim]\n")
+        console.print(
+            "[dim]Create JSON files in this directory to define analysis types.[/dim]\n"
+        )
         return
 
     analysis_files = list(analysis_dir.glob("*.json"))
@@ -746,11 +824,7 @@ def view_analysis_types():
             table.add_row(name, description, output_type)
 
         except (json.JSONDecodeError, IOError) as e:
-            table.add_row(
-                analysis_file.stem,
-                f"[red]Error loading: {e}[/red]",
-                ""
-            )
+            table.add_row(analysis_file.stem, f"[red]Error loading: {e}[/red]", "")
 
     console.print(table)
     console.print(f"\n[dim]Location: {shorten_path(analysis_dir)}/[/dim]\n")
@@ -758,7 +832,9 @@ def view_analysis_types():
 
 def prompt_for_file() -> str | None:
     """Prompt user for file path interactively."""
-    console.print(Panel("[bold]Transcribe to Knowledge Base[/bold]", border_style="cyan"))
+    console.print(
+        Panel("[bold]Transcribe to Knowledge Base[/bold]", border_style="cyan")
+    )
 
     console.print("\n[dim]Enter file path, drag & drop, or paste:[/dim]")
 
@@ -786,27 +862,29 @@ def prompt_for_file() -> str | None:
 
 def show_menu() -> str | None:
     """Show interactive menu and return selected command."""
-    console.print(Panel(
-        "[bold]Knowledge Base Workflow[/bold]\n\n"
-        "Select a command to run:",
-        border_style="cyan"
-    ))
+    console.print(
+        Panel(
+            "[bold]Knowledge Base Workflow[/bold]\n\n" "Select a command to run:",
+            border_style="cyan",
+        )
+    )
 
     choices = [
-        questionary.Choice(
-            title=f"{cmd['label']:12} - {cmd['description']}",
-            value=key
-        )
+        questionary.Choice(title=f"{cmd['label']:12} - {cmd['description']}", value=key)
         for key, cmd in COMMANDS.items()
     ]
-    choices.append(questionary.Choice(title="Config       - View paths and settings", value="config"))
+    choices.append(
+        questionary.Choice(
+            title="Config       - View paths and settings", value="config"
+        )
+    )
     choices.append(questionary.Choice(title="Exit", value=None))
 
     return questionary.select(
         "",
         choices=choices,
         style=custom_style,
-        instruction="(up/down to move, Enter to select)"
+        instruction="(up/down to move, Enter to select)",
     ).ask()
 
 

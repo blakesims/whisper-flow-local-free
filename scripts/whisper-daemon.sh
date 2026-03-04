@@ -12,6 +12,12 @@ VENV_PATH="$PROJECT_ROOT/.venv"
 DAEMON_MODULE="app.daemon.whisper_daemon"
 PID_FILE="/tmp/whisper-daemon.pid"
 
+# cc-triage daemon (delegation routing)
+TRIAGE_DIR="$HOME/projects/cc-triage"
+TRIAGE_VENV="$TRIAGE_DIR/.venv"
+TRIAGE_PID_FILE="/tmp/cc-triage-daemon.pid"
+TRIAGE_LOG="/tmp/cc-triage-daemon.log"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -72,6 +78,9 @@ start_daemon() {
         echo "Log file: $LOG_FILE"
         echo ""
         echo "Press Ctrl+F to start/stop recording"
+
+        # Start cc-triage alongside whisper
+        start_triage
     else
         echo -e "${RED}Failed to start daemon. Check log: $LOG_FILE${NC}"
         tail -20 "$LOG_FILE"
@@ -107,6 +116,9 @@ stop_daemon() {
     kill -KILL "$PID" 2>/dev/null
     rm -f "$PID_FILE"
     echo -e "${GREEN}Whisper daemon stopped (forced)${NC}"
+
+    # Stop cc-triage alongside whisper
+    stop_triage
 }
 
 # Show daemon status
@@ -133,6 +145,18 @@ show_status() {
 
         echo ""
         echo -e "${YELLOW}Hotkey: Ctrl+F${NC} to toggle recording"
+
+        # cc-triage status
+        if [ -f "$TRIAGE_PID_FILE" ] && ps -p "$(cat "$TRIAGE_PID_FILE")" > /dev/null 2>&1; then
+            TPID=$(cat "$TRIAGE_PID_FILE")
+            TMEM=$(ps -o rss= -p "$TPID" 2>/dev/null | awk '{printf "%.1f MB", $1/1024}')
+            echo ""
+            echo -e "${GREEN}cc-triage daemon is RUNNING${NC}"
+            echo "  PID: $TPID | Memory: $TMEM"
+        else
+            echo ""
+            echo -e "${RED}cc-triage daemon is NOT running${NC}"
+        fi
     else
         echo -e "${RED}Whisper daemon is NOT running${NC}"
         echo ""
@@ -164,6 +188,42 @@ show_models() {
     echo ""
     echo "To change model, edit: ~/Library/Application Support/WhisperTranscribeUI/settings.json"
     echo "Set \"transcription_model_name\" to your preferred model, then restart daemon."
+}
+
+# Start cc-triage daemon
+start_triage() {
+    if [ -f "$TRIAGE_PID_FILE" ] && ps -p "$(cat "$TRIAGE_PID_FILE")" > /dev/null 2>&1; then
+        return 0  # already running
+    fi
+
+    if [ ! -d "$TRIAGE_VENV" ]; then
+        echo -e "${YELLOW}cc-triage venv not found, skipping${NC}"
+        return 1
+    fi
+
+    (
+        cd "$TRIAGE_DIR"
+        unset ANTHROPIC_API_KEY
+        nohup "$TRIAGE_VENV/bin/python" src/daemon.py > "$TRIAGE_LOG" 2>&1 &
+        echo $! > "$TRIAGE_PID_FILE"
+    )
+    echo -e "${GREEN}cc-triage daemon started${NC}"
+}
+
+# Stop cc-triage daemon
+stop_triage() {
+    if [ -f "$TRIAGE_PID_FILE" ]; then
+        PID=$(cat "$TRIAGE_PID_FILE")
+        if ps -p "$PID" > /dev/null 2>&1; then
+            kill -TERM "$PID" 2>/dev/null
+            for i in {1..6}; do
+                ps -p "$PID" > /dev/null 2>&1 || break
+                sleep 0.5
+            done
+            kill -KILL "$PID" 2>/dev/null
+        fi
+        rm -f "$TRIAGE_PID_FILE"
+    fi
 }
 
 # Main script logic
