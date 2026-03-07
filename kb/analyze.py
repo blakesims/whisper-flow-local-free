@@ -816,6 +816,35 @@ def run_analysis_with_deps(
         prerequisite_context=prompt_context if prompt_context else None
     )
 
+    # Run any downstream triggers (post-processing steps that depend on this analysis)
+    triggers = analysis_def.get("triggers", [])
+    if triggers and "error" not in result:
+        # Store this result so triggers can use it as a prerequisite
+        result["_model"] = model
+        result["_analyzed_at"] = datetime.now().isoformat()
+        existing_analysis[analysis_type] = result
+
+        for trigger in triggers:
+            if trigger not in existing_analysis:
+                console.print(f"[dim]Running triggered analysis: {trigger}[/dim]")
+                try:
+                    trig_result, trig_prereqs = run_analysis_with_deps(
+                        transcript_data=transcript_data,
+                        analysis_type=trigger,
+                        model=model,
+                        existing_analysis=existing_analysis
+                    )
+                    if "error" not in trig_result:
+                        trig_result["_model"] = model
+                        trig_result["_analyzed_at"] = datetime.now().isoformat()
+                        existing_analysis[trigger] = trig_result
+                        prerequisites_run.append(trigger)
+                        prerequisites_run.extend(trig_prereqs)
+                    else:
+                        console.print(f"[yellow]Triggered analysis '{trigger}' failed: {trig_result.get('error')}[/yellow]")
+                except Exception as e:
+                    console.print(f"[yellow]Triggered analysis '{trigger}' failed: {e}[/yellow]")
+
     return result, prerequisites_run
 
 
