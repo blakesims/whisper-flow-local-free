@@ -108,7 +108,7 @@ class MiniWaveform(QWidget):
         import numpy as np
         if audio_chunk is not None and len(audio_chunk) > 0:
             # Flatten in case of multi-channel audio
-            data = audio_chunk.flatten().astype(np.float32)
+            data = audio_chunk.flatten().astype(np.float32) / 32768.0
             # Calculate RMS (root mean square) for amplitude
             rms = float(np.sqrt(np.mean(data ** 2)))
             # MacBook mic is quiet (RMS ~0.005 for speech), external mics louder (~0.05-0.2)

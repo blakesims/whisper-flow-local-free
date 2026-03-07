@@ -150,7 +150,7 @@ class WhisperCppService:
             # Note: pywhispercpp returns a list of Segment objects
             segments = self.model.transcribe(
                 converted_path,
-                language=language if language else None,
+                language=language if language else "en",
                 n_threads=self._get_thread_count(),
             )
 

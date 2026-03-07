@@ -24,7 +24,7 @@ class AudioRecorder(QThread):
         self.sample_rate = 16000
         self.channels = 1
         self.device = device  # None = system default, or device index/name
-        self.dtype = 'float32' # Corresponds to np.float32 for wavfile.write
+        self.dtype = 'int16'
         self.chunk_size = 1024
 
         self._is_recording = False
@@ -157,10 +157,6 @@ class AudioRecorder(QThread):
         
         try:
             concatenated_data = np.concatenate(self._audio_buffer)
-            # Ensure data is in a format scipy.io.wavfile.write expects.
-            # If self.dtype is 'float32', data should be between -1 and 1.
-            # If integer types were used, they'd need to be scaled to their respective ranges.
-            # Current setup with float32 is fine.
             wavfile.write(file_path, self.sample_rate, concatenated_data)
             print(f"AudioRecorder: Recording saved to {file_path}")
             return True
