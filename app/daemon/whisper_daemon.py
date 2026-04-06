@@ -18,6 +18,10 @@ import tempfile
 import time
 from enum import Enum
 from pathlib import Path
+from typing import Optional
+
+# Daemon version — bump on performance-relevant changes
+DAEMON_VERSION = "2.0.0"  # v2: streaming transcription + VAD segmentation + base.en
 
 # Unbuffered output for daemon logging
 sys.stdout = sys.stderr  # Redirect stdout to stderr for immediate output
@@ -32,6 +36,7 @@ from PySide6.QtWidgets import QApplication
 
 from app.core.audio_recorder import AudioRecorder
 from app.core.post_processor import get_post_processor
+from app.core.streaming_transcriber import StreamingTranscriber
 from app.core.transcription_service_cpp import (
     WhisperCppService,
     get_transcription_service,
@@ -39,6 +44,61 @@ from app.core.transcription_service_cpp import (
 from app.daemon.hotkey_listener import HotkeyListener
 from app.daemon.recording_indicator import RecordingIndicator
 from app.utils.config_manager import ConfigManager
+
+
+class PerfTrace:
+    """Captures timing metadata for a single recording→transcription cycle."""
+
+    def __init__(self):
+        self.hotkey_pressed = 0.0      # when hotkey was pressed to start
+        self.recording_started = 0.0   # when audio stream actually started
+        self.stop_requested = 0.0      # when hotkey was pressed to stop
+        self.recording_stopped = 0.0   # when audio stream fully stopped
+        self.transcribe_start = 0.0    # when transcription begins (flush or file)
+        self.transcribe_end = 0.0      # when transcription text is ready
+        self.post_process_end = 0.0    # after LLM post-processing (if enabled)
+        self.clipboard_done = 0.0      # after clipboard copy
+        self.paste_done = 0.0          # after auto-paste
+
+        self.streaming_segments = 0    # segments transcribed during recording
+        self.streaming_flush_time = 0.0  # time spent in flush() only
+        self.used_streaming = False
+        self.used_vad = False
+        self.recording_mode = "normal"
+        self.model_name = ""
+        self.text_length = 0
+
+    def recording_duration(self) -> float:
+        if self.recording_started and self.stop_requested:
+            return self.stop_requested - self.recording_started
+        return 0.0
+
+    def log_summary(self):
+        """Print a structured performance summary."""
+        rec_dur = self.recording_duration()
+        hotkey_to_rec = (self.recording_started - self.hotkey_pressed) if self.hotkey_pressed else 0
+        stop_to_stopped = (self.recording_stopped - self.stop_requested) if self.stop_requested else 0
+        transcribe_time = (self.transcribe_end - self.transcribe_start) if self.transcribe_start else 0
+        post_time = (self.post_process_end - self.transcribe_end) if self.post_process_end and self.transcribe_end else 0
+        total_latency = (self.paste_done or self.clipboard_done or self.transcribe_end) - self.stop_requested if self.stop_requested else 0
+
+        print(f"\n{'='*60}")
+        print(f"  PERF TRACE  v{DAEMON_VERSION}  [{self.recording_mode}]  model={self.model_name}")
+        print(f"{'='*60}")
+        print(f"  Hotkey → Recording started:  {hotkey_to_rec*1000:6.0f}ms")
+        print(f"  Recording duration:           {rec_dur:6.2f}s")
+        print(f"  Stop → Stream fully stopped:  {stop_to_stopped*1000:6.0f}ms")
+        if self.used_streaming:
+            print(f"  Streaming segments (during):  {self.streaming_segments}")
+            print(f"  VAD segmentation:             {'yes' if self.used_vad else 'no (fixed interval)'}")
+            print(f"  Flush time (user waits):      {self.streaming_flush_time*1000:6.0f}ms")
+        print(f"  Transcription time:           {transcribe_time*1000:6.0f}ms")
+        if post_time > 0:
+            print(f"  Post-processing time:         {post_time*1000:6.0f}ms")
+        print(f"  Text length:                  {self.text_length} chars")
+        print(f"  ─────────────────────────────")
+        print(f"  TOTAL LATENCY (stop→done):    {total_latency*1000:6.0f}ms")
+        print(f"{'='*60}\n")
 
 
 class DaemonState(Enum):
@@ -290,6 +350,7 @@ class WhisperDaemon(QObject):
             True  # Whether current audio is temp (should be deleted after)
         )
         self._recording_mode = RecordingMode.NORMAL
+        self._cancel_recording = False
 
         # Initialize config manager
         self.config_manager = ConfigManager()
@@ -344,6 +405,12 @@ class WhisperDaemon(QObject):
         # Model loading state
         self._model_loaded = False
         self._model_loading = False
+
+        # Streaming transcriber (transcribes segments while recording)
+        self._streaming_transcriber: Optional[StreamingTranscriber] = None
+
+        # Performance tracing
+        self._perf: Optional[PerfTrace] = None
 
     def _connect_recorder_signals(self):
         """Connect audio recorder signals"""
@@ -424,8 +491,11 @@ class WhisperDaemon(QObject):
 
     @Slot(object)
     def _on_audio_chunk(self, chunk):
-        """Handle new audio chunk for waveform visualization"""
+        """Handle new audio chunk for waveform visualization and streaming transcription"""
         self.indicator.update_waveform(chunk)
+        # Feed chunk to streaming transcriber for progressive transcription
+        if self._streaming_transcriber and self._streaming_transcriber.is_active:
+            self._streaming_transcriber.feed_chunk(chunk)
 
     @property
     def state(self) -> DaemonState:
@@ -440,7 +510,7 @@ class WhisperDaemon(QObject):
 
     def start(self):
         """Start the daemon - load model and begin listening for hotkeys"""
-        print("[Daemon] Starting whisper daemon...")
+        print(f"[Daemon] Starting whisper daemon v{DAEMON_VERSION}...")
 
         # Write PID file
         self._write_pid_file()
@@ -511,7 +581,7 @@ class WhisperDaemon(QObject):
 
         try:
             # Get model config from settings
-            model_name = self.config_manager.get("transcription_model_name", "base")
+            model_name = self.config_manager.get("transcription_model_name", "base.en")
             device = self.config_manager.get("transcription_device", "cpu")
             compute_type = self.config_manager.get("transcription_compute_type", "int8")
 
@@ -540,6 +610,7 @@ class WhisperDaemon(QObject):
     @Slot()
     def _on_hotkey_triggered(self):
         """Handle Ctrl+F hotkey press - toggle recording (normal mode)"""
+        hotkey_time = time.time()
         print(f"[Daemon] Hotkey triggered! Current state: {self.state.value}")
 
         # Save the frontmost app BEFORE we do anything
@@ -553,8 +624,14 @@ class WhisperDaemon(QObject):
 
         if self.state == DaemonState.IDLE:
             self._recording_mode = RecordingMode.NORMAL
+            self._perf = PerfTrace()
+            self._perf.hotkey_pressed = hotkey_time
+            self._perf.recording_mode = "normal"
+            self._perf.model_name = getattr(self.transcription_service, 'model_name', '?')
             self._start_recording()
         elif self.state == DaemonState.RECORDING:
+            if self._perf:
+                self._perf.stop_requested = hotkey_time
             self._stop_recording()
         elif self.state == DaemonState.TRANSCRIBING:
             print("[Daemon] Already transcribing, please wait...")
@@ -568,6 +645,7 @@ class WhisperDaemon(QObject):
     @Slot()
     def _on_delegation_hotkey(self):
         """Handle Option+F hotkey press - toggle recording (delegation mode)"""
+        hotkey_time = time.time()
         print(
             f"[Daemon] Delegation hotkey triggered! Current state: {self.state.value}"
         )
@@ -582,8 +660,14 @@ class WhisperDaemon(QObject):
 
         if self.state == DaemonState.IDLE:
             self._recording_mode = RecordingMode.DELEGATION
+            self._perf = PerfTrace()
+            self._perf.hotkey_pressed = hotkey_time
+            self._perf.recording_mode = "delegation"
+            self._perf.model_name = getattr(self.transcription_service, 'model_name', '?')
             self._start_recording()
         elif self.state == DaemonState.RECORDING:
+            if self._perf:
+                self._perf.stop_requested = hotkey_time
             self._stop_recording()
         elif self.state == DaemonState.TRANSCRIBING:
             print("[Daemon] Already transcribing, please wait...")
@@ -690,6 +774,17 @@ class WhisperDaemon(QObject):
             return
 
         print("[Daemon] Starting recording...")
+
+        # Start streaming transcriber for progressive transcription
+        language = self.config_manager.get("transcription_language", "en")
+        if language == "auto":
+            language = "en"
+        self._streaming_transcriber = StreamingTranscriber(
+            self.transcription_service, language=language
+        )
+        self._streaming_transcriber.start_session()
+        print("[Daemon] Streaming transcriber ready")
+
         self.state = DaemonState.RECORDING
         self.audio_recorder.start_recording()
 
@@ -706,12 +801,16 @@ class WhisperDaemon(QObject):
     @Slot()
     def _on_recording_started(self):
         """Handle recording started signal"""
+        if self._perf:
+            self._perf.recording_started = time.time()
         print("[Daemon] Recording started")
         self.state = DaemonState.RECORDING
 
     @Slot(str)
     def _on_recording_stopped(self, audio_path_or_message: str):
         """Handle recording stopped signal"""
+        if self._perf:
+            self._perf.recording_stopped = time.time()
         print(f"[Daemon] Recording stopped: {audio_path_or_message}")
 
         # Wait for recorder thread to fully stop
@@ -721,20 +820,31 @@ class WhisperDaemon(QObject):
         # Check if we got a valid audio path
         if audio_path_or_message and os.path.exists(audio_path_or_message):
             # Check if recording was cancelled
-            if getattr(self, "_cancel_recording", False):
+            if self._cancel_recording:
                 self._cancel_recording = False
                 # Keep the audio file for potential undo
                 self._cancelled_audio_path = audio_path_or_message
                 self._is_temp_file = True
+                # Stop streaming transcriber without using results
+                if self._streaming_transcriber:
+                    self._streaming_transcriber.cancel()
+                    self._streaming_transcriber = None
                 print(f"[Daemon] Recording cancelled, undo available for 10s")
                 self.state = DaemonState.IDLE
                 # Show cancelled state with undo option
                 self.indicator.show_cancelled()
             else:
                 self._current_audio_path = audio_path_or_message
-                self._transcribe_audio()
+                # Use streaming transcriber if it has been processing segments
+                if self._streaming_transcriber:
+                    self._transcribe_streaming()
+                else:
+                    self._transcribe_audio()
         else:
             print(f"[Daemon] No valid audio file: {audio_path_or_message}")
+            if self._streaming_transcriber:
+                self._streaming_transcriber.cancel()
+                self._streaming_transcriber = None
             self.state = DaemonState.IDLE
 
     def _save_cancelled_recording(self, audio_path: str):
@@ -773,8 +883,56 @@ class WhisperDaemon(QObject):
         if self.state == DaemonState.ERROR:
             self.state = new_state
 
+    def _transcribe_streaming(self):
+        """Flush the streaming transcriber and handle the result.
+
+        Most of the audio was already transcribed during recording.
+        This only processes the final untranscribed segment.
+        """
+        print("[Daemon] Flushing streaming transcriber...")
+        self.state = DaemonState.TRANSCRIBING
+
+        if self._perf:
+            self._perf.transcribe_start = time.time()
+            self._perf.used_streaming = True
+            self._perf.used_vad = self._streaming_transcriber._vad is not None
+            with self._streaming_transcriber._transcribe_lock:
+                self._perf.streaming_segments = len(self._streaming_transcriber._confirmed_texts)
+
+        try:
+            flush_start = time.time()
+            text = self._streaming_transcriber.flush()
+            flush_elapsed = time.time() - flush_start
+            print(f"[Daemon] Streaming flush took {flush_elapsed:.2f}s")
+
+            if self._perf:
+                self._perf.streaming_flush_time = flush_elapsed
+                self._perf.transcribe_end = time.time()
+
+            if text:
+                print(f"[Daemon] Streaming transcription: '{text[:50]}...'")
+                self._streaming_transcriber = None
+                self._handle_transcription_result(text)
+                # Clean up temp audio file (streaming used in-memory buffer, not the file)
+                self._cleanup_audio_file()
+            else:
+                # Fallback: streaming produced nothing, try full-file transcription
+                print("[Daemon] Streaming produced no text, falling back to full transcription")
+                self._streaming_transcriber = None
+                if self._perf:
+                    self._perf.used_streaming = False
+                self._transcribe_audio()
+
+        except Exception as e:
+            print(f"[Daemon] Streaming transcription error: {e}")
+            # Fallback to file-based transcription
+            self._streaming_transcriber = None
+            if self._perf:
+                self._perf.used_streaming = False
+            self._transcribe_audio()
+
     def _transcribe_audio(self):
-        """Transcribe the recorded audio"""
+        """Transcribe the recorded audio (file-based fallback)"""
         if not self._current_audio_path:
             print("[Daemon] No audio path to transcribe")
             self.state = DaemonState.IDLE
@@ -782,6 +940,9 @@ class WhisperDaemon(QObject):
 
         print(f"[Daemon] Transcribing: {self._current_audio_path}")
         self.state = DaemonState.TRANSCRIBING
+
+        if self._perf and not self._perf.transcribe_start:
+            self._perf.transcribe_start = time.time()
 
         try:
             # Get language setting
@@ -805,6 +966,8 @@ class WhisperDaemon(QObject):
 
             if result and result.get("text"):
                 text = result["text"].strip()
+                if self._perf:
+                    self._perf.transcribe_end = time.time()
                 print(f"[Daemon] Transcription complete: '{text[:50]}...'")
                 self._handle_transcription_result(text)
             else:
@@ -822,17 +985,27 @@ class WhisperDaemon(QObject):
 
     def _handle_transcription_result(self, text: str):
         """Handle successful transcription - output depends on recording mode"""
+        if self._perf:
+            self._perf.text_length = len(text)
+
         # Apply post-processing if enabled
         if self.post_processor.enabled:
             print("[Daemon] Applying post-processing...")
             text = self.post_processor.process(text)
             print(f"[Daemon] Post-processed: '{text[:50]}...'")
+            if self._perf:
+                self._perf.post_process_end = time.time()
 
         # Branch based on recording mode
         if self._recording_mode == RecordingMode.DELEGATION:
             self._handle_delegation_output(text)
         else:
             self._handle_normal_output(text)
+
+        # Log performance summary
+        if self._perf:
+            self._perf.log_summary()
+            self._perf = None
 
         # Reset mode for next recording
         self._recording_mode = RecordingMode.NORMAL
@@ -842,6 +1015,8 @@ class WhisperDaemon(QObject):
         # Copy to clipboard
         try:
             pyperclip.copy(text)
+            if self._perf:
+                self._perf.clipboard_done = time.time()
             print("[Daemon] Text copied to clipboard")
         except Exception as e:
             print(f"[Daemon] Clipboard error: {e}")
@@ -857,6 +1032,8 @@ class WhisperDaemon(QObject):
 
         # Auto-paste using Cmd+V simulation
         self._auto_paste()
+        if self._perf:
+            self._perf.paste_done = time.time()
 
     def _handle_delegation_output(self, text: str):
         """Delegation mode output: save to cc-triage inbox, no auto-paste"""
@@ -876,6 +1053,9 @@ class WhisperDaemon(QObject):
         # Also copy to clipboard (useful but don't auto-paste)
         try:
             pyperclip.copy(text)
+            if self._perf:
+                self._perf.clipboard_done = time.time()
+                self._perf.paste_done = time.time()  # no auto-paste in delegation
             print("[Daemon] Text also copied to clipboard")
         except Exception as e:
             print(f"[Daemon] Clipboard error: {e}")

@@ -46,7 +46,7 @@ class WhisperCppService:
     def __init__(self, config_manager: Optional[ConfigManager] = None):
         self.config_manager = config_manager or ConfigManager()
         self.model: Optional[Model] = None
-        self.model_name: str = "base"
+        self.model_name: str = "base.en"
         self._model_loaded = False
 
     def set_target_model_config(self, model_name: str, device: str = "cpu", compute_type: str = "int8"):
@@ -109,6 +109,63 @@ class WhisperCppService:
         """Alias for load_model() for API compatibility."""
         self.load_model()
 
+    def transcribe_array(
+        self,
+        audio_data: np.ndarray,
+        language: Optional[str] = None,
+        initial_prompt: Optional[str] = None,
+        n_processors: Optional[int] = None,
+    ) -> dict:
+        """
+        Transcribe audio from a numpy array directly (no file I/O).
+
+        Args:
+            audio_data: numpy array of audio samples (int16 or float32, mono, 16kHz)
+            language: Language code (e.g., "en") or None for auto-detect
+            initial_prompt: Optional prompt for decoder context continuity
+            n_processors: Number of parallel processors (for long audio)
+
+        Returns:
+            dict with "text", "segments", "language", "duration" keys
+        """
+        if not self._model_loaded or self.model is None:
+            self.load_model()
+
+        start = time.time()
+
+        # Convert to float32 if needed (pywhispercpp expects float32 numpy arrays)
+        if audio_data.dtype == np.int16:
+            audio_float = audio_data.astype(np.float32) / 32768.0
+        elif audio_data.dtype == np.float32:
+            audio_float = audio_data
+        elif audio_data.dtype == np.float64:
+            audio_float = audio_data.astype(np.float32)
+        else:
+            raise ValueError(f"Unsupported audio dtype: {audio_data.dtype}. Expected int16 or float32.")
+
+        # Build transcribe kwargs
+        transcribe_kwargs = {
+            "language": language if language else "en",
+            "n_threads": self._get_thread_count(),
+        }
+        if initial_prompt:
+            transcribe_kwargs["initial_prompt"] = initial_prompt
+        if n_processors and n_processors > 1:
+            transcribe_kwargs["n_processors"] = n_processors
+
+        segments = self.model.transcribe(audio_float, **transcribe_kwargs)
+
+        text_parts = [seg.text for seg in segments]
+        full_text = " ".join(text_parts).strip()
+        elapsed = time.time() - start
+
+        return {
+            "text": full_text,
+            "segments": segments,
+            "language": language or "auto",
+            "duration": elapsed,
+        }
+
     def transcribe(
         self,
         audio_path: str,
@@ -147,11 +204,14 @@ class WhisperCppService:
 
         try:
             # Transcribe with whisper.cpp
-            # Note: pywhispercpp returns a list of Segment objects
+            transcribe_kwargs = {
+                "language": language if language else "en",
+                "n_threads": self._get_thread_count(),
+            }
+
             segments = self.model.transcribe(
                 converted_path,
-                language=language if language else "en",
-                n_threads=self._get_thread_count(),
+                **transcribe_kwargs,
             )
 
             # Combine segment texts
@@ -217,8 +277,9 @@ class WhisperCppService:
                 # Convert int32 to int16 by scaling
                 data = (data / 65536).astype(np.int16)
 
-            # Save to temp file
-            temp_path = tempfile.mktemp(suffix='.wav')
+            # Save to temp file (mkstemp for safe atomic creation)
+            fd, temp_path = tempfile.mkstemp(suffix='.wav')
+            os.close(fd)
             wavfile.write(temp_path, sample_rate, data)
             print(f"[WhisperCpp] Converted audio to int16: {temp_path}")
             return temp_path
