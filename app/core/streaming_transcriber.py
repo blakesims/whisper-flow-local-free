@@ -409,14 +409,22 @@ class StreamingTranscriber(QObject):
             had_prior = len(self._segments) > 0
 
         remaining_samples = total_samples - transcribed_up_to
+        remaining_duration = remaining_samples / SAMPLE_RATE
 
-        if remaining_samples > int(MIN_SEGMENT_LENGTH * SAMPLE_RATE):
-            overlap_samples = int(OVERLAP_DURATION * SAMPLE_RATE)
-            seg_start = max(0, transcribed_up_to - overlap_samples)
-            final_segment = full_audio[seg_start:]
-
+        if remaining_duration > 0.3 and had_prior:
+            # Re-transcribe from last segment's start through the tail.
+            # This gives whisper full context for the ending — no short orphan segments
+            # that lack context and produce bad quality.
             with self._transcribe_lock:
-                initial_prompt = self._last_segment_text[-200:] if self._last_segment_text else None
+                last_seg = self._segments[-1]
+                if len(self._segments) >= 2:
+                    initial_prompt = self._segments[-2].text[-200:]
+                else:
+                    initial_prompt = None
+                old_last_text = last_seg.text
+                flush_start_sample = last_seg.audio_start
+
+            final_segment = full_audio[flush_start_sample:]
 
             try:
                 flush_start = time.time()
@@ -425,17 +433,22 @@ class StreamingTranscriber(QObject):
                 )
                 text = result.get("text", "").strip()
                 is_hallucination = text.lower() in _HALLUCINATION_LOWER
+                elapsed = time.time() - flush_start
 
                 if text and not is_hallucination:
+                    deltas = _count_word_deltas(old_last_text, text)
                     with self._transcribe_lock:
-                        seg = SegmentInfo(audio_start=transcribed_up_to, audio_end=total_samples, text=text)
-                        self._segments.append(seg)
-
-                print(f"[StreamingTranscriber] Flush segment ({time.time()-flush_start:.2f}s): '{text[:60]}'")
+                        last_seg.text = text
+                        last_seg.audio_end = total_samples
+                        self._total_deltas += deltas
+                    print(f"[StreamingTranscriber] Flush: re-transcribed last seg + {remaining_duration:.1f}s tail ({elapsed:.2f}s, {deltas} deltas): '{text[:60]}'")
+                else:
+                    print(f"[StreamingTranscriber] Flush: tail produced no text ({elapsed:.2f}s)")
             except Exception as e:
-                print(f"[StreamingTranscriber] Final segment error: {e}")
+                print(f"[StreamingTranscriber] Flush error: {e}")
 
         elif total_samples > 0 and not had_prior:
+            # No prior segments — short recording, transcribe everything
             try:
                 result = self._service.transcribe_array(full_audio, language=self._language)
                 text = result.get("text", "").strip()
