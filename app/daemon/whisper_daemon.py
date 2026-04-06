@@ -406,8 +406,9 @@ class WhisperDaemon(QObject):
         self._model_loaded = False
         self._model_loading = False
 
-        # Streaming transcriber (transcribes segments while recording)
+        # Streaming transcriber — pre-created, reused across recordings
         self._streaming_transcriber: Optional[StreamingTranscriber] = None
+        self._streaming_language: Optional[str] = None
 
         # Performance tracing
         self._perf: Optional[PerfTrace] = None
@@ -597,6 +598,17 @@ class WhisperDaemon(QObject):
             if self.transcription_service.model is not None:
                 self._model_loaded = True
                 print(f"[Daemon] Model '{model_name}' loaded successfully!")
+
+                # Pre-create streaming transcriber + VAD so first recording is fast
+                language = self.config_manager.get("transcription_language", "en")
+                if language == "auto":
+                    language = "en"
+                self._streaming_transcriber = StreamingTranscriber(
+                    self.transcription_service, language=language
+                )
+                self._streaming_transcriber._init_vad()
+                self._streaming_language = language
+                print("[Daemon] Streaming transcriber + VAD pre-initialized")
             else:
                 print("[Daemon] ERROR: Failed to load model")
                 self.state = DaemonState.ERROR
@@ -775,15 +787,16 @@ class WhisperDaemon(QObject):
 
         print("[Daemon] Starting recording...")
 
-        # Start streaming transcriber for progressive transcription
+        # Reuse streaming transcriber (avoid re-creating VAD model each time)
         language = self.config_manager.get("transcription_language", "en")
         if language == "auto":
             language = "en"
-        self._streaming_transcriber = StreamingTranscriber(
-            self.transcription_service, language=language
-        )
+        if self._streaming_transcriber is None or self._streaming_language != language:
+            self._streaming_transcriber = StreamingTranscriber(
+                self.transcription_service, language=language
+            )
+            self._streaming_language = language
         self._streaming_transcriber.start_session()
-        print("[Daemon] Streaming transcriber ready")
 
         self.state = DaemonState.RECORDING
         self.audio_recorder.start_recording()
@@ -844,7 +857,6 @@ class WhisperDaemon(QObject):
             print(f"[Daemon] No valid audio file: {audio_path_or_message}")
             if self._streaming_transcriber:
                 self._streaming_transcriber.cancel()
-                self._streaming_transcriber = None
             self.state = DaemonState.IDLE
 
     def _save_cancelled_recording(self, audio_path: str):
@@ -911,22 +923,17 @@ class WhisperDaemon(QObject):
 
             if text:
                 print(f"[Daemon] Streaming transcription: '{text[:50]}...'")
-                self._streaming_transcriber = None
                 self._handle_transcription_result(text)
-                # Clean up temp audio file (streaming used in-memory buffer, not the file)
                 self._cleanup_audio_file()
             else:
-                # Fallback: streaming produced nothing, try full-file transcription
                 print("[Daemon] Streaming produced no text, falling back to full transcription")
-                self._streaming_transcriber = None
                 if self._perf:
                     self._perf.used_streaming = False
                 self._transcribe_audio()
 
         except Exception as e:
             print(f"[Daemon] Streaming transcription error: {e}")
-            # Fallback to file-based transcription
-            self._streaming_transcriber = None
+            self._streaming_transcriber = None  # discard on error
             if self._perf:
                 self._perf.used_streaming = False
             self._transcribe_audio()
@@ -1027,10 +1034,8 @@ class WhisperDaemon(QObject):
         # Return to idle FIRST (before pasting to avoid indicator focus issues)
         self.state = DaemonState.IDLE
 
-        # Small delay to let indicator settle
-        time.sleep(0.05)
-
         # Auto-paste using Cmd+V simulation
+        QApplication.processEvents()  # let indicator update before paste
         self._auto_paste()
         if self._perf:
             self._perf.paste_done = time.time()
