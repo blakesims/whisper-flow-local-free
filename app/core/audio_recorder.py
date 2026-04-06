@@ -80,7 +80,18 @@ class AudioRecorder(QThread):
 
         Returns device index/name or None if nothing works.
         """
-        # Refresh device list to handle hot-plug
+        # Skip expensive PortAudio reinit if we have a configured device —
+        # only refresh when falling through to device discovery
+        if self.device is not None:
+            try:
+                sd.check_input_settings(device=self.device, channels=self.channels,
+                                        samplerate=self.sample_rate, dtype=self.dtype)
+                print(f"AudioRecorder: Using configured device {self.device} (fast path)")
+                return self.device
+            except Exception:
+                pass  # fall through to full refresh
+
+        # Full refresh only when needed (configured device failed or no device set)
         AudioRecorder.refresh_devices()
 
         available_devices = AudioRecorder.get_input_devices()

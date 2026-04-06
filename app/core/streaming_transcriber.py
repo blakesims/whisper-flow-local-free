@@ -1,22 +1,20 @@
 """
 Streaming Transcriber - Transcribes audio segments while recording continues.
 
-Instead of waiting for recording to finish, this component:
+Architecture:
 1. Receives audio chunks as they're recorded
-2. Accumulates them into segments using VAD to find natural speech pauses
-3. Transcribes each segment in a background thread
-4. Merges results with overlap deduplication
+2. Accumulates into ~7s segments, using VAD to find natural speech pauses
+3. Transcribes each segment in a background thread (first pass)
+4. After every pair [0,1], [2,3] etc, re-transcribes the combined audio (refinement pass)
 5. On recording stop, only the final untranscribed audio needs processing
 
-VAD (Voice Activity Detection) finds natural speech pauses for segment boundaries
-instead of cutting at fixed intervals. Falls back to fixed intervals if VAD
-library is not installed.
-
-Result: perceived transcription time drops from "entire recording" to "last segment only".
+The refinement pass fixes boundary artifacts where segments were cut mid-phrase.
+Delta tracking shows how many words changed between first-pass and refined text.
 """
 
 import threading
 import time
+from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
@@ -24,25 +22,23 @@ from PySide6.QtCore import QObject, Signal
 
 
 # Tuning constants
-SEGMENT_DURATION = 3.0  # seconds of new audio before triggering transcription (fallback)
-OVERLAP_DURATION = 0.5  # seconds of overlap between segments for boundary coherence
-MIN_SEGMENT_LENGTH = 1.0  # minimum seconds of audio worth transcribing
-MAX_SEGMENT_DURATION = 5.0  # maximum seconds before forcing transcription (VAD mode)
+SEGMENT_DURATION = 7.0  # seconds for fixed-interval fallback
+OVERLAP_DURATION = 0.5  # seconds of overlap between segments
+MIN_SEGMENT_LENGTH = 5.0  # minimum seconds of audio worth transcribing
+MAX_SEGMENT_DURATION = 10.0  # maximum seconds before forcing transcription (VAD mode)
 SAMPLE_RATE = 16000
 
 # VAD constants
-VAD_WINDOW_SAMPLES = 512  # 32ms at 16kHz (silero-vad-lite window size)
-VAD_SPEECH_THRESHOLD = 0.5  # probability above which audio is considered speech
-VAD_SILENCE_DURATION = 0.3  # seconds of silence to trigger a segment boundary
+VAD_WINDOW_SAMPLES = 512
+VAD_SPEECH_THRESHOLD = 0.5
+VAD_SILENCE_DURATION = 0.6  # sentence-level pauses, not breath pauses
 
-# Try to import VAD library (optional dependency)
 try:
     from silero_vad_lite import SileroVAD
     _VAD_AVAILABLE = True
 except ImportError:
     _VAD_AVAILABLE = False
 
-# Whisper hallucination tokens to filter out (not real speech)
 HALLUCINATION_TOKENS = {
     "[BLANK_AUDIO]", "(blank audio)", "[SILENCE]", "(silence)",
     "(eerie music)", "(humming)", "(music)", "(birds chirping)",
@@ -50,91 +46,81 @@ HALLUCINATION_TOKENS = {
 }
 _HALLUCINATION_LOWER = {h.lower() for h in HALLUCINATION_TOKENS}
 
-# Minimum word overlap to strip (avoids false positives on common single words)
-MIN_DEDUP_WORDS = 2
+
+def _count_word_deltas(old_text: str, new_text: str) -> int:
+    """Count word-level differences between two texts."""
+    old_words = old_text.lower().split()
+    new_words = new_text.lower().split()
+    # Simple: count words that differ using longest common subsequence length
+    # For speed, just use set symmetric difference as approximation
+    if not old_words and not new_words:
+        return 0
+    if not old_words or not new_words:
+        return max(len(old_words), len(new_words))
+    # Word-by-word diff (aligned by position)
+    max_len = max(len(old_words), len(new_words))
+    deltas = 0
+    for i in range(max_len):
+        old_w = old_words[i] if i < len(old_words) else ""
+        new_w = new_words[i] if i < len(new_words) else ""
+        if old_w != new_w:
+            deltas += 1
+    return deltas
 
 
-def _deduplicate_overlap(previous_text: str, new_text: str) -> str:
-    """
-    Remove duplicated words at the boundary between two overlapping segments.
-
-    When segments overlap by OVERLAP_DURATION, whisper re-transcribes the overlap
-    region. This function finds the longest suffix of previous_text that matches
-    a prefix of new_text and strips it to avoid doubled words.
-
-    Requires at least MIN_DEDUP_WORDS matching to avoid false positives from
-    common single words like "the", "a", "is".
-    """
-    if not previous_text or not new_text:
-        return new_text
-
-    prev_words = previous_text.split()
-    new_words = new_text.split()
-
-    if not prev_words or not new_words:
-        return new_text
-
-    # Try matching progressively longer suffixes of prev against prefixes of new
-    # Limit search to a reasonable window (overlap is ~0.5s ≈ 2-5 words)
-    max_overlap_words = min(len(prev_words), len(new_words), 10)
-
-    best_match = 0
-    for length in range(MIN_DEDUP_WORDS, max_overlap_words + 1):
-        suffix = prev_words[-length:]
-        prefix = new_words[:length]
-        if [w.lower() for w in suffix] == [w.lower() for w in prefix]:
-            best_match = length
-
-    if best_match >= MIN_DEDUP_WORDS:
-        return " ".join(new_words[best_match:])
-    return new_text
+@dataclass
+class SegmentInfo:
+    """Tracks audio range and text for each transcribed segment."""
+    audio_start: int  # absolute sample index
+    audio_end: int    # absolute sample index
+    text: str = ""
+    refined: bool = False  # whether this segment has been refined as part of a pair
 
 
 class StreamingTranscriber(QObject):
     """
     Transcribes audio segments progressively while recording continues.
-
-    Usage:
-        streamer = StreamingTranscriber(transcription_service)
-        streamer.start_session()
-        # Feed audio chunks as they arrive:
-        streamer.feed_chunk(chunk)  # int16 numpy array
-        # When recording stops:
-        final_text = streamer.flush()
+    After every pair of segments, re-transcribes the combined audio for better quality.
     """
 
-    partial_text_updated = Signal(str)  # emitted when new partial text is available
+    partial_text_updated = Signal(str)
 
     def __init__(self, transcription_service, language: str = "en"):
         super().__init__()
         self._service = transcription_service
         self._language = language
 
-        # Audio buffer (int16 samples at 16kHz)
-        # _buffer_samples is an absolute counter that only grows (never decremented).
-        # This keeps sample indices consistent across segments without needing to
-        # adjust _transcribed_up_to when trimming. We accept O(N) memory for the
-        # recording duration — ~10MB per 5 minutes at 16kHz int16 mono.
+        # Audio buffer
         self._buffer: list[np.ndarray] = []
         self._buffer_samples = 0
         self._buffer_lock = threading.Lock()
 
-        # Tracking what's been transcribed (protected by _transcribe_lock)
-        self._transcribed_up_to = 0  # absolute sample index
-        self._confirmed_texts: list[str] = []
+        # Segment tracking (protected by _transcribe_lock)
+        self._segments: list[SegmentInfo] = []
+        self._transcribed_up_to = 0
         self._last_segment_text = ""
+
+        # Refinement stats
+        self._total_deltas = 0
+        self._refinements_done = 0
 
         # Threading
         self._transcribe_lock = threading.Lock()
         self._is_transcribing = threading.Event()
+        self._is_refining = threading.Event()  # separate flag for refinement
         self._active = False
 
-        # VAD state (lazy-initialized on first chunk)
+        # VAD state
         self._vad = None
         self._vad_initialized = False
         self._vad_buffer = np.array([], dtype=np.float32)
         self._is_speaking = False
         self._silence_start_sample = 0
+
+    @property
+    def _confirmed_texts(self) -> list[str]:
+        """Compatibility: return segment texts as a list."""
+        return [s.text for s in self._segments if s.text]
 
     def start_session(self):
         """Reset state for a new recording session."""
@@ -143,14 +129,16 @@ class StreamingTranscriber(QObject):
             self._buffer_samples = 0
 
         with self._transcribe_lock:
+            self._segments = []
             self._transcribed_up_to = 0
-            self._confirmed_texts = []
             self._last_segment_text = ""
+            self._total_deltas = 0
+            self._refinements_done = 0
 
         self._is_transcribing.clear()
+        self._is_refining.clear()
         self._active = True
 
-        # Reset VAD state — re-create model to clear internal RNN hidden state
         self._vad_buffer = np.array([], dtype=np.float32)
         self._is_speaking = False
         self._silence_start_sample = 0
@@ -158,7 +146,7 @@ class StreamingTranscriber(QObject):
             try:
                 self._vad = SileroVAD(sample_rate=SAMPLE_RATE)
             except Exception:
-                pass  # keep existing instance if re-creation fails
+                pass
 
     def cancel(self):
         """Cancel the streaming session, discarding all results."""
@@ -182,28 +170,18 @@ class StreamingTranscriber(QObject):
             self._vad = None
 
     def _process_vad(self, chunk: np.ndarray, current_buffer_samples: int) -> bool:
-        """
-        Process chunk through VAD, return True if a speech pause boundary is detected.
-        The chunk is int16; VAD needs float32 in [-1, 1].
-
-        current_buffer_samples is passed in to avoid reading _buffer_samples without lock.
-        """
+        """Process chunk through VAD, return True if speech pause detected."""
         if self._vad is None:
             return False
 
-        # Convert int16 to float32 normalized
         float_chunk = chunk.astype(np.float32) / 32768.0
-
-        # Append to VAD buffer
         self._vad_buffer = np.concatenate([self._vad_buffer, float_chunk])
 
-        # Process complete VAD windows (512 samples = 32ms each)
         pause_detected = False
         while len(self._vad_buffer) >= VAD_WINDOW_SAMPLES:
             window = self._vad_buffer[:VAD_WINDOW_SAMPLES].copy()
             self._vad_buffer = self._vad_buffer[VAD_WINDOW_SAMPLES:]
 
-            # Pass numpy array directly (silero-vad-lite accepts array-like)
             score = self._vad.process(window)
             is_speech = score >= VAD_SPEECH_THRESHOLD
 
@@ -217,21 +195,15 @@ class StreamingTranscriber(QObject):
                     self._silence_start_sample = current_buffer_samples
 
                 silence_samples = current_buffer_samples - self._silence_start_sample
-                silence_duration = silence_samples / SAMPLE_RATE
-                if silence_duration >= VAD_SILENCE_DURATION:
+                if silence_samples / SAMPLE_RATE >= VAD_SILENCE_DURATION:
                     pause_detected = True
 
         return pause_detected
 
     def feed_chunk(self, chunk: np.ndarray):
-        """
-        Feed an audio chunk from the recorder.
-        Called from the Qt main thread via signal — must not raise.
-        AudioRecorder emits (N, 1) shaped chunks; we need 1D.
-        """
+        """Feed an audio chunk from the recorder. Must not raise."""
         if not self._active:
             return
-
         try:
             if chunk.ndim > 1:
                 chunk = chunk.ravel()
@@ -240,8 +212,6 @@ class StreamingTranscriber(QObject):
             print(f"[StreamingTranscriber] Error in feed_chunk: {e}")
 
     def _feed_chunk_inner(self, chunk: np.ndarray):
-        """Inner feed logic, wrapped by feed_chunk's exception guard."""
-        # Lazy-init VAD on first chunk
         if not self._vad_initialized:
             self._init_vad()
 
@@ -250,7 +220,6 @@ class StreamingTranscriber(QObject):
             self._buffer_samples += len(chunk)
             current_buffer_samples = self._buffer_samples
 
-        # Don't trigger if already transcribing
         if self._is_transcribing.is_set():
             return
 
@@ -261,15 +230,12 @@ class StreamingTranscriber(QObject):
         new_duration = new_samples / SAMPLE_RATE
 
         if self._vad is not None:
-            # VAD mode: trigger on speech pause (with min/max duration guards)
             pause_detected = self._process_vad(chunk, current_buffer_samples)
-
             if pause_detected and new_duration >= MIN_SEGMENT_LENGTH:
                 self._transcribe_next_segment()
             elif new_duration >= MAX_SEGMENT_DURATION:
                 self._transcribe_next_segment()
         else:
-            # Fixed-interval fallback (no VAD)
             if new_duration >= SEGMENT_DURATION:
                 self._transcribe_next_segment()
 
@@ -278,65 +244,66 @@ class StreamingTranscriber(QObject):
         with self._buffer_lock:
             if not self._buffer:
                 return np.array([], dtype=np.int16), 0
-            audio = np.concatenate(self._buffer)
-            return audio, self._buffer_samples
+            return np.concatenate(self._buffer), self._buffer_samples
 
     def _transcribe_next_segment(self):
         """Trigger transcription of the next segment in a background thread."""
         self._is_transcribing.set()
 
-        # Thread-safe snapshot of buffer and state
         full_audio, buffer_len = self._snapshot_buffer()
         overlap_samples = int(OVERLAP_DURATION * SAMPLE_RATE)
 
         with self._transcribe_lock:
             transcribed_up_to = self._transcribed_up_to
+            initial_prompt = self._last_segment_text[-200:] if self._last_segment_text else None
 
-        # Start from (transcribed_up_to - overlap) to capture boundary context
         seg_start = max(0, transcribed_up_to - overlap_samples)
         segment = full_audio[seg_start:buffer_len].copy()
-
         new_transcribed_up_to = buffer_len
 
-        with self._transcribe_lock:
-            initial_prompt = self._last_segment_text[-200:] if self._last_segment_text else None
+        # Record the audio range for this segment (without overlap)
+        seg_info = SegmentInfo(audio_start=transcribed_up_to, audio_end=buffer_len)
 
         thread = threading.Thread(
             target=self._do_transcribe,
-            args=(segment, new_transcribed_up_to, initial_prompt),
+            args=(segment, new_transcribed_up_to, initial_prompt, seg_info),
             daemon=True,
         )
         thread.start()
 
-    def _do_transcribe(self, segment: np.ndarray, up_to: int, initial_prompt: Optional[str]):
-        """Run transcription (called in background thread)."""
+    def _do_transcribe(self, segment: np.ndarray, up_to: int,
+                       initial_prompt: Optional[str], seg_info: SegmentInfo):
+        """Run first-pass transcription, then trigger pair refinement if applicable."""
         try:
             result = self._service.transcribe_array(
-                segment,
-                language=self._language,
-                initial_prompt=initial_prompt,
+                segment, language=self._language, initial_prompt=initial_prompt,
             )
             text = result.get("text", "").strip()
             duration = result.get("duration", 0)
 
             is_hallucination = text.lower() in _HALLUCINATION_LOWER
 
+            seg_index = -1
             with self._transcribe_lock:
                 self._transcribed_up_to = up_to
 
                 if text and not is_hallucination:
-                    if self._confirmed_texts:
-                        text = _deduplicate_overlap(self._confirmed_texts[-1], text)
-                    if text:
-                        self._confirmed_texts.append(text)
-                        self._last_segment_text = text
+                    seg_info.text = text
+                    self._segments.append(seg_info)
+                    self._last_segment_text = text
+                    seg_index = len(self._segments) - 1
 
+            # Emit partial text
             with self._transcribe_lock:
-                full_so_far = " ".join(self._confirmed_texts)
+                full_so_far = " ".join(s.text for s in self._segments if s.text)
             if full_so_far:
                 self.partial_text_updated.emit(full_so_far)
 
-            print(f"[StreamingTranscriber] Segment done ({duration:.2f}s): '{text[:60]}'")
+            print(f"[StreamingTranscriber] Segment {seg_index} done ({duration:.2f}s): '{text[:60]}'")
+
+            # Trigger pair refinement after every even-indexed segment (i.e., pairs [0,1], [2,3]...)
+            if seg_index >= 1 and seg_index % 2 == 1 and not self._is_refining.is_set():
+                self._refine_pair(seg_index - 1, seg_index)
 
         except Exception as e:
             print(f"[StreamingTranscriber] Segment transcription error: {e}")
@@ -345,32 +312,101 @@ class StreamingTranscriber(QObject):
         finally:
             self._is_transcribing.clear()
 
-    def flush(self) -> str:
-        """
-        Finalize transcription after recording stops.
+    def _refine_pair(self, idx_a: int, idx_b: int):
+        """Re-transcribe segments [idx_a, idx_b] combined for better quality."""
+        self._is_refining.set()
 
-        Transcribes any remaining untranscribed audio, then returns the full text.
-        This is the only part the user has to wait for.
-        """
+        thread = threading.Thread(
+            target=self._do_refine_pair,
+            args=(idx_a, idx_b),
+            daemon=True,
+        )
+        thread.start()
+
+    def _do_refine_pair(self, idx_a: int, idx_b: int):
+        """Run pair refinement in background thread."""
+        try:
+            with self._transcribe_lock:
+                if idx_a >= len(self._segments) or idx_b >= len(self._segments):
+                    return
+                seg_a = self._segments[idx_a]
+                seg_b = self._segments[idx_b]
+                old_text = seg_a.text + " " + seg_b.text
+                # Get initial_prompt from the segment before the pair
+                if idx_a > 0:
+                    initial_prompt = self._segments[idx_a - 1].text[-200:]
+                else:
+                    initial_prompt = None
+
+            # Get the combined audio range
+            full_audio, _ = self._snapshot_buffer()
+            combined = full_audio[seg_a.audio_start:seg_b.audio_end].copy()
+
+            result = self._service.transcribe_array(
+                combined, language=self._language, initial_prompt=initial_prompt,
+            )
+            new_text = result.get("text", "").strip()
+            duration = result.get("duration", 0)
+
+            if not new_text or new_text.lower() in _HALLUCINATION_LOWER:
+                return
+
+            # Count deltas
+            deltas = _count_word_deltas(old_text, new_text)
+
+            # Quality gate: reject if text length changed too much or too many words differ
+            old_words = len(old_text.split())
+            new_words = len(new_text.split())
+            ratio = new_words / max(old_words, 1)
+            delta_rate = deltas / max(old_words, 1)
+            # Reject if: too short/long, or >50% of words changed (likely different interpretation)
+            accepted = 0.80 <= ratio <= 1.25 and delta_rate <= 0.50
+
+            with self._transcribe_lock:
+                self._total_deltas += deltas
+                self._refinements_done += 1
+
+                if accepted:
+                    self._segments[idx_a].text = new_text
+                    self._segments[idx_a].audio_end = seg_b.audio_end
+                    self._segments[idx_a].refined = True
+                    self._segments[idx_b].text = ""
+                    self._segments[idx_b].refined = True
+
+            if accepted:
+                with self._transcribe_lock:
+                    full_text = " ".join(s.text for s in self._segments if s.text)
+                if full_text:
+                    self.partial_text_updated.emit(full_text)
+
+            status = "accepted" if accepted else f"rejected (ratio={ratio:.2f})"
+            print(f"[StreamingTranscriber] Refined [{idx_a},{idx_b}] ({duration:.2f}s, {deltas} deltas, {status}): '{new_text[:60]}'")
+
+        except Exception as e:
+            print(f"[StreamingTranscriber] Refinement error: {e}")
+        finally:
+            self._is_refining.clear()
+
+    def flush(self) -> str:
+        """Finalize transcription. Transcribes remaining audio, waits for refinements."""
         self._active = False
 
-        # Wait for any in-progress transcription to finish
+        # Wait for in-progress transcription
         if self._is_transcribing.is_set():
             deadline = time.time() + 15
             while self._is_transcribing.is_set() and time.time() < deadline:
                 time.sleep(0.01)
-
             if self._is_transcribing.is_set():
-                print("[StreamingTranscriber] WARNING: background transcription timed out")
+                print("[StreamingTranscriber] WARNING: transcription timed out")
                 with self._transcribe_lock:
-                    return " ".join(self._confirmed_texts).strip()
+                    return " ".join(s.text for s in self._segments if s.text).strip()
 
-        # Get remaining untranscribed audio (thread-safe snapshot)
+        # Transcribe remaining audio
         full_audio, total_samples = self._snapshot_buffer()
 
         with self._transcribe_lock:
             transcribed_up_to = self._transcribed_up_to
-            had_prior_results = len(self._confirmed_texts) > 0
+            had_prior = len(self._segments) > 0
 
         remaining_samples = total_samples - transcribed_up_to
 
@@ -385,52 +421,50 @@ class StreamingTranscriber(QObject):
             try:
                 flush_start = time.time()
                 result = self._service.transcribe_array(
-                    final_segment,
-                    language=self._language,
-                    initial_prompt=initial_prompt,
+                    final_segment, language=self._language, initial_prompt=initial_prompt,
                 )
                 text = result.get("text", "").strip()
                 is_hallucination = text.lower() in _HALLUCINATION_LOWER
 
                 if text and not is_hallucination:
                     with self._transcribe_lock:
-                        if self._confirmed_texts:
-                            text = _deduplicate_overlap(self._confirmed_texts[-1], text)
-                        if text:
-                            self._confirmed_texts.append(text)
+                        seg = SegmentInfo(audio_start=transcribed_up_to, audio_end=total_samples, text=text)
+                        self._segments.append(seg)
 
                 print(f"[StreamingTranscriber] Flush segment ({time.time()-flush_start:.2f}s): '{text[:60]}'")
             except Exception as e:
                 print(f"[StreamingTranscriber] Final segment error: {e}")
 
-        elif total_samples > 0 and not had_prior_results:
-            # Very short recording — transcribe everything
+        elif total_samples > 0 and not had_prior:
             try:
-                result = self._service.transcribe_array(
-                    full_audio,
-                    language=self._language,
-                )
+                result = self._service.transcribe_array(full_audio, language=self._language)
                 text = result.get("text", "").strip()
-                is_hallucination = text.lower() in _HALLUCINATION_LOWER
-                if text and not is_hallucination:
+                if text and text.lower() not in _HALLUCINATION_LOWER:
                     with self._transcribe_lock:
-                        self._confirmed_texts.append(text)
+                        seg = SegmentInfo(audio_start=0, audio_end=total_samples, text=text)
+                        self._segments.append(seg)
             except Exception as e:
                 print(f"[StreamingTranscriber] Short recording error: {e}")
 
+        # Wait for any in-flight refinement to finish
+        if self._is_refining.is_set():
+            deadline = time.time() + 10
+            while self._is_refining.is_set() and time.time() < deadline:
+                time.sleep(0.01)
+
         with self._transcribe_lock:
-            return " ".join(self._confirmed_texts).strip()
+            result_text = " ".join(s.text for s in self._segments if s.text).strip()
+            print(f"[StreamingTranscriber] Refinement stats: {self._refinements_done} pairs, {self._total_deltas} total word deltas")
+            return result_text
 
     def get_partial_text(self) -> str:
-        """Get the current partial transcription text."""
         with self._transcribe_lock:
-            return " ".join(self._confirmed_texts).strip()
+            return " ".join(s.text for s in self._segments if s.text).strip()
 
     @property
     def has_results(self) -> bool:
-        """Whether any segments have been transcribed."""
         with self._transcribe_lock:
-            return len(self._confirmed_texts) > 0
+            return any(s.text for s in self._segments)
 
     @property
     def is_active(self) -> bool:
