@@ -12,6 +12,9 @@ pyperclip>=1.8.2
 # Transcription
 pywhispercpp>=1.4.0     # whisper.cpp - 5-6x faster on Apple Silicon
 
+# Voice Activity Detection (optional - enables smart segmentation in streaming transcriber)
+silero-vad-lite>=0.2.0
+
 # Packaging
 py2app>=0.28.0
 
