@@ -106,8 +106,9 @@ class StreamingTranscriber(QObject):
 
         # Threading
         self._transcribe_lock = threading.Lock()
+        self._model_lock = threading.Lock()  # whisper.cpp is NOT thread-safe
         self._is_transcribing = threading.Event()
-        self._is_refining = threading.Event()  # separate flag for refinement
+        self._is_refining = threading.Event()
         self._active = False
 
         # VAD state
@@ -275,9 +276,10 @@ class StreamingTranscriber(QObject):
                        initial_prompt: Optional[str], seg_info: SegmentInfo):
         """Run first-pass transcription, then trigger pair refinement if applicable."""
         try:
-            result = self._service.transcribe_array(
-                segment, language=self._language, initial_prompt=initial_prompt,
-            )
+            with self._model_lock:
+                result = self._service.transcribe_array(
+                    segment, language=self._language, initial_prompt=initial_prompt,
+                )
             text = result.get("text", "").strip()
             duration = result.get("duration", 0)
 
@@ -342,9 +344,10 @@ class StreamingTranscriber(QObject):
             full_audio, _ = self._snapshot_buffer()
             combined = full_audio[seg_a.audio_start:seg_b.audio_end].copy()
 
-            result = self._service.transcribe_array(
-                combined, language=self._language, initial_prompt=initial_prompt,
-            )
+            with self._model_lock:
+                result = self._service.transcribe_array(
+                    combined, language=self._language, initial_prompt=initial_prompt,
+                )
             new_text = result.get("text", "").strip()
             duration = result.get("duration", 0)
 
@@ -391,15 +394,15 @@ class StreamingTranscriber(QObject):
         """Finalize transcription. Transcribes remaining audio, waits for refinements."""
         self._active = False
 
-        # Wait for in-progress transcription
-        if self._is_transcribing.is_set():
-            deadline = time.time() + 15
-            while self._is_transcribing.is_set() and time.time() < deadline:
-                time.sleep(0.01)
-            if self._is_transcribing.is_set():
-                print("[StreamingTranscriber] WARNING: transcription timed out")
-                with self._transcribe_lock:
-                    return " ".join(s.text for s in self._segments if s.text).strip()
+        # Wait for in-progress transcription AND refinement
+        # (whisper.cpp model is NOT thread-safe — only one call at a time)
+        for event, name in [(self._is_transcribing, "transcription"), (self._is_refining, "refinement")]:
+            if event.is_set():
+                deadline = time.time() + 15
+                while event.is_set() and time.time() < deadline:
+                    time.sleep(0.01)
+                if event.is_set():
+                    print(f"[StreamingTranscriber] WARNING: {name} timed out")
 
         # Transcribe remaining audio
         full_audio, total_samples = self._snapshot_buffer()
@@ -428,9 +431,10 @@ class StreamingTranscriber(QObject):
 
             try:
                 flush_start = time.time()
-                result = self._service.transcribe_array(
-                    final_segment, language=self._language, initial_prompt=initial_prompt,
-                )
+                with self._model_lock:
+                    result = self._service.transcribe_array(
+                        final_segment, language=self._language, initial_prompt=initial_prompt,
+                    )
                 text = result.get("text", "").strip()
                 is_hallucination = text.lower() in _HALLUCINATION_LOWER
                 elapsed = time.time() - flush_start
@@ -450,7 +454,8 @@ class StreamingTranscriber(QObject):
         elif total_samples > 0 and not had_prior:
             # No prior segments — short recording, transcribe everything
             try:
-                result = self._service.transcribe_array(full_audio, language=self._language)
+                with self._model_lock:
+                    result = self._service.transcribe_array(full_audio, language=self._language)
                 text = result.get("text", "").strip()
                 if text and text.lower() not in _HALLUCINATION_LOWER:
                     with self._transcribe_lock:
