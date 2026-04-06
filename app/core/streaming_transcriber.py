@@ -227,11 +227,14 @@ class StreamingTranscriber(QObject):
         """
         Feed an audio chunk from the recorder.
         Called from the Qt main thread via signal — must not raise.
+        AudioRecorder emits (N, 1) shaped chunks; we need 1D.
         """
         if not self._active:
             return
 
         try:
+            if chunk.ndim > 1:
+                chunk = chunk.ravel()
             self._feed_chunk_inner(chunk)
         except Exception as e:
             print(f"[StreamingTranscriber] Error in feed_chunk: {e}")
