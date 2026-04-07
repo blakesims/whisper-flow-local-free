@@ -769,6 +769,89 @@
             border-radius: 4px;
             object-fit: cover;
             border: 1px solid var(--surface0);
+            cursor: pointer;
+            transition: transform 0.15s, border-color 0.15s;
+        }
+        .visual-thumbnail:hover {
+            transform: scale(1.1);
+            border-color: var(--lavender);
+        }
+
+        /* Carousel viewer overlay */
+        .carousel-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.92);
+            z-index: 9999;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .carousel-overlay.active { display: flex; }
+        .carousel-overlay-header {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 16px;
+            color: var(--text);
+            font-size: 13px;
+        }
+        .carousel-overlay-header .slide-counter {
+            font-size: 14px;
+            color: var(--subtext0);
+        }
+        .carousel-overlay-header a {
+            color: var(--lavender);
+            text-decoration: none;
+            font-size: 12px;
+            padding: 4px 12px;
+            border: 1px solid var(--surface1);
+            border-radius: 4px;
+        }
+        .carousel-overlay-header a:hover { background: var(--surface0); }
+        .carousel-overlay-close {
+            position: absolute;
+            top: 16px; right: 24px;
+            color: var(--overlay0);
+            font-size: 24px;
+            cursor: pointer;
+            z-index: 10000;
+        }
+        .carousel-overlay-close:hover { color: var(--text); }
+        .carousel-slides-strip {
+            display: flex;
+            gap: 12px;
+            overflow-x: auto;
+            max-width: 100%;
+            padding: 8px 0;
+            align-items: center;
+        }
+        .carousel-slides-strip img {
+            max-height: 70vh;
+            border-radius: 8px;
+            border: 2px solid transparent;
+            transition: border-color 0.15s;
+        }
+        .carousel-slides-strip img.current {
+            border-color: var(--lavender);
+        }
+        .carousel-slide-single {
+            max-height: 80vh;
+            max-width: 90vw;
+            border-radius: 8px;
+        }
+        .carousel-nav-hint {
+            margin-top: 12px;
+            font-size: 11px;
+            color: var(--overlay0);
+        }
+        .carousel-nav-hint kbd {
+            background: var(--surface0);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 11px;
         }
 
         /* Edit info bar */
@@ -1104,6 +1187,7 @@
                 <span class="shortcut"><span class="key-hint">a</span> stage</span>
                 <span class="shortcut"><span class="key-hint">c</span> copy</span>
                 <span class="shortcut"><span class="key-hint">v</span> visuals</span>
+                <span class="shortcut"><span class="key-hint">V</span> view carousel</span>
                 <span class="shortcut"><span class="key-hint">s</span> save</span>
             </div>
         </div>
@@ -2595,6 +2679,13 @@
                 window.location.href = '/browse';
                 return;
             }
+            if (e.key === 'V') {
+                // Shift+V: open carousel viewer for selected item
+                if (selectedEntity && selectedEntity.slide_urls && selectedEntity.slide_urls.length > 0) {
+                    openCarouselViewer(selectedEntity.slide_urls, selectedEntity.pdf_url);
+                    return;
+                }
+            }
             if (e.key === 'v') {
                 // In staging mode, 'v' means generate visuals (not navigate to videos)
                 if (isStagingMode()) {
@@ -2704,6 +2795,90 @@
 
         // Poll for updates every 5 seconds
         setInterval(fetchQueue, 5000);
+
+        // --- Carousel Viewer ---
+        let carouselViewerOpen = false;
+        let carouselCurrentSlide = 0;
+        let carouselSlideUrls = [];
+
+        function openCarouselViewer(slideUrls, pdfUrl, startSlide = 0) {
+            if (!slideUrls || slideUrls.length === 0) return;
+            carouselSlideUrls = slideUrls;
+            carouselCurrentSlide = startSlide;
+            carouselViewerOpen = true;
+
+            let overlay = document.getElementById('carousel-overlay');
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.id = 'carousel-overlay';
+                overlay.className = 'carousel-overlay';
+                overlay.innerHTML = `
+                    <div class="carousel-overlay-close" id="carousel-close">&times;</div>
+                    <div class="carousel-overlay-header">
+                        <span class="slide-counter" id="carousel-counter"></span>
+                        <a href="#" id="carousel-pdf-link" target="_blank">Open PDF</a>
+                    </div>
+                    <img class="carousel-slide-single" id="carousel-main-img" src="" alt="Slide">
+                    <div class="carousel-nav-hint">
+                        <kbd>←</kbd> / <kbd>→</kbd> navigate &nbsp;
+                        <kbd>Esc</kbd> close
+                    </div>
+                `;
+                document.body.appendChild(overlay);
+                document.getElementById('carousel-close').addEventListener('click', closeCarouselViewer);
+                overlay.addEventListener('click', (e) => {
+                    if (e.target === overlay) closeCarouselViewer();
+                });
+            }
+
+            const pdfLink = document.getElementById('carousel-pdf-link');
+            if (pdfUrl) {
+                pdfLink.href = pdfUrl;
+                pdfLink.style.display = '';
+            } else {
+                pdfLink.style.display = 'none';
+            }
+
+            overlay.classList.add('active');
+            updateCarouselSlide();
+        }
+
+        function closeCarouselViewer() {
+            carouselViewerOpen = false;
+            const overlay = document.getElementById('carousel-overlay');
+            if (overlay) overlay.classList.remove('active');
+        }
+
+        function updateCarouselSlide() {
+            const img = document.getElementById('carousel-main-img');
+            const counter = document.getElementById('carousel-counter');
+            if (!img) return;
+            img.src = carouselSlideUrls[carouselCurrentSlide];
+            counter.textContent = `${carouselCurrentSlide + 1} / ${carouselSlideUrls.length}`;
+        }
+
+        // Keyboard nav for carousel viewer
+        document.addEventListener('keydown', (e) => {
+            if (!carouselViewerOpen) return;
+            if (e.key === 'Escape') { closeCarouselViewer(); e.preventDefault(); return; }
+            if (e.key === 'ArrowRight' || e.key === 'l') {
+                carouselCurrentSlide = Math.min(carouselCurrentSlide + 1, carouselSlideUrls.length - 1);
+                updateCarouselSlide(); e.preventDefault();
+            }
+            if (e.key === 'ArrowLeft' || e.key === 'h') {
+                carouselCurrentSlide = Math.max(carouselCurrentSlide - 1, 0);
+                updateCarouselSlide(); e.preventDefault();
+            }
+        });
+
+        // Make thumbnail clickable
+        document.addEventListener('click', (e) => {
+            if (e.target.classList.contains('visual-thumbnail')) {
+                if (selectedEntity && selectedEntity.slide_urls && selectedEntity.slide_urls.length > 0) {
+                    openCarouselViewer(selectedEntity.slide_urls, selectedEntity.pdf_url);
+                }
+            }
+        });
     </script>
 </body>
 </html>

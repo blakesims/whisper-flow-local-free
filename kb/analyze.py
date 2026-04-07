@@ -22,6 +22,7 @@ Usage (via kb command):
 import sys
 import os
 import json
+import random
 import time
 from pathlib import Path
 from datetime import datetime
@@ -627,7 +628,7 @@ def analyze_transcript(
     analysis_type: str,
     title: str = "",
     model: str = DEFAULT_MODEL,
-    max_retries: int = 3,
+    max_retries: int = 6,
     prerequisite_context: dict | None = None
 ) -> dict:
     """
@@ -721,8 +722,8 @@ def analyze_transcript(
 
         except errors.ClientError as e:
             if e.code == 429:  # Rate limited
-                wait_time = 2 ** attempt
-                console.print(f"[yellow]Rate limited, waiting {wait_time}s...[/yellow]")
+                wait_time = min(2 ** attempt + random.uniform(0, 1), 60)
+                console.print(f"[yellow]Rate limited, waiting {wait_time:.0f}s...[/yellow]")
                 time.sleep(wait_time)
                 continue
             elif e.code == 400:
@@ -734,7 +735,9 @@ def analyze_transcript(
 
         except errors.ServerError as e:
             if attempt < max_retries - 1:
-                time.sleep(2 ** attempt)
+                wait_time = min(2 ** attempt + random.uniform(0, 1), 60)
+                console.print(f"[yellow]Server error ({e.code}), waiting {wait_time:.0f}s...[/yellow]")
+                time.sleep(wait_time)
                 continue
             raise
 
@@ -800,6 +803,23 @@ def run_analysis_with_deps(
 
     # Build context for the prompt, starting with optional inputs (includes transcript)
     transcript_text = transcript_data.get("transcript", "")
+
+    # If segments with timestamps are available, append them to transcript text
+    # so analyses like key_points can reference real timestamps
+    segments = transcript_data.get("segments", [])
+    if segments:
+        seg_lines = []
+        for seg in segments:
+            start = seg.get("start", 0)
+            mins, secs = divmod(int(start), 60)
+            hrs, mins = divmod(mins, 60)
+            if hrs:
+                ts = f"{hrs}:{mins:02d}:{secs:02d}"
+            else:
+                ts = f"{mins}:{secs:02d}"
+            seg_lines.append(f"[{ts}] {seg.get('text', '')}")
+        transcript_text = transcript_text + "\n\n---\nTIMESTAMPED SEGMENTS:\n" + "\n".join(seg_lines)
+
     prompt_context = resolve_optional_inputs(analysis_def, existing_analysis, transcript_text)
 
     # Add required prerequisites to context (these are guaranteed to exist now)

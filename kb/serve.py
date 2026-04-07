@@ -1298,8 +1298,27 @@ def get_posting_queue_v2():
                     item["thumbnail_url"] = f"/visuals/{rel_path}"
                 except (ValueError, IndexError):
                     item["thumbnail_url"] = None
+                # All slide URLs for viewer
+                slide_urls = []
+                for tp in thumbnail_paths:
+                    try:
+                        slide_urls.append(f"/visuals/{Path(tp).relative_to(KB_ROOT)}")
+                    except ValueError:
+                        pass
+                item["slide_urls"] = slide_urls
             else:
                 item["thumbnail_url"] = None
+                item["slide_urls"] = []
+
+            # PDF URL
+            pdf_path = visual_data.get("pdf_path", "")
+            if pdf_path:
+                try:
+                    item["pdf_url"] = f"/visuals/{Path(pdf_path).relative_to(KB_ROOT)}"
+                except ValueError:
+                    item["pdf_url"] = None
+            else:
+                item["pdf_url"] = None
 
             entities.append(item)
 

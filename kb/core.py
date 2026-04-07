@@ -492,6 +492,7 @@ def transcribe_to_kb(
     source_type: str | None = None,  # video, audio, meeting, paste, cap
     model_name: str = "medium",
     transcript_text: str | None = None,  # For paste source (already has transcript)
+    segments: list | None = None,  # Timestamped segments from whisper
 ) -> dict:
     """
     Transcribe a file (or save existing transcript) to the knowledge base.
@@ -561,6 +562,7 @@ def transcribe_to_kb(
         "speakers": speakers or ["Blake Sims"],
         "tags": tags,
         "transcript": transcript_text,
+        "segments": segments or [],
         "analysis": {},
         "created_at": datetime.now().isoformat(),
     }
