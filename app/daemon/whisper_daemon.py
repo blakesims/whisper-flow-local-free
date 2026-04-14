@@ -381,6 +381,21 @@ class WhisperDaemon(QObject):
         self.hotkey_listener.delegation_requested.connect(
             self._on_delegation_hotkey
         )
+        self.hotkey_listener.post_process_requested.connect(
+            self._on_double_ctrl_f
+        )
+        self.hotkey_listener.diff_view_requested.connect(
+            self._on_diff_view_requested
+        )
+
+        # Post-process-on-demand: double Ctrl+F triggers post-processing
+        self._post_process_this_transcription = False
+
+        # Diff view: store last original + processed text
+        self._last_original_text = ""
+        self._last_processed_text = ""
+        self._last_transcription_time = 0.0
+        self._diff_view = None
 
         # Initialize delegation tracker for pip status updates
         self.delegation_tracker = DelegationTracker(self.config_manager)
@@ -453,6 +468,69 @@ class WhisperDaemon(QObject):
         self.post_processor.enabled = enabled
         self.indicator.set_post_processing_enabled(enabled)
         print(f"[Daemon] Post-processing {'enabled' if enabled else 'disabled'}")
+
+    @Slot()
+    def _on_double_ctrl_f(self):
+        """Handle double Ctrl+F - stop recording AND post-process."""
+        if self.state == DaemonState.TRANSCRIBING:
+            self._post_process_this_transcription = True
+            print("[Daemon] Double Ctrl+F: post-processing enabled for this transcription")
+        elif self.state == DaemonState.RECORDING:
+            # The first Ctrl+F already stopped recording via hotkey_triggered,
+            # and the double-tap was detected. Flag for post-processing.
+            self._post_process_this_transcription = True
+            print("[Daemon] Double Ctrl+F: post-processing enabled for this transcription")
+        else:
+            print(f"[Daemon] Double Ctrl+F ignored (state={self.state.value})")
+
+    @Slot()
+    def _on_diff_view_requested(self):
+        """Handle Ctrl+D - toggle diff view."""
+        # Always allow dismiss if visible
+        if self._diff_view is not None and self._diff_view.isVisible():
+            print("[Daemon] Ctrl+D: hiding diff view")
+            self._diff_view.hide()
+            return
+
+        # For showing, check we have something to diff
+        if not self._last_original_text:
+            print("[Daemon] Ctrl+D: no transcription to diff")
+            return
+        if self._last_original_text == self._last_processed_text:
+            print("[Daemon] Ctrl+D: no post-processing was applied, nothing to diff")
+            return
+
+        print("[Daemon] Ctrl+D: showing diff view")
+        if self._diff_view is None:
+            from app.daemon.diff_view import DiffView
+            self._diff_view = DiffView()
+            self._diff_view.reprocess_requested.connect(self._on_reprocess_requested)
+        self._diff_view.show_diff(self._last_original_text, self._last_processed_text)
+
+    @Slot(str)
+    def _on_reprocess_requested(self, new_prompt: str):
+        """Re-run post-processing with an updated prompt from the diff view."""
+        if not self._last_original_text:
+            return
+
+        print(f"[Daemon] Re-processing with edited prompt ({len(new_prompt)} chars)...")
+
+        # Run post-processing with the edited prompt (don't save to disk yet)
+        was_enabled = self.post_processor.enabled
+        if not was_enabled:
+            self.post_processor._enabled = True
+        result = self.post_processor.process(self._last_original_text, prompt_override=new_prompt)
+        if not was_enabled:
+            self.post_processor._enabled = False
+
+        previous = self._last_processed_text
+        self._last_processed_text = result
+        print(f"[Daemon] Re-processed: '{result}'")
+
+        # Update diff view with 3-way comparison
+        if self._diff_view is not None and self._diff_view.isVisible():
+            self._diff_view.show_3way(self._last_original_text, previous, result)
+            self._diff_view._reset_rerun_btn()
 
     def _log_audio_device(self):
         """Log the current audio input device"""
@@ -807,9 +885,14 @@ class WhisperDaemon(QObject):
 
     def _stop_recording(self):
         """Stop audio recording - will trigger transcription"""
+        if self.state != DaemonState.RECORDING:
+            print(f"[Daemon] _stop_recording called but state is {self.state.value}, ignoring")
+            return
         print("[Daemon] Stopping recording...")
+        self._post_process_this_transcription = False
+        # Set state immediately to prevent double-stop from rapid Ctrl+F presses
+        self.state = DaemonState.TRANSCRIBING
         self.audio_recorder.stop_recording()
-        # State will be updated in _on_recording_stopped
 
     @Slot()
     def _on_recording_started(self):
@@ -922,7 +1005,7 @@ class WhisperDaemon(QObject):
                 self._perf.transcribe_end = time.time()
 
             if text:
-                print(f"[Daemon] Streaming transcription: '{text[:50]}...'")
+                print(f"[Daemon] Streaming transcription: '{text}'")
                 self._handle_transcription_result(text)
                 self._cleanup_audio_file()
             else:
@@ -995,13 +1078,31 @@ class WhisperDaemon(QObject):
         if self._perf:
             self._perf.text_length = len(text)
 
-        # Apply post-processing if enabled
-        if self.post_processor.enabled:
-            print("[Daemon] Applying post-processing...")
+        # Store original for diff view
+        self._last_original_text = text
+        self._last_processed_text = text  # default: same as original
+
+        # Apply post-processing if enabled globally OR triggered with double Ctrl+F
+        should_post_process = self.post_processor.enabled or self._post_process_this_transcription
+        if should_post_process:
+            trigger = "double-Ctrl+F" if self._post_process_this_transcription else "always-on"
+            print(f"[Daemon] Applying post-processing ({trigger})...")
+            # Temporarily enable if triggered on-demand
+            was_enabled = self.post_processor.enabled
+            if not was_enabled:
+                self.post_processor._enabled = True
             text = self.post_processor.process(text)
-            print(f"[Daemon] Post-processed: '{text[:50]}...'")
+            if not was_enabled:
+                self.post_processor._enabled = False
+            self._last_processed_text = text
+            print(f"[Daemon] Post-processed: '{text}'")
             if self._perf:
                 self._perf.post_process_end = time.time()
+
+        # Record completion time for diff view window
+        self._last_transcription_time = time.time()
+        # Reset per-transcription flag
+        self._post_process_this_transcription = False
 
         # Branch based on recording mode
         if self._recording_mode == RecordingMode.DELEGATION:

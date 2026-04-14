@@ -38,21 +38,13 @@ class PostProcessor:
     - External prompt file for easy editing
     """
 
-    # Default model - Llama 3.2 3B is the mlx-lm default, reliable and fast
-    DEFAULT_MODEL = "mlx-community/Llama-3.2-3B-Instruct-4bit"
+    # Default model - Gemma 4 E4B is fast and great at light text cleanup
+    DEFAULT_MODEL = "mlx-community/gemma-4-e4b-it-4bit"
 
     # Default cleanup prompt (used if external file not found)
-    DEFAULT_PROMPT = """You are a text editor. Clean up this transcribed speech by:
-1. Remove filler words (um, uh, like, you know, kind of, sort of, I mean, basically, actually, literally)
-2. Remove repeated words or phrases
-3. Format any numbered items as bullet points using "-"
-4. Fix grammar errors
+    DEFAULT_PROMPT = """Lightly clean up this transcribed speech. Remove filler words, stutters, and fix grammar. Preserve the speaker's voice and meaning. Do not rewrite or restructure. Output ONLY the cleaned text.
 
-Important: Output ONLY the cleaned text. No explanations, no markdown headers, no commentary.
-
-Input: {text}
-
-Output:"""
+{text}"""
 
     def __init__(self, config_manager: Optional[ConfigManager] = None):
         self.config_manager = config_manager or ConfigManager()
@@ -62,7 +54,7 @@ Output:"""
         self._loaded = False
         self._load_lock = threading.Lock()
         self._last_used = 0
-        self._idle_timeout = 120  # Unload after 2 minutes idle
+        self._idle_timeout = 1800  # Unload after 30 minutes idle
 
         # Check if enabled in settings
         self._enabled = self.config_manager.get("post_processing_enabled", False)
@@ -212,13 +204,14 @@ Output:"""
             print("[PostProcessor] Idle timeout - unloading model")
             self.unload()
 
-    def process(self, text: str, timeout: float = 30.0) -> str:
+    def process(self, text: str, timeout: float = 30.0, prompt_override: str = None) -> str:
         """
         Clean up transcribed text using the LLM.
 
         Args:
             text: Raw transcription text
             timeout: Maximum time to wait for processing
+            prompt_override: If provided, use this prompt template instead of the saved one
 
         Returns:
             Cleaned text, or original if processing fails
@@ -243,9 +236,22 @@ Output:"""
             from mlx_lm import generate
             from mlx_lm.sample_utils import make_sampler
 
-            # Load prompt from external file (re-read each time for hot-reload)
-            prompt_template = self._get_prompt_template()
-            prompt = self._format_prompt(prompt_template, text)
+            # Use override prompt if provided, otherwise load from file
+            prompt_template = prompt_override if prompt_override else self._get_prompt_template()
+            user_message = self._format_prompt(prompt_template, text)
+
+            # Use chat template for instruction-tuned models (with thinking disabled)
+            messages = [{"role": "user", "content": user_message}]
+            try:
+                prompt = self.tokenizer.apply_chat_template(
+                    messages, tokenize=False, add_generation_prompt=True,
+                    enable_thinking=False,
+                )
+            except TypeError:
+                # Fallback for models without enable_thinking support
+                prompt = self.tokenizer.apply_chat_template(
+                    messages, tokenize=False, add_generation_prompt=True,
+                )
 
             print(f"[PostProcessor] Processing {len(text.split())} words...")
             start = time.time()

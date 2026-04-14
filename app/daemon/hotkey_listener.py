@@ -5,6 +5,7 @@ Uses pynput to listen for system-wide keyboard shortcuts.
 On macOS, this requires Accessibility permissions.
 """
 
+import time
 from PySide6.QtCore import QObject, Signal, QThread
 from pynput import keyboard
 import platform
@@ -16,26 +17,21 @@ class HotkeyListener(QObject):
 
     Hotkeys:
     - Ctrl+F: Toggle recording
+    - Ctrl+F double-tap: Stop recording + post-process
+    - Ctrl+D: Show diff view (original vs post-processed)
     - Ctrl+Option+F: Transcribe file from clipboard
-    - Escape: Cancel recording (save but don't transcribe)
-
-    Note: On macOS, the app needs Accessibility permissions for global hotkeys.
-    The user will be prompted to grant access in System Preferences > Privacy & Security > Accessibility.
+    - Option+F: Delegation mode
+    - Escape: Cancel recording
     """
 
     hotkey_triggered = Signal()
     file_transcribe_requested = Signal()  # Ctrl+Option+F for file transcription
     escape_pressed = Signal()  # For cancelling recording
     delegation_requested = Signal()  # Option+F for delegation mode
+    post_process_requested = Signal()  # Double Ctrl+F to post-process
+    diff_view_requested = Signal()  # Ctrl+D to show diff
 
     def __init__(self, hotkey: str = "<ctrl>+f", parent=None):
-        """
-        Initialize the hotkey listener.
-
-        Args:
-            hotkey: The hotkey combination in pynput format.
-                    Default is "<ctrl>+f" (Ctrl+F on Mac)
-        """
         super().__init__(parent)
 
         self._hotkey_str = hotkey
@@ -47,6 +43,10 @@ class HotkeyListener(QObject):
         self._option_pressed = False  # Option/Alt key
         self._hotkey_active = False
 
+        # Double-tap detection for Ctrl+F
+        self._last_ctrl_f_time = 0.0
+        self._double_tap_window = 0.6  # seconds
+
     def start(self):
         """Start listening for the global hotkey"""
         if self._is_listening:
@@ -54,7 +54,6 @@ class HotkeyListener(QObject):
             return
 
         try:
-            # Use the keyboard listener with callbacks
             self._listener = keyboard.Listener(
                 on_press=self._on_key_press,
                 on_release=self._on_key_release
@@ -63,7 +62,6 @@ class HotkeyListener(QObject):
             self._is_listening = True
             print(f"[Hotkey] Listening for {self._hotkey_str}")
 
-            # Check for accessibility permissions on macOS
             if platform.system() == "Darwin":
                 self._check_macos_permissions()
 
@@ -96,17 +94,24 @@ class HotkeyListener(QObject):
                 self._ctrl_pressed = True
                 return
 
-            # Check for Option/Alt key (used for file transcription: Ctrl+Option+F)
+            # Check for Option/Alt key
             if key == keyboard.Key.alt or key == keyboard.Key.alt_l or key == keyboard.Key.alt_r:
                 self._option_pressed = True
                 return
 
+            char = getattr(key, 'char', None)
+            vk = getattr(key, 'vk', None)
+
+            # Check for Ctrl+D (diff view)
+            if (char and char.lower() == 'd') or vk == 2:  # macOS vk=2 for 'd'
+                if self._ctrl_pressed and not self._option_pressed:
+                    print("[Hotkey] Ctrl+D detected! (diff view)")
+                    self.diff_view_requested.emit()
+                    return
+
             # Check for 'f' key combinations
-            # Note: On macOS, Option+F produces 'ƒ' (function symbol), not 'f'
-            # We check: 1) char is 'f', 2) char is 'ƒ', 3) vk code is 3 (macOS 'f' key)
+            # On macOS, Option+F produces 'ƒ' (function symbol)
             if not self._hotkey_active:
-                char = getattr(key, 'char', None)
-                vk = getattr(key, 'vk', None)
                 is_f_key = (
                     (char and char.lower() in ('f', 'ƒ')) or
                     vk == 3  # macOS virtual key code for 'f'
@@ -116,37 +121,40 @@ class HotkeyListener(QObject):
                     if self._ctrl_pressed:
                         self._hotkey_active = True
                         if self._option_pressed:
-                            # Ctrl+Option+F: File transcription
                             print("[Hotkey] Ctrl+Option+F detected! (file transcribe)")
                             self.file_transcribe_requested.emit()
                         else:
-                            # Ctrl+F: Toggle recording
-                            print("[Hotkey] Ctrl+F detected! (toggle recording)")
-                            self.hotkey_triggered.emit()
+                            # Ctrl+F: check for double-tap
+                            now = time.time()
+                            elapsed = now - self._last_ctrl_f_time
+                            self._last_ctrl_f_time = now
+
+                            if elapsed < self._double_tap_window:
+                                # Double-tap: post-process
+                                print(f"[Hotkey] Double Ctrl+F detected! ({elapsed*1000:.0f}ms gap, post-process)")
+                                self.post_process_requested.emit()
+                            else:
+                                # Single tap: normal toggle
+                                print("[Hotkey] Ctrl+F detected! (toggle recording)")
+                                self.hotkey_triggered.emit()
                     elif self._option_pressed:
-                        # Option+F: Delegation mode
                         self._hotkey_active = True
                         print("[Hotkey] Option+F detected! (delegation mode)")
                         self.delegation_requested.emit()
 
         except AttributeError:
-            # Some keys don't have the 'char' attribute
             pass
 
     def _on_key_release(self, key):
         """Handle key release events"""
         try:
-            # Reset Ctrl state on release
             if key == keyboard.Key.ctrl or key == keyboard.Key.ctrl_l or key == keyboard.Key.ctrl_r:
                 self._ctrl_pressed = False
                 self._hotkey_active = False
 
-            # Reset Option/Alt state on release
             if key == keyboard.Key.alt or key == keyboard.Key.alt_l or key == keyboard.Key.alt_r:
                 self._option_pressed = False
 
-            # Reset hotkey active state when 'f' is released
-            # Check char or vk code (macOS vk=3 for 'f')
             char = getattr(key, 'char', None)
             vk = getattr(key, 'vk', None)
             if (char and char.lower() in ('f', 'ƒ')) or vk == 3:
@@ -158,8 +166,6 @@ class HotkeyListener(QObject):
     def _check_macos_permissions(self):
         """Check and warn about macOS accessibility permissions"""
         try:
-            # Try to detect if we have permission by the behavior
-            # pynput will work but not capture all keys without permission
             print("[Hotkey] macOS detected - ensure Accessibility permission is granted")
             print("[Hotkey] Go to: System Preferences > Privacy & Security > Accessibility")
             print("[Hotkey] Add Terminal (or Python) to the allowed apps")
@@ -171,10 +177,7 @@ class HotkeyListener(QObject):
         return self._is_listening
 
     def set_hotkey(self, hotkey: str):
-        """
-        Change the hotkey combination.
-        Must call stop() and start() for changes to take effect.
-        """
+        """Change the hotkey combination."""
         self._hotkey_str = hotkey
         print(f"[Hotkey] Hotkey set to: {hotkey}")
 
@@ -200,7 +203,7 @@ class HotkeyListenerThread(QThread):
 
         def on_press(key):
             if not self._running:
-                return False  # Stop listener
+                return False
 
             try:
                 if key == keyboard.Key.ctrl or key == keyboard.Key.ctrl_l or key == keyboard.Key.ctrl_r:
@@ -216,7 +219,7 @@ class HotkeyListenerThread(QThread):
 
         def on_release(key):
             if not self._running:
-                return False  # Stop listener
+                return False
 
             try:
                 if key == keyboard.Key.ctrl or key == keyboard.Key.ctrl_l or key == keyboard.Key.ctrl_r:
@@ -250,9 +253,17 @@ if __name__ == "__main__":
     def on_hotkey():
         print(">>> HOTKEY TRIGGERED! <<<")
 
+    def on_post_process():
+        print(">>> DOUBLE-TAP: POST-PROCESS! <<<")
+
+    def on_diff():
+        print(">>> DIFF VIEW! <<<")
+
     listener.hotkey_triggered.connect(on_hotkey)
+    listener.post_process_requested.connect(on_post_process)
+    listener.diff_view_requested.connect(on_diff)
     listener.start()
 
-    print("Press Ctrl+F to trigger hotkey. Ctrl+C to exit.")
+    print("Press Ctrl+F to trigger hotkey. Double Ctrl+F for post-process. Ctrl+D for diff. Ctrl+C to exit.")
 
     sys.exit(app.exec())
